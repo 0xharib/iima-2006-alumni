@@ -111,4 +111,26 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
   .bar .mast nav{white-space:normal}.mast nav .account{flex-shrink:0}
   .directory-controls:has([name=dorm]){grid-template-columns:1fr 1fr}
 }
+
+.member-site{min-height:100vh;background:#26201c linear-gradient(#1e1712aa,#1e1712dc),url('/campus/arches.webp') center / cover fixed}
+.member-site main>h1,.member-site .memory-toolbar,.member-site .feed-more{color:#fff6eb}
+.member-site main:has(>.directory-controls),.member-site main:has(>.memory-toolbar){color:#fff6eb}
+.member-site .directory-card{color:#251a16}
+.member-site main:has(>.alumni-profile)>h1{display:none}
+.member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.directory-controls)){background:#f5f3eef2;margin-block:1rem;border-radius:1rem}
+.member-site .alumni-profile,.member-site .collage-card{color:#251a16}
+.alumni-profile .profile-report{color:#fff6eb}
+.editable-field:has(> .inline-edit[open])>.field-display{display:none}
+.editable-field .inline-edit[open] form{margin-top:.3rem}
+.profile-rsvp:empty{display:none}.profile-rsvp{margin-top:.25rem}
+.profile-rsvp .inline-edit summary{position:static}.profile-rsvp .inline-edit:not([open]){display:inline-block;margin-left:.2rem}
+.profile-rsvp:has(.inline-edit[open]) .inline-edit{display:block}
+.auto-feed{height:1px;width:1px;overflow:hidden;padding:0;border:0;font-size:0;margin:1rem auto}
+.auto-feed:focus-visible{height:auto;width:auto;font-size:1rem;padding:.5rem}
+.memory-toolbar{display:flex;justify-content:space-between;align-items:end;gap:1rem;margin-bottom:1.25rem}
+.memory-toolbar form{display:flex;align-items:end;gap:.5rem;width:min(34rem,75%)}
+.memory-toolbar label{flex:1;margin:0}.memory-toolbar button{margin:0;white-space:nowrap}
+.share-memory{display:inline-block;padding:.65rem 1rem;border-radius:.65rem;text-align:center}
+.memory-inline [data-comments] p{background:#f3e8de;padding:.5rem .75rem;border-radius:.9rem;margin:.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){.memory-toolbar{align-items:stretch;flex-direction:column}.memory-toolbar form{width:100%}.share-memory{align-self:flex-start}.member-site{background-attachment:scroll}}
 `;

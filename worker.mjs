@@ -52,6 +52,8 @@ async function route(req, env) {
     if (!object) return missing();
     return new Response(object.body,{headers:{'Content-Type':campusAssets[asset],'Cache-Control':'public, max-age=3600'}});
   }
+  if (path==='/social.js' && !post) return new Response(page.socialScript,{
+    headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300'}});
   const token = req.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-alumni=([a-f0-9-]+)/)?.[1];
   const member = token && await one(`SELECT m.*,r.name FROM sessions s JOIN members m ON m.id=s.member
     JOIN roster r ON r.id=m.id WHERE s.token=? AND s.expires>? AND m.suspended=0 AND (?=0 OR m.invited=1 OR m.role='admin')`,await hash(token),now(),+pilot);
@@ -135,7 +137,6 @@ async function route(req, env) {
   }
   if (!member) return redirect('/signin?next='+encode(path+u.search));
   const me = member.id;
-  if (path==='/social.js' && !post) return new Response(page.socialScript,{headers:{'Content-Type':'text/javascript; charset=utf-8'}});
   if (path==='/tag-search' && !post) {
     const q = (u.searchParams.get('q')||'').trim().slice(0,80);
     if (q.length<2) return json([]);
@@ -164,8 +165,8 @@ async function route(req, env) {
     (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked,
     EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)) AS is_about_me
     FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject`;
-  async function posts(where = '1', args = [], size = 25) {
-    return all(`${postQuery} WHERE ${postVisible} AND (${where}) ORDER BY p.created DESC,p.id DESC LIMIT ?`,me,me,...args,size);
+  async function posts(where = '1', args = [], size = 25, order='p.created DESC,p.id DESC') {
+    return all(`${postQuery} WHERE ${postVisible} AND (${where}) ORDER BY ${order} LIMIT ?`,me,me,...args,size);
   }
   async function gallery(person) {
     const seed = `SELECT 'seed/'||s.roster_id AS media,r.name AS caption,'/people/'||r.id AS source,s.portrait_key AS object_key
@@ -210,20 +211,43 @@ async function route(req, env) {
     await run('DELETE FROM sessions WHERE token=?',await hash(token));
     return redirect('/',{'Set-Cookie':cookie('',0)});
   }
-  async function feed(size) {
-    const before = Number(u.searchParams.get('before')) || now()+1;
+  async function feed(size, featured, q='') {
+    const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM uploads up WHERE up.post=p.id)
+      OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) THEN 604800000 ELSE 0 END`;
+    const score = featured ? `(p.created+(${photoBonus}))` : 'p.created';
+    const before = Number(u.searchParams.get('before')) || now()+604800001;
     const cursor = u.searchParams.get('cursor') || '';
-    const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor],size+1);
+    const search = `AND (instr(lower(p.body||' '||r.name||' '||r.nickname||' '||coalesce(subject.name,'')||' '||coalesce(subject.nickname,'')||' '||coalesce(t.title,'')),lower(?))>0
+      OR EXISTS(SELECT 1 FROM comments c WHERE c.post=p.id AND c.hidden=0 AND instr(lower(c.body),lower(?))>0)
+      OR EXISTS(SELECT 1 FROM tags tg JOIN roster tr ON tr.id=tg.member WHERE tg.post=p.id AND tg.status='accepted' AND instr(lower(tr.name||' '||tr.nickname),lower(?))>0)
+      OR EXISTS(SELECT 1 FROM memory_about ma LEFT JOIN roster ar ON ma.kind='person' AND ma.target=CAST(ar.id AS TEXT)
+        AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+        LEFT JOIN topics at ON ma.kind='topic' AND ma.target=at.id AND at.hidden=0 AND at.redirect IS NULL
+        WHERE ma.post=p.id AND instr(lower(coalesce(ar.name,'')||' '||coalesce(ar.nickname,'')||' '||coalesce(at.title,'')),lower(?))>0)
+      OR EXISTS(SELECT 1 FROM uploads a WHERE a.post=p.id AND instr(lower(a.caption),lower(?))>0)
+      OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin AND instr(lower(ph.caption),lower(?))>0)
+      OR (lower(?) IN ('photo','photos') AND ((${photoBonus})>0)))`;
+    const rows = await posts(`(${score}<? OR (${score}=? AND p.id<?)) ${q?search:''}`,
+      [before,before,cursor,...(q?Array(7).fill(q):[])],size+1,`${score} DESC,p.id DESC`);
     const more = rows.length>size;
     if (more) rows.pop();
     const last=rows.at(-1);
-    const next = more ? '/memories?before='+last.created+'&cursor='+encode(last.id) : '';
-    return {rows,next};
+    const position = more && last.created+(featured && (last.feed_photo||last.has_legacy_photo)?604800000:0);
+    const next = more ? '/memories?before='+position+'&cursor='+encode(last.id)+(featured?'&featured=1':'')+(q?'&q='+encode(q):'') : '';
+    if (!featured) return {rows,next};
+    const photos=rows.filter(row=>row.feed_photo||row.has_legacy_photo);
+    const words=rows.filter(row=>!row.feed_photo&&!row.has_legacy_photo);
+    const mixed=[];
+    while(photos.length||words.length){
+      mixed.push(...photos.splice(0,2),...words.splice(0,1));
+    }
+    return {rows:mixed,next};
   }
   if (path==='/memories') {
-    const {rows,next} = await feed(12);
+    const q=(u.searchParams.get('q')||'').trim().slice(0,100);
+    const {rows,next} = await feed(12,u.searchParams.get('featured')==='1',q);
     if (u.searchParams.get('fragment')==='1') return json({html:page.memoryCards(rows),next});
-    return show('Memories',page.memories(rows,next));
+    return show('Memories',page.memories(rows,next,q,id()));
   }
   if (path==='/memory-targets' && !post) {
     const q=(u.searchParams.get('q')||'').trim().slice(0,100);
@@ -239,7 +263,7 @@ async function route(req, env) {
       AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id))
     + (${portrait} IS NOT NULL))`;
   if (path==='/') {
-    const {rows,next} = await feed(6);
+    const {rows,next} = await feed(9,true);
     const people = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
       WHERE r.id<>? ORDER BY ${completeness} DESC, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
       +pilot,me,Math.floor(now()/86400000)*351);
@@ -261,7 +285,7 @@ async function route(req, env) {
   const person = path.match(/^\/people\/(\d+)$/);
   if (person) {
     const key = Number(person[1]);
-    const row = await one(`SELECT r.*,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
+    const row = await one(`SELECT r.*,a.status AS own_attendance,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
     const seed = await one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot);
@@ -269,7 +293,7 @@ async function route(req, env) {
     const published = await one('SELECT fields FROM yearbook_public WHERE member=?',key);
     const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=? AND field!=?',key,'portraitObject')).map(r=>[r.field,r.value]));
     const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
-    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
+    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[key===me?row.own_attendance:row.status],details,await gallery(key),
       await posts(`p.author=? OR EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted')`,[key,key,key]),me,pilot),member,{home:true});
   }
   if (path==='/profile') {
@@ -279,6 +303,12 @@ async function route(req, env) {
     }
     const f = await data();
     const inline = f.get('field');
+    if (inline === 'attendance') {
+      const status=str(f,'value',20);
+      if (!Object.hasOwn(attendanceNames,status)) return invalid('Choose an attendance status.');
+      await run('INSERT INTO attendance VALUES(?,?) ON CONFLICT(member) DO UPDATE SET status=excluded.status',me,status);
+      return redirect('/people/'+me);
+    }
     if (inline === 'portraitObject') {
       const file = f.get('photo');
       const photo = file instanceof File && file.size && file.size<=15*1024*1024

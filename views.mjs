@@ -1,3 +1,4 @@
+import { socialScript } from './social.mjs';
 import { theme } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
@@ -51,229 +52,8 @@ const memoryCards = (rows,priority=false) => rows.flatMap((post,index)=>{
   </article>`);
 }).join('');
 const collage=(rows,next,priority=false)=>`<div class="memory-collage" data-feed>${memoryCards(rows,priority)||'<p>No memories here yet.</p>'}</div>
-${next?`<a class="feed-more" data-feed-next href="${e(next)}">Load more</a>`:''}
+${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 <dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
-function socialInteractions(){
-  const next=document.querySelector('[data-feed-next]');
-  if(next&&'IntersectionObserver' in window){
-    let loading=false;
-    const observer=new IntersectionObserver(entries=>{
-      if(entries.some(entry=>entry.isIntersecting)) loadMore();
-    },{rootMargin:'500px'});
-    async function loadMore(){
-      if(loading)return;
-      loading=true;
-      observer.unobserve(next);
-      try {
-        const url=new URL(next.href);
-        url.searchParams.set('fragment','1');
-        const response=await fetch(url);
-        if(!response.ok)throw new Error();
-        const items=await response.json();
-        document.querySelector('[data-feed]').insertAdjacentHTML('beforeend',items.html);
-        if(items.next){next.href=items.next;observer.observe(next);}
-        else next.remove();
-      }catch{next.textContent='Retry loading memories';}
-      finally{loading=false;}
-    }
-    next.addEventListener('click',event=>{event.preventDefault();loadMore();});
-    observer.observe(next);
-  }
-  document.querySelector('[data-compose-open]')?.addEventListener('click',event=>{
-    event.preventDefault();
-    document.querySelector('.compose-dialog').showModal();
-  });
-  const addSelection=(form,value,label)=>{
-    const list=form.querySelector('[data-topic-chips]');
-    if([...list.querySelectorAll('input')].some(input=>input.value.toLowerCase()===value.toLowerCase()))return;
-    const chip=document.createElement('span'), field=document.createElement('input');
-    const name=document.createElement('span'), close=document.createElement('button');
-    chip.className='topic-chip';field.type='hidden';field.name='about';field.value=value;
-    name.textContent=label;
-    close.type='button';close.dataset.removeTopic='';close.textContent='×';
-    close.setAttribute('aria-label','Remove '+label);
-    chip.append(field,name,close);list.append(chip);
-  };
-  const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
-  async function send(url,data){
-    const response=await fetch(url,{method:'POST',body:data,headers:{Accept:'application/json'}});
-    if(!response.ok) throw new Error(response.status===429?'Please wait and try again.':'Could not save. Try again.');
-    return response;
-  }
-  function message(card,text){card.querySelector('.memory-result').textContent=text;}
-  async function comments(card){
-    const response=await fetch(path(card)+'?panel=comments');
-    if(!response.ok) throw new Error('Could not load comments.');
-    const list=card.querySelector('[data-comments]');
-    const rows=await response.json();
-    list.replaceChildren(...rows.map(row=>{
-      const item=document.createElement('p'), name=document.createElement('strong');
-      name.textContent=row.name;
-      item.append(name,document.createTextNode(' '+row.body));
-      return item;
-    }));
-  }
-  document.addEventListener('click',async event=>{
-    const button=event.target.closest('button');
-    if(!button)return;
-    if(button.matches('[data-upload]')){button.form.elements.photo.click();return;}
-    if(button.matches('[data-close]')){button.closest('dialog').close();return;}
-    const compose=button.closest('[data-compose]');
-    if(compose){
-      if(button.matches('[data-remove-topic]'))button.closest('.topic-chip').remove();
-      if(button.matches('[data-target-option]')){
-        addSelection(compose,button.dataset.targetOption,button.textContent);
-        compose.querySelector('[data-target-search]').value='';
-        button.parentElement.replaceChildren();
-      }
-      if(button.matches('[data-add-topic]')){
-        const input=compose.querySelector('[data-new-topic]'), title=input.value.trim();
-        if(title){addSelection(compose,'new:'+title,title);input.value='';input.closest('details').open=false;}
-      }
-    }
-    const card=button.closest('[data-post]');
-    if(!card)return;
-    try {
-      if(button.matches('[data-enlarge]')){
-        if(card.closest('dialog'))return;
-        const dialog=document.querySelector('.memory-dialog'), copy=card.cloneNode(true);
-        copy.querySelector('img')?.removeAttribute('loading');
-        dialog.querySelector('[data-dialog-content]').replaceChildren(copy);
-        dialog.showModal();
-      } else if(button.matches('[data-like]')){
-        button.disabled=true;
-        try {
-          const data=new FormData();
-          data.set('action','like');data.set('liked',button.getAttribute('aria-pressed')==='true'?'0':'1');
-          const {liked,likes}=await (await send(path(card),data)).json();
-          for(const other of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
-            const control=other.querySelector('[data-like]');
-            control.setAttribute('aria-pressed',String(liked));
-            control.setAttribute('aria-label',liked?'Unlike':'Like');
-            control.title=liked?'Unlike':'Like';
-            other.querySelector('[data-count]').textContent=likes||'';
-          }
-        } finally {button.disabled=false;}
-      } else if(button.matches('[data-panel]')){
-        const panel=card.querySelector('[data-panel-content="'+button.dataset.panel+'"]');
-        panel.hidden=!panel.hidden;
-        button.setAttribute('aria-expanded',String(!panel.hidden));
-        if(!panel.hidden){
-          panel.querySelector('input,textarea')?.focus();
-          if(button.dataset.panel==='comments') await comments(card);
-        }
-      } else if(button.matches('[data-tag-id]')){
-        button.disabled=true;
-        try {
-          const data=new FormData();
-          data.set('action','tag-add');data.set('tag',button.dataset.tagId);
-          await send(path(card),data);
-          message(card,'Tag sent for approval.');
-          button.closest('[data-panel-content]').querySelector('[data-tag-search]').value='';
-          button.parentElement.replaceChildren();
-        } finally {button.disabled=false;}
-      }
-    } catch(error){message(card,error.message);}
-  });
-  document.addEventListener('input',async event=>{
-    const input=event.target;
-    if(input.matches('[data-target-search]')){
-      const results=input.form.querySelector('[data-target-results]'), q=input.value.trim();
-      results.replaceChildren();
-      if(!q)return;
-      try{
-        const response=await fetch('/memory-targets?q='+encodeURIComponent(q));
-        if(!response.ok)throw new Error();
-        const rows=await response.json();
-        if(input.value.trim()!==q)return;
-        results.replaceChildren(...rows.map(({value,label})=>{
-          const option=document.createElement('button');
-          option.type='button';option.dataset.targetOption=value;option.textContent=label;
-          return option;
-        }));
-        if(!rows.length)results.textContent='No matches';
-      }catch{if(input.value.trim()===q)results.textContent='Search unavailable.';}
-      return;
-    }
-    if(!input.matches('[data-tag-search]'))return;
-    const results=input.parentElement.querySelector('[data-tag-results]'), q=input.value.trim();
-    results.replaceChildren();
-    if(q.length<2)return;
-    try {
-      const response=await fetch('/tag-search?q='+encodeURIComponent(q));
-      if(!response.ok)throw new Error('Search unavailable.');
-      const rows=await response.json();
-      if(input.value.trim()!==q)return;
-      results.replaceChildren(...rows.map(row=>{
-        const button=document.createElement('button');
-        button.type='button';button.dataset.tagId=row.id;
-        button.textContent=row.nickname?row.name+' · '+row.nickname:row.name;
-        return button;
-      }));
-      if(!rows.length)results.textContent='No matches.';
-    } catch(error){if(input.value.trim()===q)results.textContent=error.message;}
-  });
-  document.addEventListener('change',event=>{
-    if(event.target.matches('[data-profile-edit] input[type=file]')&&event.target.files.length)event.target.form.requestSubmit();
-  });
-  document.addEventListener('submit',async event=>{
-    const form=event.target;
-    if(form.matches('.compose-dialog [data-compose]')){
-      event.preventDefault();
-      if(form.dataset.saving)return;
-      form.dataset.saving='true';
-      const status=form.querySelector('[data-compose-status]');
-      const button=form.querySelector('button[type=submit]');
-      button.disabled=true;
-      try{
-        const response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{Accept:'application/json'}});
-        if(!response.ok)throw new Error(await response.text());
-        const result=await response.json();
-        const feed=document.querySelector('[data-feed]');
-        if(!feed.querySelector('[data-post]'))feed.replaceChildren();
-        feed.insertAdjacentHTML('afterbegin',result.html);
-        form.reset();
-        form.querySelector('[data-topic-chips]').replaceChildren();
-        form.querySelector('[data-target-results]').replaceChildren();
-        form.elements.id.value=crypto.randomUUID();
-        status.textContent='';
-        form.closest('dialog').close();
-      }catch(error){status.textContent=error.message;}
-      finally{delete form.dataset.saving;button.disabled=false;}
-      return;
-    }
-    if(!form.matches('[data-social],[data-profile-edit]'))return;
-    event.preventDefault();
-    if(form.dataset.saving)return;
-    form.dataset.saving='true';
-    const card=form.closest('[data-post]');
-    let status=form.querySelector('[data-edit-status]');
-    try {
-      const data=new FormData(form);
-      if(card){
-        await send(path(card),data);
-        form.reset();
-        await comments(card);
-        message(card,'');
-      }else{
-        const response=await fetch(form.action,{method:'POST',body:data});
-        if(!response.ok)throw new Error(await response.text());
-        const next=new DOMParser().parseFromString(await response.text(),'text/html');
-        const updated=next.querySelector('.alumni-profile');
-        if(!updated)throw new Error('Could not update the profile. Try again.');
-        document.querySelector('.alumni-profile').replaceWith(updated);
-        const avatar=next.querySelector('.account summary');
-        if(avatar)document.querySelector('.account summary').replaceWith(avatar);
-      }
-    }catch(error){
-      if(card)message(card,error.message);
-      else{
-        if(!status){status=document.createElement('span');status.dataset.editStatus='';status.setAttribute('role','status');form.append(status);}
-        status.textContent=error.message;
-      }
-    }finally{delete form.dataset.saving;}
-  });
-}
 export function render(title,body,member,{home=false}={}) {
   const nav=member?`<nav aria-label="Main navigation">${link('/','Home')}${link('/memories','Memories')}${link('/reunion','Reunion')}
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
@@ -288,10 +68,10 @@ export function render(title,body,member,{home=false}={}) {
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body${home?' class="home"':''}><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=2" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
-  socialScript: '('+socialInteractions.toString()+')();',
+  socialScript,
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
     box.addEventListener('input',async()=>{const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
     try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
@@ -326,8 +106,11 @@ export const page={
       <dialog class="memory-dialog compose-dialog" aria-label="Add your memory">${icon('close','Close','data-close')}<h2>Add your memory</h2>${page.compose(key)}</dialog>
     </div>`;
   },
-  memories(rows,next){return `<div class="memory-nav">${link('/gallery','Gallery')}${link('/topics','Topics')}${link('/compose','Share a memory')}</div>
-    ${collage(rows,next,true)}`;},
+  memories(rows,next,q,key){return `<div class="memory-toolbar">
+    <form method="get" action="/memories"><label>Search memories<input type="search" name="q" value="${e(q)}" placeholder="People, topics, photos or comments"></label><button>Search</button></form>
+    <a href="/compose" class="profile-primary share-memory" data-compose-open>Share a memory</a></div>
+    ${collage(rows,next,true)}
+    <dialog class="memory-dialog compose-dialog" aria-label="Share a memory">${icon('close','Close','data-close')}<h2>Share a memory</h2>${page.compose(key)}</dialog>`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
   memoryCards,
   directory(rows,statuses,q,status,dorms,dorm){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}<button>Apply filters</button></form>
@@ -343,11 +126,11 @@ export const page={
     const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||own));
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
       ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
-    const edit = (key,label,value) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">✎</summary>
-      ${form('/profile',field('field',key)+area('value',label,value,'maxlength="4000"'),'Save','data-profile-edit')}</details>` : '';
+    const edit = (key,label,value,control=area('value',label,value,'maxlength="4000"')) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">✎</summary>
+      ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
     const entry = key => {
       const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
-      return `<div class="editable-field"><dt>${e(label)}</dt><dd>${e(details[key]||'—')}</dd>${edit(key,label,details[key])}</div>`;
+      return `<div class="editable-field"><dt>${e(label)}</dt><dd class="field-display">${e(details[key]||'—')}</dd>${edit(key,label,details[key])}</div>`;
     };
     return `<div class="alumni-profile">
       <header class="profile-header">
@@ -357,9 +140,12 @@ export const page={
             ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
               ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
               ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
-          <div class="profile-name editable-field"><h1>${e(details.displayName||row.name)}</h1>
+          <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
             ${edit('displayName','Name',details.displayName||row.name)}
-            ${status?`<span class="profile-status">${e(status)}</span>`:''}
+            <div class="editable-field profile-rsvp">
+              ${status||own?`<span class="profile-status field-display">${e(status||'No response')}</span>`:''}
+              ${edit('attendance','Reunion attendance','',select('value','Reunion attendance',[['attending','Attending'],['declined','Not attending'],['unknown','No response']],row.own_attendance||'unknown'))}
+            </div>
           </div>
           <div class="profile-actions">
             ${own?`<a class="profile-secondary" href="/yearbook">Review yearbook</a>`
