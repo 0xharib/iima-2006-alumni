@@ -1,4 +1,4 @@
-import { render, signIn, page, form, field } from './views.mjs';
+import { render, signIn, page, form, field, escape } from './views.mjs';
 
 const campusAssets = {
   'arches.webp':'image/webp', 'steps.webp':'image/webp', 'light.webp':'image/webp', 'logo.png':'image/png',
@@ -61,7 +61,6 @@ async function route(req, env) {
     WHERE y.member=r.id ORDER BY ph.slot='now' DESC,j.key LIMIT 1),
     CASE WHEN s.portrait_key IS NOT NULL THEN 'seed/'||r.id END)`;
   const seedJoin = `LEFT JOIN profile_seeds s ON s.roster_id=r.id AND ${visibleSeed}`;
-  if (member) member.portrait = (await one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,member.id))?.portrait;
   const show = (title,body) => render(title,body,member);
   const data = () => req.formData();
   const mailHelp = 'mailto:s.tahseen.q@gmail.com,arun.devanathan@gmail.com?subject=IIMA%20Class%20of%202006%20roster%20email&body=Name%3A%0ADorm%20Number%3A%0ADorm%20Name%3A%0ACorrect%20Email%20ID%3A';
@@ -112,7 +111,8 @@ async function route(req, env) {
       await run('INSERT INTO login_links VALUES(?,?,?,?)',await hash(raw),key,now()+1200000,destination(f.get('next')));
       const link = new URL('/verify?token='+raw,env.SITE_ORIGIN || u.origin);
       const mail = await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json'},
-        body:JSON.stringify({from:env.MAIL_FROM,to:[contact.email.trim()],subject:'Sign in to IIMA Class of 2006',text:'Open this link within 20 minutes to sign in: '+link.href})});
+        body:JSON.stringify({from:env.MAIL_FROM,to:[contact.email.trim()],subject:'Sign in to IIMA Class of 2006',text:'Welcome to the IIMA Class of 2006 alumni site. Open this link within 20 minutes to sign in: '+link.href,
+          html:`<div style="background:#f5eee6;padding:24px;font-family:Arial,sans-serif;color:#2d201a"><div style="max-width:520px;margin:auto;background:#fffaf5;padding:28px;border-radius:14px"><p style="color:#873d31;font-weight:bold">IIM Ahmedabad · Class of 2006</p><h1 style="font-size:28px">Twenty years on.</h1><p>Welcome back. Sign in to find classmates, revisit campus memories, and see who’s coming to the reunion.</p><p style="margin:26px 0"><a style="display:inline-block;background:#873d31;color:white;padding:13px 22px;border-radius:8px;text-decoration:none;font-weight:bold" href="${escape(link.href)}">Sign in to the alumni site</a></p><p style="color:#65534b;font-size:14px">This link works once and expires in 20 minutes.</p></div></div>`})});
       if (!mail.ok) {
         await run('DELETE FROM login_links WHERE token=?',await hash(raw));
         return signInPage(key,next,'Email could not be sent. Please try again later.');
@@ -144,19 +144,28 @@ async function route(req, env) {
   }
   const admin = member.role === 'admin';
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
+  const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT)))`;
+  const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}))`;
   const postQuery = `SELECT p.*,r.name AS author_name,t.title AS topic_title,subject.name AS subject_name,
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
     (SELECT a.id FROM uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
+    (SELECT json_group_array(label) FROM (
+      SELECT rr.name AS label FROM memory_about ma JOIN roster rr ON ma.target=CAST(rr.id AS TEXT)
+      WHERE ma.post=p.id AND ma.kind='person' AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+      UNION SELECT tt.title FROM memory_about ma JOIN topics tt ON ma.target=tt.id
+      WHERE ma.post=p.id AND ma.kind='topic' AND tt.hidden=0 AND tt.redirect IS NULL
+    )) AS about_labels,
     (SELECT json_group_array(media) FROM (
       SELECT 'post/'||a.id AS media FROM uploads a WHERE a.post=p.id
       UNION ALL SELECT 'legacy/'||p.id||'/'||row_number() OVER(ORDER BY ph.object_key)
       FROM photos ph WHERE ph.submission=p.origin
     )) AS collage_photos,
     (SELECT count(*) FROM likes l WHERE l.post=p.id) AS likes,
-    (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked
+    (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked,
+    EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)) AS is_about_me
     FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject`;
   async function posts(where = '1', args = [], size = 25) {
-    return all(`${postQuery} WHERE ${postVisible} AND (${where}) ORDER BY p.created DESC,p.id DESC LIMIT ?`,me,...args,size);
+    return all(`${postQuery} WHERE ${postVisible} AND (${where}) ORDER BY p.created DESC,p.id DESC LIMIT ?`,me,me,...args,size);
   }
   async function gallery(person) {
     const seed = `SELECT 'seed/'||s.roster_id AS media,r.name AS caption,'/people/'||r.id AS source,s.portrait_key AS object_key
@@ -166,7 +175,7 @@ async function route(req, env) {
       AND ph.object_key=json_extract(j.value,'$.key') WHERE (? IS NULL OR y.member=?)`;
     const uploads = `SELECT 'post/'||a.id AS media,a.caption,'/posts/'||p.id AS source,a.object_key
       FROM uploads a JOIN posts p ON p.id=a.post WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
-      (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR
+      (EXISTS(SELECT 1 FROM (SELECT ? AS id) person_ref WHERE ${aboutPerson('person_ref.id')}) AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR
       EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted'))`;
     const memories = `SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,ph.caption,'/posts/'||p.id AS source,ph.object_key
       FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
@@ -194,41 +203,60 @@ async function route(req, env) {
       WHERE y.member=? AND j.key=?`,Number(bits[1]),Number(bits[2]));
     else if (bits[0]==='legacy' && Number(bits[2])>0) row = await one(`SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
       WHERE p.id=? AND ${postVisible} ORDER BY ph.object_key LIMIT 1 OFFSET ?`,bits[1],Number(bits[2])-1);
-    return servePhoto(env,row);
+    return servePhoto(env,row,req);
   }
+  if (!post && u.searchParams.get('fragment')!=='1') member.portrait = (await one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,member.id))?.portrait;
   if (path==='/logout' && post) {
     await run('DELETE FROM sessions WHERE token=?',await hash(token));
     return redirect('/',{'Set-Cookie':cookie('',0)});
   }
-  if (path==='/memories') {
+  async function feed(size) {
     const before = Number(u.searchParams.get('before')) || now()+1;
     const cursor = u.searchParams.get('cursor') || '';
-    const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
-    const last = rows.at(-1);
-    const next = last && rows.length===25 ? '/memories?before='+last.created+'&cursor='+encode(last.id) : '';
+    const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor],size+1);
+    const more = rows.length>size;
+    if (more) rows.pop();
+    const last=rows.at(-1);
+    const next = more ? '/memories?before='+last.created+'&cursor='+encode(last.id) : '';
+    return {rows,next};
+  }
+  if (path==='/memories') {
+    const {rows,next} = await feed(12);
+    if (u.searchParams.get('fragment')==='1') return json({html:page.memoryCards(rows),next});
     return show('Memories',page.memories(rows,next));
   }
+  if (path==='/memory-targets' && !post) {
+    const q=(u.searchParams.get('q')||'').trim().slice(0,100);
+    if (!q) return json([]);
+    const pairs=await all(`SELECT 'person:'||id AS value,name AS label FROM roster
+      WHERE instr(lower(name||' '||nickname),lower(?))>0
+      UNION ALL SELECT 'topic:'||id,title FROM topics
+      WHERE hidden=0 AND redirect IS NULL AND instr(lower(title),lower(?))>0 ORDER BY label LIMIT 20`,q,q);
+    return json(pairs);
+  }
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
-    + 2 * EXISTS(SELECT 1 FROM posts p WHERE p.subject=r.id AND p.author<>r.id AND ${postVisible}
+    + 2 * EXISTS(SELECT 1 FROM posts p WHERE ${aboutPerson('r.id')} AND p.author<>r.id AND ${postVisible}
       AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id))
     + (${portrait} IS NOT NULL))`;
   if (path==='/') {
-    const before = Number(u.searchParams.get('before')) || now()+1;
-    const cursor = u.searchParams.get('cursor') || '';
-    const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
+    const {rows,next} = await feed(6);
     const people = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
       WHERE r.id<>? ORDER BY ${completeness} DESC, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
       +pilot,me,Math.floor(now()/86400000)*351);
-    return render('Twenty years on',page.home(rows,people),member,{home:true});
+    return render('Twenty years on',page.home(rows,people,next,id()),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
-    const q = (u.searchParams.get('q')||'').slice(0,100), status = u.searchParams.get('status')||'';
+    const reunion=path==='/reunion';
+    const q = (u.searchParams.get('q')||'').trim().slice(0,100);
+    const status = u.searchParams.get('status') ?? (reunion?'attending':'');
+    const dorm = (u.searchParams.get('dorm')||'').trim().slice(0,50);
+    const dorms = reunion ? await all("SELECT DISTINCT dorm FROM roster WHERE trim(dorm)<>'' ORDER BY CAST(dorm AS INTEGER),dorm") : [];
     const rows = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin}
-      WHERE instr(lower(r.name||' '||coalesce(r.nickname,'')||' '||coalesce(r.dorm,'')),lower(?))>0
+      WHERE (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' '||coalesce(r.dorm,'')),lower(?))>0) AND (?='' OR r.dorm=?)
       AND (?='' OR (coalesce(m.attendance_private,0)=0 AND coalesce(a.status,'unknown')=?))
-      ORDER BY ${completeness} DESC,r.name`,+pilot,q,status,status);
-    return show(path==='/reunion'?'December reunion':'Classmates',page.directory(rows,attendanceNames,q,status));
+      ORDER BY ${completeness} DESC,r.name`,+pilot,q,q,dorm,dorm,status,status);
+    return show(path==='/reunion'?'December reunion':'Classmates',page.directory(rows,attendanceNames,q,status,dorms,dorm));
   }
   const person = path.match(/^\/people\/(\d+)$/);
   if (person) {
@@ -242,7 +270,7 @@ async function route(req, env) {
     const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=? AND field!=?',key,'portraitObject')).map(r=>[r.field,r.value]));
     const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
     return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
-      await posts('p.author=? OR (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status=\'accepted\')',[key,key,key]),me,pilot),member,{home:true});
+      await posts(`p.author=? OR EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted')`,[key,key,key]),me,pilot),member,{home:true});
   }
   if (path==='/profile') {
     if (!post) {
@@ -340,7 +368,7 @@ async function route(req, env) {
   if (path==='/topics') {
     const q = (u.searchParams.get('q')||'').slice(0,100);
     const rows = await all(`SELECT t.* FROM topics t WHERE t.hidden=0 AND t.redirect IS NULL AND instr(lower(t.title),lower(?))>0
-      AND EXISTS(SELECT 1 FROM posts p WHERE p.topic=t.id AND p.hidden=0) ORDER BY t.title`,q);
+      AND EXISTS(SELECT 1 FROM posts p WHERE ${aboutTopic('t.id')} AND ${postVisible}) ORDER BY t.title`,q);
     return show('Memory topics',page.topics(rows,q));
   }
   const topic = path.match(/^\/topics\/([\w-]+)$/);
@@ -348,40 +376,43 @@ async function route(req, env) {
     const row = await one('SELECT * FROM topics WHERE id=?',topic[1]);
     if (row?.redirect) return redirect('/topics/'+row.redirect);
     if (!row || row.hidden) return missing();
-    return show(row.title,page.topic(row,await posts('p.topic=?',[row.id])));
+    return show(row.title,page.topic(row,await posts(`EXISTS(SELECT 1 FROM (SELECT ? AS id) topic_ref WHERE ${aboutTopic('topic_ref.id')})`,[row.id])));
   }
   if (path==='/compose') {
     const subject = Number(u.searchParams.get('person')) || null;
-    if (!post) return show('Share a memory',page.compose(
-      await all('SELECT id,name FROM roster ORDER BY name'),
-      await all('SELECT id,title FROM topics WHERE hidden=0 AND redirect IS NULL ORDER BY title'),
-      subject,u.searchParams.get('topic')||'',id()));
+    if (!post) {
+      const topic=u.searchParams.get('topic');
+      const personRow=subject && await one('SELECT name FROM roster WHERE id=?',subject);
+      const topicRow=topic && await one('SELECT title FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',topic);
+      return show('Share a memory',page.compose(id(),[
+        ...(personRow?[{value:'person:'+subject,label:personRow.name}]:[]),
+        ...(topicRow?[{value:'topic:'+topic,label:topicRow.title}]:[])
+      ]));
+    }
     if (!await limit('post:'+me,10,20)) return invalid('Please wait before posting again.');
     if (Number(req.headers.get('Content-Length'))>96*1024*1024) return invalid('Photos are too large.');
     const f = await data(), key = str(f,'id',50), body = str(f,'body');
-    if (!/^[a-f0-9-]{36}$/.test(key) || !body) return invalid('Write a memory first.');
-    const original = await one('SELECT author FROM posts WHERE id=?',key);
-    if (original) return original.author===me ? redirect('/posts/'+key) : missing();
-    const subjectId = Number(f.get('subject')) || null;
-    if (subjectId && !await one('SELECT id FROM roster WHERE id=?',subjectId)) return invalid('Choose an existing classmate.');
-    let topicId = str(f,'topic',50) || null;
-    const title = str(f,'title',100);
-    if (title && topicId) return invalid('Choose an existing topic or enter a new one.');
-    if (topicId && !await one('SELECT id FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',topicId)) return invalid('Topic unavailable.');
-    const jobs = [];
-    if (title) {
-      const kind = str(f,'kind',12);
-      if (!['Place','Item','Other'].includes(kind)) return invalid('Choose a topic type.');
-      const existing = await one('SELECT id,hidden,redirect FROM topics WHERE title=? COLLATE NOCASE',title);
-      if (existing?.hidden || existing?.redirect) return invalid('Choose a different topic title.');
-      topicId = existing?.id || id();
-      if (!existing) jobs.push(sql('INSERT INTO topics(id,title,kind) VALUES(?,?,?)',topicId,title,kind));
-    }
-    jobs.push(sql('INSERT INTO posts(id,author,subject,topic,body,created) VALUES(?,?,?,?,?,?)',key,me,subjectId,topicId,body,now()));
-    const tag = Number(f.get('tag'));
-    if (tag && tag!==me && await one('SELECT id FROM roster WHERE id=?',tag)) jobs.push(sql("INSERT INTO tags VALUES(?,?,'pending')",key,tag));
     const files = f.getAll('images').filter(image=>image instanceof File && image.size);
+    if (!/^[a-f0-9-]{36}$/.test(key) || (!body&&!files.length)) return invalid('Add a photo or write a memory.');
     if (files.length>6) return invalid('Choose up to six photos.');
+    const wantsJson=req.headers.get('Accept')==='application/json';
+    const success=async()=>wantsJson?json({html:page.memoryCards(await posts('p.id=?',[key],1))}):redirect('/posts/'+key);
+    const original = await one('SELECT author FROM posts WHERE id=?',key);
+    if (original) return original.author===me ? success() : missing();
+    const selections=[...new Set(f.getAll('about').map(String))];
+    const jobs = [sql('INSERT INTO posts(id,author,body,created) VALUES(?,?,?,?)',key,me,body||'Shared a yearbook photo.',now())];
+    for (const selected of selections) {
+      const split=selected.indexOf(':');
+      const kind=selected.slice(0,split), target=selected.slice(split+1).trim();
+      if (kind==='person' && /^\d+$/.test(target)) {
+        jobs.push(sql("INSERT OR IGNORE INTO memory_about SELECT ?,'person',CAST(id AS TEXT) FROM roster WHERE id=?",key,Number(target)));
+      } else if (kind==='topic' && target.length<=100) {
+        jobs.push(sql("INSERT OR IGNORE INTO memory_about SELECT ?,'topic',id FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL",key,target));
+      } else if (kind==='new' && target && target.length<=100) {
+        jobs.push(sql("INSERT OR IGNORE INTO topics(id,title,kind) VALUES(?,?,'Other')",id(),target));
+        jobs.push(sql("INSERT OR IGNORE INTO memory_about SELECT ?,'topic',id FROM topics WHERE title=? COLLATE NOCASE AND hidden=0 AND redirect IS NULL",key,target));
+      } else return invalid('Choose a classmate or topic.');
+    }
     const uploaded = [];
     try {
       for (const [index,image] of files.entries()) {
@@ -398,7 +429,7 @@ async function route(req, env) {
       }
       await db.batch(jobs);
       uploaded.length=0;
-      return redirect('/posts/'+key);
+      return success();
     } finally {
       await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));
     }
@@ -437,6 +468,8 @@ async function route(req, env) {
       await run('UPDATE tags SET status=? WHERE post=? AND member=?',action==='tag-accept'?'accepted':'declined',key,me);
     } else if (action==='unassociate' && item.subject===me) {
       await run('INSERT OR IGNORE INTO muted_subjects VALUES(?)',key);
+    } else if (action==='unassociate' && item.is_about_me) {
+      await run("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,String(me));
     } else if (action==='delete' && item.author===me) {
       await run('UPDATE posts SET hidden=1 WHERE id=?',key);
       return redirect('/');
@@ -521,7 +554,9 @@ async function route(req, env) {
     if (action==='merge-topic') {
       const to = str(f,'into',80);
       if (to===target || !await one('SELECT id FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',to)) return invalid('Choose an active destination topic.');
-      await db.batch([sql('UPDATE posts SET topic=? WHERE topic=?',to,target),sql('UPDATE topics SET redirect=? WHERE id=?',to,target),
+      await db.batch([sql('UPDATE posts SET topic=? WHERE topic=?',to,target),
+        sql("INSERT OR IGNORE INTO memory_about SELECT post,kind,? FROM memory_about WHERE kind='topic' AND target=?",to,target),
+        sql("DELETE FROM memory_about WHERE kind='topic' AND target=?",target),sql('UPDATE topics SET redirect=? WHERE id=?',to,target),
         sql('UPDATE topics SET redirect=? WHERE redirect=?',to,target),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
       return redirect(path);
     }
@@ -568,11 +603,17 @@ function joinBytes(parts) {
   return joined;
 }
 
-async function servePhoto(env,row) {
+async function servePhoto(env,row,req) {
   if (!row?.object_key) return missing();
   const object = await env.MEDIA.get(row.object_key);
   if (!object) return missing();
   const type = row.type || object.httpMetadata?.contentType || ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif'})[row.object_key.split('.').pop().toLowerCase()];
   if (!['image/jpeg','image/png','image/webp','image/gif','image/avif'].includes(type)) return missing();
-  return new Response(object.body,{headers:{'Content-Type':type}});
+  if (!req) return new Response(object.body,{headers:{'Content-Type':type}});
+  const headers={'Content-Type':type,'Cache-Control':'private, no-cache','ETag':object.httpEtag,'Vary':'Cookie'};
+  if (req.headers.get('If-None-Match')?.split(/,\s*/).includes(object.httpEtag)) {
+    await object.body.cancel();
+    return new Response(null,{status:304,headers});
+  }
+  return new Response(object.body,{headers});
 }

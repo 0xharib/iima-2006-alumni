@@ -89,4 +89,26 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .profile-portrait [data-edit-status]{position:absolute;top:100%;left:0;z-index:1;background:#fff;padding:.2rem;font-size:.8rem}
 @media(max-width:850px){.memory-collage{columns:2}.home-classmates .people-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:490px){.memory-collage{columns:1}.home-classmates .people-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.bar{position:relative;z-index:10}.bar .mast nav{overflow:visible}.account{z-index:11}
+.home-memories .memory-nav{margin:0;gap:.6rem}.home-memories .memory-nav a{padding:.35rem .5rem}
+.feed-more{display:table;margin:1.2rem auto;padding:.5rem .85rem;border:1px solid currentColor;border-radius:.5rem}
+.memory-collage .text-memory,.memory-dialog .text-memory{background:#f1e2d1;border-color:#e1cbb5}
+.text-memory .collage-visual{display:flex;flex-direction:column}
+.text-memory .memory-credit{position:static;order:-1;max-width:none;background:none;color:#6e3c31;margin:.85rem .85rem 0;padding:.25rem 0 .65rem;border-bottom:1px solid #d8c1aa;border-radius:0}
+.memory-credit a{color:inherit}.memory-about{font-weight:500;overflow-wrap:anywhere}
+.text-memory .memory-quote{margin:0;padding:1rem .85rem;background:none;border:0;white-space:pre-wrap;overflow:visible;max-height:none}
+.icon-action[data-like][aria-pressed=true]{color:#a52d43}.icon-action[data-like][aria-pressed=true] svg{fill:currentColor}
+.compose-dialog{padding:clamp(.85rem,3vw,1.5rem);max-width:590px}.compose-dialog h2{margin:.25rem 0 .8rem}
+.memory-targets [data-target-results]{display:flex;flex-wrap:wrap;gap:.35rem}.memory-targets [data-target-results] button{margin:0;background:#eee0d0;color:#432a24}
+[data-topic-chips]{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.45rem}.topic-chip{display:inline-flex;gap:.4rem;align-items:center;background:#eee0d0;border-radius:2rem;padding:.15rem .3rem .15rem .65rem;font-size:.88rem;overflow-wrap:anywhere}
+.topic-chip button{margin:0;background:transparent;color:#69342c;padding:.15rem .45rem}
+.add-topic{display:flex;gap:.45rem;align-items:center}.add-topic button{flex:none}
+.directory-controls:has([name=dorm]){grid-template-columns:2fr 1fr 1fr auto}
+@media(max-width:760px){
+  .alumni-home .campus-hero{min-height:clamp(270px,55svh,440px);align-items:start;padding-top:clamp(24px,7svh,52px);background-position:center 46%;background-image:linear-gradient(180deg,#160d0cdb,#170e1020),url('/campus/arches.webp')}
+  .alumni-home .campus-hero h1{font-size:clamp(2.8rem,11vw,4rem)}
+  .bar .mast nav{white-space:normal}.mast nav .account{flex-shrink:0}
+  .directory-controls:has([name=dorm]){grid-template-columns:1fr 1fr}
+}
 `;

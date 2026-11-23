@@ -25,14 +25,15 @@ const card=(p,back)=>`<article><header>${link('/people/'+p.author,p.author_name)
   ${p.feed_photo||p.has_legacy_photo?`<a class="feed-photos" href="/posts/${e(p.id)}"><img src="/media/${p.feed_photo?'post/'+e(p.feed_photo):'legacy/'+e(p.id)+'/1'}" alt="Yearbook memory photo" loading="lazy"></a>`:''}<p class="story">${e(p.body)}</p>${link('/posts/'+p.id,'Open memory')} ${action('/posts/'+p.id,'like',p.liked?'Unlike':'Like',{liked:p.liked?0:1,...(back?{return:back}:{})})} ${badge(p.likes+' likes')}</article>`;
 const cards=(rows,back)=>rows.map(row=>card(row,back)).join('')||'<p>No memories here yet.</p>';
 
-const collage = (rows,compact=false) => `<div class="memory-collage${compact?' compact-collage':''}">${rows.flatMap(post=>{
+const memoryCards = (rows,priority=false) => rows.flatMap((post,index)=>{
   const photos=JSON.parse(post.collage_photos||'[]');
-  return (photos.length?photos:[null]).map(photo=>`<article class="collage-card" data-post="${e(post.id)}">
+  const about=[...new Set([post.subject_name,post.topic_title,...JSON.parse(post.about_labels||'[]')].filter(Boolean))].join(', ');
+  return (photos.length?photos:[null]).map(photo=>`<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}">
     <div class="collage-visual">
       <button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
-        ${photo?`<img src="/media/${e(photo)}" alt="Memory shared by ${e(post.author_name)}" loading="lazy">`:`<span class="memory-quote">${e(post.body)}</span>`}
+        ${photo?`<img src="/media/${e(photo)}" alt="Memory shared by ${e(post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:`<span class="memory-quote">${e(post.body)}</span>`}
       </button>
-      <a class="memory-credit" href="/people/${post.author}">${e(post.author_name)}</a>
+      <div class="memory-credit"><a href="/people/${post.author}">${e(post.author_name)}</a>${about?` <span class="memory-about"><span aria-label="about">→</span> ${e(about)}</span>`:''}</div>
     </div>
     ${photo&&post.body&&post.body!=='Shared a yearbook photo.'?`<p class="memory-caption">${e(post.body)}</p>`:''}
     <div class="collage-actions">
@@ -48,9 +49,51 @@ const collage = (rows,compact=false) => `<div class="memory-collage${compact?' c
       <div data-tag-results></div></div>
     <div class="memory-result" role="status"></div>
   </article>`);
-}).join('')||'<p>No memories here yet.</p>'}</div>
+}).join('');
+const collage=(rows,next,priority=false)=>`<div class="memory-collage" data-feed>${memoryCards(rows,priority)||'<p>No memories here yet.</p>'}</div>
+${next?`<a class="feed-more" data-feed-next href="${e(next)}">Load more</a>`:''}
 <dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
 function socialInteractions(){
+  const next=document.querySelector('[data-feed-next]');
+  if(next&&'IntersectionObserver' in window){
+    let loading=false;
+    const observer=new IntersectionObserver(entries=>{
+      if(entries.some(entry=>entry.isIntersecting)) loadMore();
+    },{rootMargin:'500px'});
+    async function loadMore(){
+      if(loading)return;
+      loading=true;
+      observer.unobserve(next);
+      try {
+        const url=new URL(next.href);
+        url.searchParams.set('fragment','1');
+        const response=await fetch(url);
+        if(!response.ok)throw new Error();
+        const items=await response.json();
+        document.querySelector('[data-feed]').insertAdjacentHTML('beforeend',items.html);
+        if(items.next){next.href=items.next;observer.observe(next);}
+        else next.remove();
+      }catch{next.textContent='Retry loading memories';}
+      finally{loading=false;}
+    }
+    next.addEventListener('click',event=>{event.preventDefault();loadMore();});
+    observer.observe(next);
+  }
+  document.querySelector('[data-compose-open]')?.addEventListener('click',event=>{
+    event.preventDefault();
+    document.querySelector('.compose-dialog').showModal();
+  });
+  const addSelection=(form,value,label)=>{
+    const list=form.querySelector('[data-topic-chips]');
+    if([...list.querySelectorAll('input')].some(input=>input.value.toLowerCase()===value.toLowerCase()))return;
+    const chip=document.createElement('span'), field=document.createElement('input');
+    const name=document.createElement('span'), close=document.createElement('button');
+    chip.className='topic-chip';field.type='hidden';field.name='about';field.value=value;
+    name.textContent=label;
+    close.type='button';close.dataset.removeTopic='';close.textContent='×';
+    close.setAttribute('aria-label','Remove '+label);
+    chip.append(field,name,close);list.append(chip);
+  };
   const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
   async function send(url,data){
     const response=await fetch(url,{method:'POST',body:data,headers:{Accept:'application/json'}});
@@ -75,6 +118,19 @@ function socialInteractions(){
     if(!button)return;
     if(button.matches('[data-upload]')){button.form.elements.photo.click();return;}
     if(button.matches('[data-close]')){button.closest('dialog').close();return;}
+    const compose=button.closest('[data-compose]');
+    if(compose){
+      if(button.matches('[data-remove-topic]'))button.closest('.topic-chip').remove();
+      if(button.matches('[data-target-option]')){
+        addSelection(compose,button.dataset.targetOption,button.textContent);
+        compose.querySelector('[data-target-search]').value='';
+        button.parentElement.replaceChildren();
+      }
+      if(button.matches('[data-add-topic]')){
+        const input=compose.querySelector('[data-new-topic]'), title=input.value.trim();
+        if(title){addSelection(compose,'new:'+title,title);input.value='';input.closest('details').open=false;}
+      }
+    }
     const card=button.closest('[data-post]');
     if(!card)return;
     try {
@@ -121,6 +177,24 @@ function socialInteractions(){
   });
   document.addEventListener('input',async event=>{
     const input=event.target;
+    if(input.matches('[data-target-search]')){
+      const results=input.form.querySelector('[data-target-results]'), q=input.value.trim();
+      results.replaceChildren();
+      if(!q)return;
+      try{
+        const response=await fetch('/memory-targets?q='+encodeURIComponent(q));
+        if(!response.ok)throw new Error();
+        const rows=await response.json();
+        if(input.value.trim()!==q)return;
+        results.replaceChildren(...rows.map(({value,label})=>{
+          const option=document.createElement('button');
+          option.type='button';option.dataset.targetOption=value;option.textContent=label;
+          return option;
+        }));
+        if(!rows.length)results.textContent='No matches';
+      }catch{if(input.value.trim()===q)results.textContent='Search unavailable.';}
+      return;
+    }
     if(!input.matches('[data-tag-search]'))return;
     const results=input.parentElement.querySelector('[data-tag-results]'), q=input.value.trim();
     results.replaceChildren();
@@ -144,6 +218,30 @@ function socialInteractions(){
   });
   document.addEventListener('submit',async event=>{
     const form=event.target;
+    if(form.matches('.compose-dialog [data-compose]')){
+      event.preventDefault();
+      if(form.dataset.saving)return;
+      form.dataset.saving='true';
+      const status=form.querySelector('[data-compose-status]');
+      const button=form.querySelector('button[type=submit]');
+      button.disabled=true;
+      try{
+        const response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{Accept:'application/json'}});
+        if(!response.ok)throw new Error(await response.text());
+        const result=await response.json();
+        const feed=document.querySelector('[data-feed]');
+        if(!feed.querySelector('[data-post]'))feed.replaceChildren();
+        feed.insertAdjacentHTML('afterbegin',result.html);
+        form.reset();
+        form.querySelector('[data-topic-chips]').replaceChildren();
+        form.querySelector('[data-target-results]').replaceChildren();
+        form.elements.id.value=crypto.randomUUID();
+        status.textContent='';
+        form.closest('dialog').close();
+      }catch(error){status.textContent=error.message;}
+      finally{delete form.dataset.saving;button.disabled=false;}
+      return;
+    }
     if(!form.matches('[data-social],[data-profile-edit]'))return;
     event.preventDefault();
     if(form.dataset.saving)return;
@@ -216,7 +314,7 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people){
+  home(rows,people,next,key){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1>Twenty years on.</h1>
       <div class="hero-actions"><a class="cta" href="/people">Find classmates</a><a class="cta secondary" href="/reunion">Reunion</a></div>
@@ -224,14 +322,16 @@ export const page={
       <section class="home-classmates"><div class="section-head"><h2>Classmates</h2>${link('/people','See all →')}</div>
         <div class="people-grid">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
-      <section class="home-memories"><div class="section-head"><h2>Memories</h2>${link('/memories','See all →')}</div>${collage(rows.slice(0,6),true)}</section>
+      <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add your memory</a>${link('/memories','See all →')}</div></div>${collage(rows,next)}</section>
+      <dialog class="memory-dialog compose-dialog" aria-label="Add your memory">${icon('close','Close','data-close')}<h2>Add your memory</h2>${page.compose(key)}</dialog>
     </div>`;
   },
   memories(rows,next){return `<div class="memory-nav">${link('/gallery','Gallery')}${link('/topics','Topics')}${link('/compose','Share a memory')}</div>
-    ${collage(rows)}${next?link(next,'Older memories'):''}`;},
+    ${collage(rows,next,true)}`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
-  directory(rows,statuses,q,status){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:'<p>No classmates match.</p>'}`;},
+  memoryCards,
+  directory(rows,statuses,q,status,dorms,dorm){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}<button>Apply filters</button></form>
+    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}`;},
   person(row,status,details,photos,stories,me,pilot){
     const own = me === row.id;
     const profileUrl = '/people/'+row.id;
@@ -305,19 +405,20 @@ export const page={
   images,
   topics(rows,q){return `<form method="get">${input('q','Find a memory topic',q)}<button>Search</button></form><p>${link('/compose','Create a topic and add a memory')}</p>`+list(rows.map(r=>link('/topics/'+r.id,r.title)+' '+badge(r.kind)),'No topics yet.');},
   topic(row,rows){return `${badge(row.kind)}<p>${link('/compose?topic='+row.id,'Add your memory')}</p>${cards(rows)}${report('topic',row.id)}`;},
-  compose(roster,topics,person,topic,key){
-    const names=[['','Choose a classmate'],...roster.map(r=>[r.id,r.name])];
-    return form('/compose',field('id',key)+area('body','Your memory','','required maxlength="4000"')+
-      select('subject','Memory about a classmate',names,person)+select('tag','Tag a classmate',names)+
-      select('topic','Existing memory topic',[['','Choose a topic'],...topics.map(t=>[t.id,t.title])],topic)+
-      `<fieldset><legend>Or create a new topic</legend>${input('title','Topic name','','maxlength="100"')}${select('kind','Topic type',[['Other','Other'],['Place','Place'],['Item','Item']])}</fieldset>
-      <fieldset><legend>Photos</legend><label>Choose up to six JPEG or PNG images<input type="file" name="images" accept="image/jpeg,image/png" multiple></label>
-      <details><summary>Add captions</summary>${Array.from({length:6},(_,i)=>input('caption_'+i,'Caption for photo '+(i+1),'','maxlength="240"')).join('')}</details></fieldset>`,'Publish memory','enctype="multipart/form-data"');},
+  compose(key,selected=[]){
+    const chip = ({value,label}) => `<span class="topic-chip">${field('about',value)}<span>${e(label)}</span><button type="button" data-remove-topic aria-label="Remove ${e(label)}">×</button></span>`;
+    return form('/compose',field('id',key)+area('body','Your memory','','maxlength="4000"')+
+      `<div class="memory-targets"><label>About<input type="search" data-target-search placeholder="Find a classmate, place or topic" autocomplete="off"></label>
+        <div data-target-results></div><div data-topic-chips>${selected.map(chip).join('')}</div>
+        <details><summary>Add Topic +</summary><div class="add-topic"><input data-new-topic maxlength="100" aria-label="New topic" placeholder="Topic name"><button type="button" data-add-topic>Add</button></div></details>
+      </div>
+      <label>Photos<input type="file" name="images" accept="image/jpeg,image/png" multiple></label>
+      <p data-compose-status role="status"></p>`,'Publish memory','enctype="multipart/form-data" data-compose');},
   post(item,comments,tags,photos,me){
     const url='/posts/'+item.id;
     return card(item)+images(photos)+
       (item.author===me?`<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',item.body,'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
-      (item.subject===me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
+      (item.subject===me||item.is_about_me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
       (tags.length?'<h2>Tags</h2>'+list(tags.map(t=>link('/people/'+t.member,t.name)+' '+badge(t.status)+
        (t.member===me?(t.status==='pending'?action(url,'tag-accept','Accept tag'):'')+action(url,'tag-remove','Remove tag'):'')),''):'')+
       '<h2>Comments</h2>'+list(comments.map(c=>`${link('/people/'+c.author,c.name)}<p class="story">${e(c.body)}</p>${c.author===me?
