@@ -1,5 +1,8 @@
 import { render, signIn, page, form, field } from './views.mjs';
 
+const campusAssets = {
+  'arches.webp':'image/webp', 'steps.webp':'image/webp', 'light.webp':'image/webp', 'logo.png':'image/png',
+};
 const encoder = new TextEncoder();
 const id = () => crypto.randomUUID();
 const now = () => Date.now();
@@ -21,9 +24,9 @@ export default {
   async fetch(request, env) {
     try {
       const response = await route(request, env);
-      response.headers.set('Cache-Control','private, no-store');
+      if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
-      response.headers.set('Referrer-Policy','no-referrer');
+      response.headers.set('Referrer-Policy','strict-origin');
       response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' https://archives.iima.ac.in; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
@@ -42,6 +45,13 @@ async function route(req, env) {
   const pilot = env.ACCESS_MODE !== 'batch';
   if (post && req.headers.get('Origin') !== u.origin) return new Response('Request denied', {status:403});
   if (!post && req.method !== 'GET') return new Response(null,{status:405});
+  if (!post && path.startsWith('/campus/')) {
+    const asset = path.slice('/campus/'.length);
+    if (!Object.hasOwn(campusAssets,asset)) return missing();
+    const object = await env.MEDIA.get('campus-design-v1/'+asset);
+    if (!object) return missing();
+    return new Response(object.body,{headers:{'Content-Type':campusAssets[asset],'Cache-Control':'public, max-age=3600'}});
+  }
   const token = req.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-alumni=([a-f0-9-]+)/)?.[1];
   const member = token && await one(`SELECT m.*,r.name FROM sessions s JOIN members m ON m.id=s.member
     JOIN roster r ON r.id=m.id WHERE s.token=? AND s.expires>? AND m.suspended=0 AND (?=0 OR m.invited=1 OR m.role='admin')`,await hash(token),now(),+pilot);
@@ -110,10 +120,11 @@ async function route(req, env) {
   const admin = member.role === 'admin';
   const visibleSeed = "(s.review_status='approved' OR (?=1 AND s.review_status='pending'))";
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
-  const postQuery = `SELECT p.*,r.name AS author_name,t.title AS topic_title,
+  const postQuery = `SELECT p.*,r.name AS author_name,t.title AS topic_title,subject.name AS subject_name,
+    EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
     (SELECT count(*) FROM likes l WHERE l.post=p.id) AS likes,
     (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked
-    FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic`;
+    FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject`;
   async function posts(where = '1', args = [], size = 25) {
     return all(`${postQuery} WHERE ${postVisible} AND (${where}) ORDER BY p.created DESC,p.id DESC LIMIT ?`,me,...args,size);
   }
@@ -163,7 +174,12 @@ async function route(req, env) {
     const cursor = u.searchParams.get('cursor') || '';
     const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
     const last = rows.at(-1);
-    return show('Twenty years on',page.feed(rows,last && rows.length===25 ? '/?before='+last.created+'&cursor='+encode(last.id):''));
+    const next = last && rows.length===25 ? '/?before='+last.created+'&cursor='+encode(last.id) : '';
+    const people = await all(`SELECT r.id,r.name,s.portrait_key FROM roster r
+      LEFT JOIN profile_seeds s ON s.roster_id=r.id AND ${visibleSeed}
+      WHERE r.id<>? ORDER BY s.portrait_key IS NULL, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
+      +pilot,me,Math.floor(now()/86400000)*351);
+    return render('Twenty years on',page.home(rows,next,people,member),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
     const q = (u.searchParams.get('q')||'').slice(0,100), status = u.searchParams.get('status')||'';
@@ -182,8 +198,8 @@ async function route(req, env) {
     const imported = parse(seed?.source_data);
     const published = await one('SELECT fields FROM yearbook_public WHERE member=?',key);
     const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=?',key)).map(r=>[r.field,r.value]));
-    const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],...parse(published?.fields),...overrides};
-    return show(row.name,page.person(row,attendanceNames[row.status],details,await gallery(key),
+    const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
+    return show(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
       await posts('p.author=? OR (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status=\'accepted\')',[key,key,key]),me,pilot));
   }
   if (path==='/profile') {

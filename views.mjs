@@ -1,3 +1,4 @@
+import { theme } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
 const link=(href,label)=>`<a href="${e(href)}">${e(label)}</a>`;
@@ -14,14 +15,15 @@ const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li
 const labelFor=key=>({life:'Life, lately',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
 const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="/media/${e(row.media)}" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a><figcaption>${e(row.caption)} ${link(row.source,'Context')}</figcaption></figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
 const card=p=>`<article><header>${link('/people/'+p.author,p.author_name)} <time datetime="${new Date(p.created).toISOString()}">${e(new Date(p.created).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'}))}</time></header>
-  ${p.topic?link('/topics/'+p.topic,p.topic_title):''}<p class="story">${e(p.body)}</p>${link('/posts/'+p.id,'Open memory')} ${badge(p.likes+' likes')}</article>`;
+  ${p.topic?link('/topics/'+p.topic,p.topic_title):''}${p.subject_name?`<small>About ${link('/people/'+p.subject,p.subject_name)}</small>`:''}
+  ${p.has_legacy_photo?`<a class="feed-photos" href="/posts/${e(p.id)}"><img src="/media/legacy/${e(p.id)}/1" alt="Yearbook memory photo" loading="lazy"></a>`:''}<p class="story">${e(p.body)}</p>${link('/posts/'+p.id,'Open memory')} ${badge(p.likes+' likes')}</article>`;
 const cards=rows=>rows.map(card).join('')||'<p>No memories here yet.</p>';
 
-export function render(title,body,member) {
+export function render(title,body,member,{home=false}={}) {
   const nav=member?`<nav aria-label="Main navigation">${link('/','Home')}${link('/people','Classmates')}${link('/topics','Memory topics')}${link('/gallery','Gallery')}${link('/reunion','Reunion')}${link('/people/'+member.id,'My profile')}${link('/notifications','Notifications')}${member.role==='admin'?link('/admin','Admin'):''}</nav>`:'';
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><style>
   :root{color-scheme:light;--ink:#251a16;--muted:#654138;--paper:#fbf3e7;--tile:#fffaf3;--brick:#883b2e;--line:#dfcabc}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 system-ui,sans-serif}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem Georgia,serif;text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:Georgia,serif}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:3px solid #296769;outline-offset:3px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
-  </style><header class="bar"><div><a class="wordmark" href="/">IIMA Class of ’06</a>${nav}</div></header><main><h1>${e(title)}</h1>${body}</main>${member?`<footer>${form('/logout','','Sign out')}</footer>`:''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  ${theme}</style><body${home?' class="home"':''}><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?`<footer>${form('/logout','','Sign out')}</footer>`:''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
@@ -29,9 +31,25 @@ export const page={
     try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
     for(const item of names){ const li=document.createElement('li'), a=document.createElement('a'); a.textContent=item.name; a.href='/signin?id='+item.id+'&next='+encodeURIComponent(box.dataset.next); li.append(a); results.append(li); }
     if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; }});`,
-  feed(rows,next){return `<p>${link('/compose','Share a memory')} · ${link('/topics','Browse memory topics')}</p>${cards(rows)}${next?link(next,'Older memories'):''}`;},
+  home(rows,next,people,member){
+    return `<section class="campus-hero"><div><p class="class-label">IIM Ahmedabad · Class of 2006</p>
+      <h1>Twenty years on.</h1><p>Welcome back, ${e(member.name.trim().split(/\s+/)[0])}.</p>
+      <div class="hero-actions"><a class="cta" href="/people">Find classmates</a><a class="cta secondary" href="/compose">Share a memory</a></div>
+      </div></section>
+      <div class="home-links">
+        <a class="shortcut image steps" href="/reunion"><strong>December reunion</strong><small>See who’s coming</small></a>
+        <a class="shortcut image light" href="/gallery"><strong>Photo gallery</strong><small>Explore batch photos</small></a>
+        <a class="shortcut" href="/people/${member.id}"><strong>My profile</strong><small>View your yearbook and profile</small></a>
+      </div>
+      <div class="home-columns">
+        <section><div class="section-head"><h2>Batch memories</h2>${link('/topics','Browse topics →')}</div>
+          ${cards(rows)}${next?'<a class="soft-link" href="'+e(next)+'">Older memories</a>':''}</section>
+        <section><div class="section-head"><h2>Classmates</h2>${link('/people','See directory →')}</div>
+          <div class="people-grid">${people.map(person=>`<a class="person-tile" href="/people/${person.id}">${person.portrait_key?`<img src="/media/seed/${person.id}" alt="" loading="lazy">`:`<span class="initials" aria-hidden="true">${e(person.name.trim().split(/\s+/).slice(0,2).map(word=>word[0]).join(''))}</span>`}<strong>${e(person.name)}</strong></a>`).join('')}</div></section>
+      </div>`;
+  },
   directory(rows,statuses,q,status){return `<form method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}<button>Search</button></form>`+list(rows.map(row=>`${link('/people/'+row.id,row.name)} ${badge(row.dorm)} ${badge(statuses[row.status])}`),'No classmates match.');},
-  person(row,status,details,photos,stories,me,pilot){return `${badge(status)}<p>${link('/compose?person='+row.id,'Add a memory')}${me===row.id?' · '+link('/profile','Edit profile')+' · '+link('/yearbook','Review yearbook'):''}</p>${pilot?'<p>Profiles are being checked during the pilot.</p>':''}<dl>${Object.entries(details).filter(([,v])=>v).map(([k,v])=>`<dt>${e(labelFor(k))}</dt><dd>${e(v)}</dd>`).join('')}</dl>
+  person(row,status,details,photos,stories,me,pilot){return `${badge(status)}<p>${link('/compose?person='+row.id,'Add a memory')}${me===row.id?' · '+link('/profile','Edit profile')+' · '+link('/yearbook','Review yearbook'):''}</p>${pilot?'<p>Profiles are being checked during the pilot.</p>':''}${/^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')?`<p><a class="soft-link" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn profile ↗</a></p>`:''}<dl>${Object.entries(details).filter(([,v])=>v).map(([k,v])=>`<dt>${e(labelFor(k))}</dt><dd>${e(v)}</dd>`).join('')}</dl>
     <h2>Photos</h2>${images(photos)}<h2>Memories shared</h2>${cards(stories.filter(p=>p.author===row.id))}<h2>Memories from classmates</h2>${cards(stories.filter(p=>p.author!==row.id))}${report('profile',row.id)}`;},
   editProfile(fields,member){const keys=['life','city','company','education','dorm','family','nickname'];
     return form('/profile',keys.map(k=>area(k,labelFor(k),fields[k])+checkbox('hide_'+k,'Hide '+labelFor(k),fields[k]==='')).join('')+checkbox('attendance_private','Hide my attendance status',!!member.attendance_private),'Save profile');},
@@ -103,14 +121,15 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl }) {
     :root { color-scheme:light; --paper:#f6f4ef; --ink:#242721; --muted:#555a50; --accent:#873d31; --line:#dedbd3; font:16px/1.5 system-ui,sans-serif }
     * { box-sizing:border-box }
     body { margin:0; background:var(--paper); color:var(--ink) }
-    a { color:var(--accent); text-underline-offset:.2em }
+    a { color:var(--accent); text-decoration:none }
+    a:hover { text-decoration:underline }
     :focus-visible { outline:3px solid #975044; outline-offset:4px }
     .shell { max-width:1240px; margin:auto; padding:0 clamp(16px,5vw,64px) 48px }
     .masthead { min-height:74px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line) }
     .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750; text-decoration:none }
-    .mark { display:grid; place-items:center; width:35px; height:35px; background:var(--accent); border-radius:9px; color:white; font-size:.76rem; letter-spacing:.03em }
+    .mark { display:grid; place-items:center; width:35px; height:35px; background:white; border-radius:50%; padding:2px; object-fit:contain }
     .yearbook { font-size:.87rem; font-weight:650 }
-    .intro { padding:clamp(26px,5vw,58px) 0 clamp(20px,3vw,38px) }
+    .intro { margin:22px 0; min-height:clamp(185px,32vw,370px); display:flex; align-items:end; border-radius:22px; padding:clamp(22px,5vw,58px); color:#fffaf0; background:linear-gradient(90deg,#160d0cda,#190e0c28),#251a16 url('/campus/arches.webp') center 49% / cover }
     h1,h2 { margin:0; line-height:1.08 }
     h1 { font:500 clamp(2.9rem,8vw,6.4rem)/.97 Georgia,serif; letter-spacing:-.072em }
     .layout { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr); align-items:start; gap:clamp(18px,3vw,36px) }
@@ -146,7 +165,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl }) {
 <body>
   <div class="shell">
     <header class="masthead">
-      <a href="/" class="brand"><span class="mark" aria-hidden="true">’06</span>IIMA Class of 2006</a>
+      <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA Class of 2006</a>
       ${yearbookUrl ? `<a class="yearbook" href="${e(yearbookUrl)}">Submit yearbook entry</a>` : ''}
     </header>
     <main>

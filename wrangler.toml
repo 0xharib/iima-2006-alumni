@@ -1,9 +1,12 @@
 name = "iima-2006-alumni"
 main = "worker.mjs"
 compatibility_date = "2025-11-23"
+keep_vars = true
 
 [vars]
 ACCESS_MODE = "batch"
+SITE_ORIGIN = "https://iima-2006-alumni.arun-devanathan.workers.dev"
+LEGACY_YEARBOOK_URL = "https://iima-2006-reunion-yearbook.arun-devanathan.workers.dev"
 MAIL_FROM = "IIMA Class of 2006 Batch Admin <signin@iima-class-of-2006.in>"
 
 [[d1_databases]]

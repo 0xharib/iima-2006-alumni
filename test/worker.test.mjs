@@ -101,3 +101,25 @@ test('topics, memories, moderation and absence of private RSVP inference',async(
   assert.match(await body(await call('/reunion?status=declined',other)),/Test Classmate/);
   assert.doesNotMatch(await body(await call('/reunion?status=declined',other)),/Test Admin/);
 });
+
+test('signed-in home and profiles include published legacy content', async () => {
+  const {call,session,sqlite,env}=fixture();
+  sqlite.exec(`INSERT INTO submissions VALUES
+    ('memory-1',2,1,'memory','{"story":"A campus memory"}','2026-11-22');`);
+  sqlite.exec(readFileSync(new URL('../migrations/0002_publish_imports.sql',import.meta.url),'utf8'));
+  env.ACCESS_MODE='batch';
+  const viewer=await session(1,'aaa');
+  const home=await body(await call('/',viewer));
+  assert.match(home,/Twenty years on/);
+  assert.match(home,/A campus memory/);
+  assert.match(home,/\/media\/seed\/2/);
+  assert.match(home,/Photo gallery/);
+  const profile=await body(await call('/people/2',viewer));
+  assert.match(profile,/Owner yearbook answer/);
+  assert.match(profile,/A campus memory/);
+  assert.equal((await call('/media/yearbook/2/0',viewer)).status,200);
+  assert.equal((await call('/media/seed/2',viewer)).status,200);
+  assert.equal((await call('/media/yearbook/2/0')).status,303);
+  assert.equal((await call('/media/seed/2')).status,303);
+  assert.equal((await call('/campus/anything-else')).status,404);
+});
