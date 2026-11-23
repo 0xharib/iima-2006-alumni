@@ -1,0 +1,16 @@
+name = "iima-2006-alumni"
+main = "worker.mjs"
+compatibility_date = "2025-11-23"
+
+[vars]
+ACCESS_MODE = "pilot"
+MAIL_FROM = "IIMA Class of 2006 Batch Admin <signin@iima-class-of-2006.in>"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iima-2006-alumni"
+database_id = "65f8c7f3-44ae-455a-98d0-17dcd12bd1ca"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "iima-2006-alumni-media"
