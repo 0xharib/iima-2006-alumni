@@ -1,4 +1,4 @@
-import { render, page, escape, form, field } from './views.mjs';
+import { render, signIn, page, form, field } from './views.mjs';
 
 const encoder = new TextEncoder();
 const id = () => crypto.randomUUID();
@@ -24,7 +24,7 @@ export default {
       response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
       response.headers.set('Referrer-Policy','no-referrer');
-      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' https://archives.iima.ac.in; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
       return new Response('The site could not complete that request. Please try again.', {status:500});
@@ -69,21 +69,12 @@ async function route(req, env) {
     const key = Number(u.searchParams.get('id'));
     const selected = key && await one('SELECT id,name FROM roster WHERE id=?',key);
     const contact = selected && await rosterEmail(key);
-    let message = '';
-    if (selected) {
-      let address = '';
-      if (contact) {
-        const [local, domain] = contact.email.trim().split('@');
-        address = local.slice(0,Math.min(3,local.length-1))+'XXX@'+domain;
-      }
-      message = `<h2>${escape(selected.name)}</h2><p>${escape(address || 'No usable email on file')}</p>` +
-        (contact ? form('/request-link',field('id',key)+field('next',destination(u.searchParams.get('next'))),'Email me a sign-in link') : '');
-    }
-    return show('Twenty years on', `<p>IIM Ahmedabad · Class of 2006</p><h2>Identify yourself please</h2>
-      <label for="name-search">Search for your name</label><input id="name-search" autocomplete="off" data-next="${escape(destination(u.searchParams.get('next')))}">
-      <ul id="name-results" aria-live="polite"></ul><script src="/picker.js" defer></script>${message}
-      <p><a href="${mailHelp}">Wrong or inaccessible email? Contact Tahseen and Arun</a></p>
-      ${(intake || env.LEGACY_YEARBOOK_URL) ? `<p><a href="${escape(intake ? '/submit' : env.LEGACY_YEARBOOK_URL)}">Submit your yearbook entry</a></p>` : ''}`);
+    const [local, domain] = (contact?.email.trim() || '').split('@');
+    const maskedEmail = local && domain ? local.slice(0, Math.max(0, Math.min(3, local.length - 1))) + 'XXX@' + domain : '';
+    return signIn({
+      selected, maskedEmail, next: destination(u.searchParams.get('next')), mailHelp,
+      yearbookUrl: intake ? '/submit' : env.LEGACY_YEARBOOK_URL,
+    });
   }
   if (path === '/request-link' && post) {
     const f = await data(), key = Number(f.get('id'));

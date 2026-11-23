@@ -84,3 +84,94 @@ export const page={
   },
   attendancePreview(rows,csv){return `<p>${rows.length} RSVP updates.</p>${list(rows.map(r=>e(r.join(' · '))),'')}${form('/admin',field('action','attendance-apply')+field('rsvp',csv),'Apply import')}`;}
 };
+
+export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl }) {
+  const photoUrl = 'https://archives.iima.ac.in/public/convocation/groupphoto/2006.jpg';
+  const selection = selected ? `
+    <div class="selection">
+      <strong>${e(selected.name)}</strong>
+      <p>${e(maskedEmail || 'No usable email on file')}</p>
+      ${maskedEmail ? form('/request-link',field('id',selected.id)+field('next',next),'Email me a sign-in link') : ''}
+    </div>` : '';
+  return new Response(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · IIMA Class of 2006</title>
+  <style>
+    :root { color-scheme:light; --paper:#f6f4ef; --ink:#242721; --muted:#555a50; --accent:#873d31; --line:#dedbd3; font:16px/1.5 system-ui,sans-serif }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--paper); color:var(--ink) }
+    a { color:var(--accent); text-underline-offset:.2em }
+    :focus-visible { outline:3px solid #975044; outline-offset:4px }
+    .shell { max-width:1240px; margin:auto; padding:0 clamp(16px,5vw,64px) 48px }
+    .masthead { min-height:74px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line) }
+    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750; text-decoration:none }
+    .mark { display:grid; place-items:center; width:35px; height:35px; background:var(--accent); border-radius:9px; color:white; font-size:.76rem; letter-spacing:.03em }
+    .yearbook { font-size:.87rem; font-weight:650 }
+    .intro { padding:clamp(26px,5vw,58px) 0 clamp(20px,3vw,38px) }
+    h1,h2 { margin:0; line-height:1.08 }
+    h1 { font:500 clamp(2.9rem,8vw,6.4rem)/.97 Georgia,serif; letter-spacing:-.072em }
+    .layout { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr); align-items:start; gap:clamp(18px,3vw,36px) }
+    figure { margin:0; min-width:0 }
+    figure img { display:block; width:100%; height:auto; border-radius:17px; background:#e7e1d6 }
+    figcaption { margin:10px 2px 0; font-size:.8rem; color:var(--muted) }
+    .card { background:#fff; border:1px solid var(--line); border-radius:17px; padding:clamp(18px,3vw,32px); box-shadow:0 12px 32px #3024190a }
+    h2 { font-size:clamp(1.55rem,3vw,2rem); letter-spacing:-.045em }
+    p { margin:.65rem 0 }
+    .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
+    label { display:block; margin-top:20px; font-weight:650; font-size:.84rem }
+    .search { display:flex; align-items:center; gap:10px; border:1px solid #a9ada0; background:#fafaf8; border-radius:10px; padding:0 12px; margin-top:7px }
+    .search svg { flex:0 0 18px; color:var(--muted) }
+    .search:focus-within { outline:2px solid var(--accent); outline-offset:2px }
+    input { width:100%; min-width:0; outline:none; border:0; background:transparent; padding:12px 0; color:var(--ink); font:inherit }
+    input:focus-visible { outline:none }
+    ul { list-style:none; margin:6px 0 0; padding:0; font-size:.92rem }
+    ul:empty { display:none }
+    li a { display:block; padding:7px 9px; border-radius:7px }
+    li a:hover { background:#f4eee9 }
+    .selection { margin-top:16px; border-top:1px solid var(--line); padding-top:16px; overflow-wrap:anywhere }
+    .selection p { margin:.15rem 0 .7rem }
+    button { padding:10px 15px; border:0; border-radius:9px; background:var(--accent); color:white; font:650 .9rem/1.4 system-ui,sans-serif; cursor:pointer }
+    button:hover { background:#703126 }
+    .help { margin:20px 0 0 }
+    @media(max-width:750px) {
+      .masthead { min-height:60px }
+      .layout { grid-template-columns:1fr }
+      figure img { max-height:32vh; object-fit:contain; background:#e9e4d9 }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <a href="/" class="brand"><span class="mark" aria-hidden="true">’06</span>IIMA Class of 2006</a>
+      ${yearbookUrl ? `<a class="yearbook" href="${e(yearbookUrl)}">Submit yearbook entry</a>` : ''}
+    </header>
+    <main>
+      <div class="intro"><h1>Twenty years on.</h1></div>
+      <div class="layout">
+        <figure>
+          <img src="${photoUrl}" alt="IIM Ahmedabad Class of 2006 convocation group photograph" fetchpriority="high">
+          <figcaption>Class of 2006 convocation · <a href="${photoUrl}">IIMA Archives</a></figcaption>
+        </figure>
+        <section class="card" aria-labelledby="sign-in-title">
+          <h2 id="sign-in-title">Sign in</h2>
+          <p class="instructions">Find your name and we’ll send a sign-in link to your email on the batch roster.</p>
+          <label for="name-search">Find your name</label>
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 4.2 4.2"/></svg>
+            <input id="name-search" type="search" autocomplete="off" placeholder="Start typing your name" data-next="${e(next)}">
+          </div>
+          <ul id="name-results" aria-live="polite"></ul>
+          ${selection}
+          <p class="help"><a href="${e(mailHelp)}">Wrong or inaccessible email? Contact Tahseen and Arun</a></p>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/picker.js" defer></script>
+</body>
+</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+}
