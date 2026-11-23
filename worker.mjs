@@ -55,6 +55,13 @@ async function route(req, env) {
   const token = req.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-alumni=([a-f0-9-]+)/)?.[1];
   const member = token && await one(`SELECT m.*,r.name FROM sessions s JOIN members m ON m.id=s.member
     JOIN roster r ON r.id=m.id WHERE s.token=? AND s.expires>? AND m.suspended=0 AND (?=0 OR m.invited=1 OR m.role='admin')`,await hash(token),now(),+pilot);
+  const visibleSeed = "(s.review_status='approved' OR (?=1 AND s.review_status='pending'))";
+  const portrait = `coalesce((SELECT 'yearbook/'||y.member||'/'||j.key FROM yearbook_public y,json_each(y.images) j
+    JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
+    WHERE y.member=r.id ORDER BY ph.slot='now' DESC,j.key LIMIT 1),
+    CASE WHEN s.portrait_key IS NOT NULL THEN 'seed/'||r.id END)`;
+  const seedJoin = `LEFT JOIN profile_seeds s ON s.roster_id=r.id AND ${visibleSeed}`;
+  if (member) member.portrait = (await one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,member.id))?.portrait;
   const show = (title,body) => render(title,body,member);
   const data = () => req.formData();
   const mailHelp = 'mailto:s.tahseen.q@gmail.com,arun.devanathan@gmail.com?subject=IIMA%20Class%20of%202006%20roster%20email&body=Name%3A%0ADorm%20Number%3A%0ADorm%20Name%3A%0ACorrect%20Email%20ID%3A';
@@ -66,6 +73,9 @@ async function route(req, env) {
       hits=CASE WHEN window=excluded.window THEN hits+1 ELSE 1 END,window=excluded.window RETURNING hits`,key,window);
     return row.hits<=maximum;
   };
+  if (path === '/verify.js' && !post) return new Response(
+    "const form = document.querySelector('#verify-form'); const verify = () => form.requestSubmit(); if (document.prerendering) document.addEventListener('prerenderingchange', verify, {once:true}); else verify();",
+    {headers:{'Content-Type':'text/javascript; charset=utf-8'}});
   if (path === '/picker.js') return new Response(page.pickerScript,{headers:{'Content-Type':'text/javascript; charset=utf-8'}});
   if (path === '/names' && !post) {
     const query = (u.searchParams.get('q') || '').trim().slice(0,80);
@@ -75,16 +85,20 @@ async function route(req, env) {
   const intake = env.INTAKE_ENABLED === 'true';
   if (path === '/submit' && !intake && env.LEGACY_YEARBOOK_URL) return redirect(env.LEGACY_YEARBOOK_URL);
   if (path === '/submit' && intake && !post && !member) return redirect('/signin?next=%2Fsubmit');
-  if (path === '/signin' || (!member && path === '/')) {
-    const key = Number(u.searchParams.get('id'));
-    const selected = key && await one('SELECT id,name FROM roster WHERE id=?',key);
+  const signInPage = async (key, next, feedback = '') => {
+    const selected = Number.isSafeInteger(key) && key>0 && await one('SELECT id,name FROM roster WHERE id=?',key);
     const contact = selected && await rosterEmail(key);
     const [local, domain] = (contact?.email?.trim() || '').split('@');
-    const maskedEmail = local && domain ? local.slice(0, Math.max(0, Math.min(3, local.length - 1))) + 'XXX@' + domain : '';
-    return signIn({
-      selected, maskedEmail, next: destination(u.searchParams.get('next')), mailHelp,
-      yearbookUrl: intake ? '/submit' : env.LEGACY_YEARBOOK_URL,
-    });
+    const chars = Array.from(local);
+    const edge = Math.min(2, Math.floor((chars.length-1)/2));
+    const maskedEmail = local && domain ? chars.slice(0,edge).join('') + '•'.repeat(chars.length-2*edge)
+      + chars.slice(chars.length-edge).join('') + '@' + domain : '';
+    return signIn({selected, maskedEmail, next, mailHelp, feedback,
+      yearbookUrl: intake ? '/submit' : env.LEGACY_YEARBOOK_URL});
+  };
+  if (!post && (path === '/signin' || (!member && path === '/'))) {
+    if (member) return redirect(destination(u.searchParams.get('next')));
+    return signInPage(Number(u.searchParams.get('id')),destination(u.searchParams.get('next')));
   }
   if (path === '/request-link' && post) {
     const f = await data(), key = Number(f.get('id'));
@@ -92,19 +106,23 @@ async function route(req, env) {
     const ok = await limit('ip:'+await hash(req.headers.get('CF-Connecting-IP') || 'local'),30,12);
     const allowed = ok && await limit('mail:'+key,30,3);
     const contact = allowed && await rosterEmail(key);
+    const next = destination(f.get('next'));
     if (contact && env.RESEND_API_KEY) {
       const raw = id()+id();
       await run('INSERT INTO login_links VALUES(?,?,?,?)',await hash(raw),key,now()+1200000,destination(f.get('next')));
       const link = new URL('/verify?token='+raw,env.SITE_ORIGIN || u.origin);
       const mail = await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+env.RESEND_API_KEY,'Content-Type':'application/json'},
         body:JSON.stringify({from:env.MAIL_FROM,to:[contact.email.trim()],subject:'Sign in to IIMA Class of 2006',text:'Open this link within 20 minutes to sign in: '+link.href})});
-      if (!mail.ok) return show('Email unavailable','<p>Please try again later or contact the batch admins.</p>');
+      if (!mail.ok) {
+        await run('DELETE FROM login_links WHERE token=?',await hash(raw));
+        return signInPage(key,next,'Email could not be sent. Please try again later.');
+      }
     }
-    if (!env.RESEND_API_KEY) return show('Email unavailable','<p>Sign-in email is being configured.</p>');
-    return show('Check your inbox','<p>If the roster address can receive mail, your sign-in link is on its way.</p>');
+    if (!env.RESEND_API_KEY) return signInPage(key,next,'Sign-in email is being configured.');
+    return signInPage(key,next,allowed && contact ? 'Check your inbox for your sign-in link.' : 'If a link was requested recently, check your inbox or try again later.');
   }
   if (path === '/verify') {
-    if (!post) return show('Confirm sign-in',form('/verify',field('token',u.searchParams.get('token') || ''),'Sign in'));
+    if (!post) return show('Signing in',form('/verify',field('token',u.searchParams.get('token') || ''),'Continue','id="verify-form"')+'<script src="/verify.js" defer></script>');
     const raw = str(await data(),'token',100), digest = await hash(raw);
     const link = await one('DELETE FROM login_links WHERE token=? AND expires>? RETURNING member,destination',digest,now());
     if (!link) return show('Link expired','<p><a href="/signin">Request another link</a></p>');
@@ -118,10 +136,10 @@ async function route(req, env) {
   if (!member) return redirect('/signin?next='+encode(path+u.search));
   const me = member.id;
   const admin = member.role === 'admin';
-  const visibleSeed = "(s.review_status='approved' OR (?=1 AND s.review_status='pending'))";
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
   const postQuery = `SELECT p.*,r.name AS author_name,t.title AS topic_title,subject.name AS subject_name,
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
+    (SELECT a.id FROM uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
     (SELECT count(*) FROM likes l WHERE l.post=p.id) AS likes,
     (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked
     FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject`;
@@ -169,38 +187,51 @@ async function route(req, env) {
     await run('DELETE FROM sessions WHERE token=?',await hash(token));
     return redirect('/',{'Set-Cookie':cookie('',0)});
   }
+  if (path==='/memories') {
+    const before = Number(u.searchParams.get('before')) || now()+1;
+    const cursor = u.searchParams.get('cursor') || '';
+    const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
+    const last = rows.at(-1);
+    const next = last && rows.length===25 ? '/memories?before='+last.created+'&cursor='+encode(last.id) : '';
+    return show('Memories',page.memories(rows,next,path+u.search));
+  }
+  const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
+    + 2 * EXISTS(SELECT 1 FROM posts p WHERE p.subject=r.id AND p.author<>r.id AND ${postVisible}
+      AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id))
+    + (${portrait} IS NOT NULL))`;
   if (path==='/') {
     const before = Number(u.searchParams.get('before')) || now()+1;
     const cursor = u.searchParams.get('cursor') || '';
     const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
     const last = rows.at(-1);
     const next = last && rows.length===25 ? '/?before='+last.created+'&cursor='+encode(last.id) : '';
-    const people = await all(`SELECT r.id,r.name,s.portrait_key FROM roster r
-      LEFT JOIN profile_seeds s ON s.roster_id=r.id AND ${visibleSeed}
-      WHERE r.id<>? ORDER BY s.portrait_key IS NULL, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
+    const people = await all(`SELECT r.id,r.name,${portrait} AS portrait FROM roster r ${seedJoin}
+      WHERE r.id<>? ORDER BY ${completeness} DESC, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
       +pilot,me,Math.floor(now()/86400000)*351);
-    return render('Twenty years on',page.home(rows,next,people,member),member,{home:true});
+    return render('Twenty years on',page.home(rows,next,people,member,path+u.search),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
     const q = (u.searchParams.get('q')||'').slice(0,100), status = u.searchParams.get('status')||'';
-    const rows = await all(`SELECT r.id,r.name,r.dorm,r.nickname,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
-      FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id
-      WHERE instr(lower(r.name||' '||r.nickname||' '||r.dorm),lower(?))>0 AND (?='' OR (coalesce(m.attendance_private,0)=0 AND a.status=?)) ORDER BY r.name`,q,status,status);
+    const rows = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
+      FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin}
+      WHERE instr(lower(r.name||' '||coalesce(r.nickname,'')||' '||coalesce(r.dorm,'')),lower(?))>0
+      AND (?='' OR (coalesce(m.attendance_private,0)=0 AND coalesce(a.status,'unknown')=?))
+      ORDER BY ${completeness} DESC,r.name`,+pilot,q,status,status);
     return show(path==='/reunion'?'December reunion':'Classmates',page.directory(rows,attendanceNames,q,status));
   }
   const person = path.match(/^\/people\/(\d+)$/);
   if (person) {
     const key = Number(person[1]);
-    const row = await one(`SELECT r.*,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
-      FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id WHERE r.id=?`,key);
+    const row = await one(`SELECT r.*,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
+      FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
     const seed = await one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot);
     const imported = parse(seed?.source_data);
     const published = await one('SELECT fields FROM yearbook_public WHERE member=?',key);
     const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=?',key)).map(r=>[r.field,r.value]));
     const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
-    return show(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
-      await posts('p.author=? OR (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status=\'accepted\')',[key,key,key]),me,pilot));
+    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
+      await posts('p.author=? OR (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status=\'accepted\')',[key,key,key]),me,pilot),member,{home:true});
   }
   if (path==='/profile') {
     if (!post) {
@@ -274,7 +305,7 @@ async function route(req, env) {
   }
   if (path==='/gallery') {
     const personId = u.searchParams.has('person') ? Number(u.searchParams.get('person')) : null;
-    return show('Gallery',page.images(await gallery(personId)));
+    return show('Gallery',page.gallery(await gallery(personId)));
   }
   if (path==='/topics') {
     const q = (u.searchParams.get('q')||'').slice(0,100);
@@ -375,7 +406,8 @@ async function route(req, env) {
       const body = str(f,'body');
       if (body) await run('UPDATE posts SET body=? WHERE id=?',body,key);
     } else return invalid('Action unavailable.');
-    return redirect(path);
+    const back = destination(f.get('return'));
+    return redirect(action==='like' && f.has('return') ? back : path);
   }
   if (path==='/report' && post) {
     const f = await data(), target = str(f,'target',100), type = str(f,'type',20), reason = str(f,'reason',1000);
