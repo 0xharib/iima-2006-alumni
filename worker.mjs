@@ -69,7 +69,7 @@ async function route(req, env) {
     const key = Number(u.searchParams.get('id'));
     const selected = key && await one('SELECT id,name FROM roster WHERE id=?',key);
     const contact = selected && await rosterEmail(key);
-    const [local, domain] = (contact?.email.trim() || '').split('@');
+    const [local, domain] = (contact?.email?.trim() || '').split('@');
     const maskedEmail = local && domain ? local.slice(0, Math.max(0, Math.min(3, local.length - 1))) + 'XXX@' + domain : '';
     return signIn({
       selected, maskedEmail, next: destination(u.searchParams.get('next')), mailHelp,

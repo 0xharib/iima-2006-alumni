@@ -64,6 +64,7 @@ test('pilot access, combined profile, selective yearbook and authorized media',a
   const {call,session,env}=fixture();
   const admin=await session(1,'aaa'), owner=await session(2,'bbb');
   assert.equal((await call('/people/2')).status,303);
+  assert.match(await body(await call('/')), /2006[.]jpg/);
   assert.match(await body(await call('/signin?id=2')),/claXXX@example.test/);
   assert.match(await body(await call('/people/2',admin)),/An imported bio/);
   assert.equal((await call('/media/seed/2',admin)).status,200);
