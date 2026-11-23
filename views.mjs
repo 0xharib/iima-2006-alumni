@@ -34,10 +34,8 @@ export function render(title,body,member,{home=false}={}) {
   .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5}
   .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
-  .profile-hero{display:grid;grid-template-columns:minmax(0,16rem) minmax(0,1fr);gap:clamp(1rem,5vw,3rem);align-items:center;background:var(--tile);border:1px solid var(--line);padding:clamp(1rem,4vw,2.5rem);margin:1.25rem 0;border-radius:1.5rem}
-  .profile-hero h1{margin:.2em 0;font-size:clamp(2rem,6vw,4rem)}.profile-hero img,.profile-hero .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:1rem;font-size:4rem}.profile-content{max-width:46rem;margin:auto}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
-  @media(max-width:600px){.profile-hero{grid-template-columns:1fr}.profile-hero img,.profile-hero .initials{max-width:18rem}.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
+  @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
   </style><body${home?' class="home"':''}><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
@@ -85,13 +83,52 @@ export const page={
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
   directory(rows,statuses,q,status){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}<button>Search</button></form>
     ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div><strong>${e(row.name)}</strong>${badge(row.dorm)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:'<p>No classmates match.</p>'}`;},
-  person(row,status,details,photos,stories,me,pilot){return `<section class="profile-hero">${portrait(row,false)}<div><h1>${e(row.name)}</h1>
-    <p>${e([details.dorm,details.city,details.company].filter(Boolean).join(' · '))}</p>${badge(status)}
-    <div class="memory-nav">${me===row.id?link('/profile','Edit profile')+link('/yearbook','Review yearbook'):link('/compose?person='+row.id,'Add a memory')}</div></div></section>
-    <div class="profile-content">${pilot?'<p>Profiles are being checked during the pilot.</p>':''}${/^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')?`<p><a class="soft-link" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn profile ↗</a></p>`:''}
-    <dl>${Object.entries(details).filter(([,value])=>value).map(([key,value])=>`<dt>${e(labelFor(key))}</dt><dd>${e(value)}</dd>`).join('')}</dl>
-    <h2>Photos</h2>${images(photos)}<h2>Memories from classmates</h2>${cards(stories.filter(p=>p.author!==row.id),'/people/'+row.id)}
-    <h2>Memories shared</h2>${cards(stories.filter(p=>p.author===row.id),'/people/'+row.id)}${report('profile',row.id)}</div>`;},
+  person(row,status,details,photos,stories,me,pilot){
+    const own = me === row.id;
+    const profileUrl = '/people/'+row.id;
+    const received = stories.filter(post=>post.author!==row.id);
+    const shared = stories.filter(post=>post.author===row.id);
+    const facts = ['dorm','nickname','city','country','company','education','section','family'];
+    const hasValue = key => typeof details[key]==='string' && details[key].trim();
+    const factKeys = facts.filter(hasValue);
+    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&hasValue(key));
+    const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
+      ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
+    const entry = key => `<div><dt>${e(labelFor(key))}</dt><dd>${e(details[key])}</dd></div>`;
+    return `<div class="alumni-profile">
+      <header class="profile-header">
+        <div class="profile-cover"></div>
+        <div class="profile-identity">
+          <div class="profile-portrait">${portrait(row,false)}</div>
+          <div class="profile-name"><h1>${e(row.name)}</h1>
+            ${hasValue('dorm')||hasValue('city')?`<p>${e([details.dorm,details.city].filter(Boolean).join(' · '))}</p>`:''}
+            ${status?`<span class="profile-status">${e(status)}</span>`:''}
+          </div>
+          <div class="profile-actions">
+            ${own?`<a class="profile-primary" href="/profile">Edit profile</a><a class="profile-secondary" href="/yearbook">Review yearbook</a>`
+              : `<a class="profile-primary" href="/compose?person=${row.id}">Add a memory</a>`}
+            ${linkedin}
+          </div>
+        </div>
+      </header>
+      ${pilot?'<p class="profile-pilot">Profiles are being checked during the pilot.</p>':''}
+      <div class="profile-layout${factKeys.length||photos.length?'':' profile-layout-wide'}">
+        ${factKeys.length||photos.length?`<aside class="profile-sidebar">
+          ${factKeys.length?`<section class="profile-section"><h2>About</h2><dl class="profile-facts">${factKeys.map(entry).join('')}</dl></section>`:''}
+          ${photos.length?`<section class="profile-section profile-photos"><div class="profile-section-head"><h2>Photos</h2>
+            <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
+        </aside>`:''}
+        <div class="profile-main">
+          ${entryKeys.length?`<section class="profile-section"><h2>Yearbook</h2><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
+          <section class="profile-section profile-memories"><h2>Memories from classmates</h2>
+            ${received.length?cards(received,profileUrl):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
+          </section>
+          ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${cards(shared,profileUrl)}</section>`:''}
+        </div>
+      </div>
+      <div class="profile-report">${report('profile',row.id)}</div>
+    </div>`;
+  },
   editProfile(fields,member){const keys=['life','city','company','education','dorm','family','nickname'];
     return form('/profile',keys.map(k=>area(k,labelFor(k),fields[k])+checkbox('hide_'+k,'Hide '+labelFor(k),fields[k]==='')).join('')+checkbox('attendance_private','Hide my attendance status',!!member.attendance_private),'Save profile');},
   intake(roster,me,payload,keys) {

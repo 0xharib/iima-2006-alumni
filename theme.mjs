@@ -11,4 +11,30 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .home-columns{grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);align-items:start;gap:clamp(20px,4vw,48px)}.home-columns section{min-width:0}.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.section-head a{color:var(--brick);font-weight:700;font-size:.83rem}.section-head h2{margin:.25rem 0 .6rem;font-size:clamp(1.6rem,3vw,2.15rem)}.people-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.person-tile{display:block;background:var(--tile);border:1px solid var(--line);border-radius:14px;overflow:hidden}.person-tile img,.person-tile .initials{aspect-ratio:1.18;object-fit:cover;object-position:center 32%;border-radius:0}.person-tile .initials{display:grid;place-items:center;background:#e8dbcf;color:#6f4036;font-size:2rem}.person-tile strong{display:block;padding:.55rem .72rem;font-size:.91rem}.home article{margin:.5rem 0 .85rem}.home article .story{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}.soft-link{display:inline-block;background:#eae3d9;padding:.55rem .85rem;border-radius:9px;font-weight:700;font-size:.87rem}.feed-photos img{max-height:238px;object-fit:cover}
 @media(max-width:760px){.mast{padding-block:10px}.mast nav{width:100%;overflow-x:auto;flex-wrap:nowrap;white-space:nowrap;padding:2px 2px 5px}.home-columns{grid-template-columns:1fr}.home-links{gap:8px;margin-bottom:25px}.shortcut{min-height:135px;padding:12px}.shortcut strong{font-size:.94rem}.shortcut small{font-size:.75rem}.campus-hero{border-radius:18px;background-position:55% center}.people-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:390px){.home-links{grid-template-columns:1fr}.shortcut{min-height:87px}.people-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.alumni-profile{--profile-card:#fffefa;--profile-border:#e8e0d5;max-width:1100px;margin:0 auto 2rem}
+.profile-header,.profile-section{background:var(--profile-card);border:1px solid var(--profile-border);border-radius:22px;box-shadow:0 7px 26px #2c1d1208}
+.profile-header{overflow:hidden}
+.profile-cover{height:clamp(125px,22vw,260px);background:#38251e linear-gradient(110deg,#301b18aa,#42231d12);background-image:linear-gradient(110deg,#301b18a8,#42231d18),url('/campus/steps.webp');background-size:cover;background-position:center 53%}
+.profile-identity{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:1.4rem;align-items:center;padding:0 clamp(1rem,3vw,2rem) 1.5rem}
+.profile-portrait{position:relative;margin-top:-3.6rem;width:clamp(105px,15vw,177px);aspect-ratio:1;padding:5px;background:var(--profile-card);border-radius:25px;box-shadow:0 8px 24px #23130e28}
+.profile-portrait img,.profile-portrait .initials{display:grid;place-items:center;width:100%;height:100%;aspect-ratio:1;object-fit:cover;object-position:center 34%;border-radius:20px;background:#e9d8c9;color:#704133;font-size:clamp(2.5rem,6vw,4.8rem);font-weight:700}
+.alumni-profile .profile-name h1{font:750 clamp(1.8rem,4.6vw,3.4rem)/1.07 system-ui,sans-serif;letter-spacing:-.055em;margin:.65rem 0 .25rem;overflow-wrap:anywhere}
+.profile-name p,.profile-pilot,.profile-empty{color:var(--muted);margin:.25rem 0}
+.profile-status{display:inline-block;margin-top:.45rem;padding:.22rem .55rem;background:#f1e9de;border-radius:99px;font-size:.78rem;font-weight:650}
+.profile-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;padding-top:.7rem}
+.profile-actions a{display:inline-flex;align-items:center;padding:.57rem .82rem;border-radius:9px;font-size:.86rem;font-weight:700;min-height:42px}
+.profile-primary{background:var(--brick);color:#fff}.profile-primary:hover{background:#703027;color:#fff}.profile-secondary{border:1px solid var(--profile-border);background:#f7f3ed}
+.profile-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.8fr);gap:1rem;margin-top:1rem;align-items:start}
+.profile-sidebar,.profile-main{display:grid;gap:1rem;min-width:0}.profile-layout-wide{grid-template-columns:minmax(0,1fr)}
+.profile-section{padding:clamp(1rem,2.8vw,1.65rem);min-width:0}
+.profile-section h2{font:750 clamp(1.15rem,2.4vw,1.45rem)/1.2 system-ui,sans-serif;letter-spacing:-.035em;margin:0 0 1rem}
+.profile-section-head{display:flex;justify-content:space-between;align-items:baseline;gap:.75rem}.profile-section-head a{font-size:.85rem;font-weight:700;color:var(--brick)}
+.profile-facts,.profile-entry{margin:0;display:grid;gap:1rem}.profile-facts{grid-template-columns:repeat(auto-fit,minmax(min(115px,100%),1fr))}
+.profile-facts dt,.profile-entry dt{font-size:.78rem;color:var(--muted);margin-bottom:.18rem}.profile-facts dd,.profile-entry dd{margin:0}
+.profile-entry>div+div{border-top:1px solid var(--profile-border);padding-top:1rem}.profile-entry dd{line-height:1.65}
+.profile-photos .photos{grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.profile-photos img{aspect-ratio:1}.profile-photos figcaption{overflow-wrap:anywhere}
+.alumni-profile .profile-memories article{background:#faf6f0;box-shadow:none;border-color:var(--profile-border)}.alumni-profile .profile-memories .story{display:block;overflow:visible}
+.profile-report{color:var(--muted);font-size:.86rem;margin-top:1rem}
+@media(max-width:730px){.profile-identity{grid-template-columns:auto minmax(0,1fr);column-gap:1rem;row-gap:.55rem}.profile-portrait{margin-top:-2rem}.profile-actions{grid-column:1/-1;justify-content:start}.profile-layout{grid-template-columns:1fr}.profile-sidebar{grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))}}
 `;
