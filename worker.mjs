@@ -264,9 +264,13 @@ async function route(req, env) {
     + (${portrait} IS NOT NULL))`;
   if (path==='/') {
     const {rows,next} = await feed(9,true);
+    const rotation=Math.floor(now()/21600000);
+    const selectionSeed=parseInt((await hash(me+':'+rotation)).slice(0,8),16);
     const people = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
-      WHERE r.id<>? ORDER BY ${completeness} DESC, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
-      +pilot,me,Math.floor(now()/86400000)*351);
+      WHERE r.id<>? ORDER BY (
+        ${completeness} * 14 + (${portrait} IS NOT NULL) * 48
+        + (((r.id * r.id * 7919 + r.id * (1 + ? % 104729)) % 65521) % 100)
+      ) DESC,r.id LIMIT 6`,+pilot,me,selectionSeed);
     return render('Twenty years on',page.home(rows,people,next,id()),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {

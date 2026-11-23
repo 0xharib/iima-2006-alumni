@@ -114,10 +114,10 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 
 .member-site{min-height:100vh;background:#26201c linear-gradient(#1e1712aa,#1e1712dc),url('/campus/arches.webp') center / cover fixed}
 .member-site main>h1,.member-site .memory-toolbar,.member-site .feed-more{color:#fff6eb}
-.member-site main:has(>.directory-controls),.member-site main:has(>.memory-toolbar){color:#fff6eb}
+.member-site main:has(>.classmates-directory),.member-site main:has(>.memory-toolbar){color:#fff6eb}
 .member-site .directory-card{color:#251a16}
 .member-site main:has(>.alumni-profile)>h1{display:none}
-.member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.directory-controls)){background:#f5f3eef2;margin-block:1rem;border-radius:1rem}
+.member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.classmates-directory)){background:#f5f3eef2;margin-block:1rem;border-radius:1rem}
 .member-site .alumni-profile,.member-site .collage-card{color:#251a16}
 .alumni-profile .profile-report{color:#fff6eb}
 .editable-field:has(> .inline-edit[open])>.field-display{display:none}
@@ -133,4 +133,13 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .share-memory{display:inline-block;padding:.65rem 1rem;border-radius:.65rem;text-align:center}
 .memory-inline [data-comments] p{background:#f3e8de;padding:.5rem .75rem;border-radius:.9rem;margin:.35rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:600px){.memory-toolbar{align-items:stretch;flex-direction:column}.memory-toolbar form{width:100%}.share-memory{align-self:flex-start}.member-site{background-attachment:scroll}}
+
+.classmates-directory .directory-controls{background:#fff8ef;color:#2b1b15;border:1px solid #e4d4c5;border-radius:.8rem;padding:.8rem 1rem}
+.classmates-directory .directory-controls label{margin:0}
+.classmates-directory .directory-controls button{margin:0}
+.classmates-directory>p{color:#fff6eb}
+[data-feed]>.memory-collage{margin:0}
+.profile-memories .memory-collage{columns:2}
+.profile-memories .memory-collage .collage-card{margin:0 0 .8rem}
+@media(max-width:580px){.profile-memories .memory-collage{columns:1}}
 `;

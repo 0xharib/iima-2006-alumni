@@ -51,9 +51,11 @@ const memoryCards = (rows,priority=false) => rows.flatMap((post,index)=>{
     <div class="memory-result" role="status"></div>
   </article>`);
 }).join('');
-const collage=(rows,next,priority=false)=>`<div class="memory-collage" data-feed>${memoryCards(rows,priority)||'<p>No memories here yet.</p>'}</div>
+const memoryDialog=()=>`<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
+const memoryBatch=(rows,priority=false)=>`<div class="memory-collage">${memoryCards(rows,priority)||'<p>No memories here yet.</p>'}</div>`;
+const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,priority)}</div>
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
-<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
+${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
   const nav=member?`<nav aria-label="Main navigation">${link('/','Home')}${link('/memories','Memories')}${link('/reunion','Reunion')}
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
@@ -68,7 +70,7 @@ export function render(title,body,member,{home=false}={}) {
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=2" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=3" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
   socialScript,
@@ -113,11 +115,10 @@ export const page={
     <dialog class="memory-dialog compose-dialog" aria-label="Share a memory">${icon('close','Close','data-close')}<h2>Share a memory</h2>${page.compose(key)}</dialog>`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
   memoryCards,
-  directory(rows,statuses,q,status,dorms,dorm){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}<button>Apply filters</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}`;},
+  directory(rows,statuses,q,status,dorms,dorm){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}<button>Search</button></form>
+    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
   person(row,status,details,photos,stories,me,pilot){
     const own = me === row.id;
-    const profileUrl = '/people/'+row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
@@ -164,11 +165,12 @@ export const page={
         <div class="profile-main">
           ${entryKeys.length?`<section class="profile-section"><h2>Yearbook</h2><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           <section class="profile-section profile-memories"><h2>Memories from classmates</h2>
-            ${received.length?cards(received,profileUrl):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
+            ${received.length?memoryBatch(received):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
           </section>
-          ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${cards(shared,profileUrl)}</section>`:''}
+          ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${memoryBatch(shared)}</section>`:''}
         </div>
       </div>
+      ${memoryDialog()}
       <div class="profile-report">${report('profile',row.id)}</div>
     </div>`;
   },

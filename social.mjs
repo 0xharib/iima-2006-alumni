@@ -1,5 +1,13 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  const feed=document.querySelector('[data-feed]');
+  const addBatch=(html,prepend=false)=>{
+    const batch=document.createElement('div');
+    batch.className='memory-collage';
+    batch.innerHTML=html;
+    if(prepend)feed.prepend(batch);
+    else feed.append(batch);
+  };
   const next=document.querySelector('[data-feed-next]');
   if(next&&'IntersectionObserver' in window){
     let loading=false;
@@ -17,7 +25,7 @@ export const socialScript = String.raw`
         const response=await fetch(url);
         if(!response.ok)throw new Error();
         const items=await response.json();
-        document.querySelector('[data-feed]').insertAdjacentHTML('beforeend',items.html);
+        addBatch(items.html);
         if(items.next){next.href=items.next;next.classList.add('auto-feed');observer.observe(next);}
         else next.remove();
       }catch{next.classList.remove('auto-feed');next.textContent='Retry loading memories';}
@@ -40,6 +48,16 @@ export const socialScript = String.raw`
     close.type='button';close.dataset.removeTopic='';close.textContent='×';
     close.setAttribute('aria-label','Remove '+label);
     chip.append(field,name,close);list.append(chip);
+  };
+  const likeRequests=new Set();
+  const updateLike=(id,liked,likes)=>{
+    for(const card of document.querySelectorAll('[data-post="'+CSS.escape(id)+'"]')){
+      const control=card.querySelector('[data-like]');
+      control.setAttribute('aria-pressed',String(liked));
+      control.setAttribute('aria-label',liked?'Unlike':'Like');
+      control.title=liked?'Unlike':'Like';
+      card.querySelector('[data-count]').textContent=likes||'';
+    }
   };
   const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
   async function send(url,data){
@@ -88,19 +106,22 @@ export const socialScript = String.raw`
         dialog.querySelector('[data-dialog-content]').replaceChildren(copy);
         dialog.showModal();
       } else if(button.matches('[data-like]')){
-        button.disabled=true;
+        const id=card.dataset.post;
+        if(likeRequests.has(id))return;
+        const previous=button.getAttribute('aria-pressed')==='true';
+        const count=Number(card.querySelector('[data-count]').textContent)||0;
+        likeRequests.add(id);
+        message(card,'');
+        updateLike(id,!previous,Math.max(0,count+(previous?-1:1)));
         try {
           const data=new FormData();
-          data.set('action','like');data.set('liked',button.getAttribute('aria-pressed')==='true'?'0':'1');
+          data.set('action','like');data.set('liked',previous?'0':'1');
           const {liked,likes}=await (await send(path(card),data)).json();
-          for(const other of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
-            const control=other.querySelector('[data-like]');
-            control.setAttribute('aria-pressed',String(liked));
-            control.setAttribute('aria-label',liked?'Unlike':'Like');
-            control.title=liked?'Unlike':'Like';
-            other.querySelector('[data-count]').textContent=likes||'';
-          }
-        } finally {button.disabled=false;}
+          updateLike(id,liked,likes);
+        } catch(error) {
+          updateLike(id,previous,count);
+          throw error;
+        } finally {likeRequests.delete(id);}
       } else if(button.matches('[data-panel]')){
         const panel=card.querySelector('[data-panel-content="'+button.dataset.panel+'"]');
         panel.hidden=!panel.hidden;
@@ -161,6 +182,7 @@ export const socialScript = String.raw`
     } catch(error){if(input.value.trim()===q)results.textContent=error.message;}
   });
   document.addEventListener('change',event=>{
+    if(event.target.matches('[data-directory-filters] select'))event.target.form.requestSubmit();
     if(event.target.matches('[data-profile-edit] input[type=file]')&&event.target.files.length)event.target.form.requestSubmit();
   });
   document.addEventListener('submit',async event=>{
@@ -176,9 +198,8 @@ export const socialScript = String.raw`
         const response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{Accept:'application/json'}});
         if(!response.ok)throw new Error(await response.text());
         const result=await response.json();
-        const feed=document.querySelector('[data-feed]');
         if(!feed.querySelector('[data-post]'))feed.replaceChildren();
-        feed.insertAdjacentHTML('afterbegin',result.html);
+        addBatch(result.html,true);
         form.reset();
         form.querySelector('[data-topic-chips]').replaceChildren();
         form.querySelector('[data-target-results]').replaceChildren();

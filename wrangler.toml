@@ -5,7 +5,7 @@ keep_vars = true
 
 [vars]
 ACCESS_MODE = "batch"
-SITE_ORIGIN = "https://iima-2006-alumni.arun-devanathan.workers.dev"
+SITE_ORIGIN = "https://iima-class-of-2006.in"
 LEGACY_YEARBOOK_URL = "https://iima-2006-reunion-yearbook.arun-devanathan.workers.dev"
 MAIL_FROM = "IIMA Class of 2006 Batch Admin <signin@iima-class-of-2006.in>"
 
