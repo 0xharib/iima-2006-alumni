@@ -37,4 +37,56 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .alumni-profile .profile-memories article{background:#faf6f0;box-shadow:none;border-color:var(--profile-border)}.alumni-profile .profile-memories .story{display:block;overflow:visible}
 .profile-report{color:var(--muted);font-size:.86rem;margin-top:1rem}
 @media(max-width:730px){.profile-identity{grid-template-columns:auto minmax(0,1fr);column-gap:1rem;row-gap:.55rem}.profile-portrait{margin-top:-2rem}.profile-actions{grid-column:1/-1;justify-content:start}.profile-layout{grid-template-columns:1fr}.profile-sidebar{grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))}}
+
+[hidden]{display:none!important}
+.wordmark img{background:transparent;mix-blend-mode:multiply}
+.home:has(.alumni-home) main{max-width:none;padding:0}
+.alumni-home{background:#211812;color:#fff7ed}
+.alumni-home .campus-hero{min-height:calc(100svh - 75px);border-radius:0;background-position:center;padding:clamp(24px,7vw,110px)}
+.alumni-home .hero-actions{margin-top:1.6rem}
+.alumni-home .section-head a{color:#ffe1c5}
+.home-classmates,.home-memories{padding:clamp(24px,5vw,70px) clamp(16px,6vw,92px);background-size:cover;background-position:center}
+.home-classmates{background-image:linear-gradient(120deg,#241813f1,#241813ac),url('/campus/steps.webp')}
+.home-memories{background-image:linear-gradient(120deg,#221a16ed,#221a16b5),url('/campus/light.webp')}
+.home-classmates .people-grid{grid-template-columns:repeat(6,minmax(0,1fr))}
+.home-classmates .person-tile{position:relative;isolation:isolate;min-height:118px;background:#392921;border-color:#fff3;color:#fff}
+.home-classmates .person-tile img,.home-classmates .person-tile .initials{aspect-ratio: .84}
+.home-classmates .person-tile>div{position:absolute;inset:auto 0 0;padding:.95rem .65rem .55rem;background:linear-gradient(transparent,#19120ff5)}
+.home-classmates .person-tile strong,.home-classmates .person-tile small{display:block;padding:0;color:#fff;overflow-wrap:anywhere}
+.home-classmates .person-tile small{font-size:.72rem;color:#f8e7d6}
+.memory-collage{columns:3;column-gap:clamp(.65rem,2vw,1.25rem)}
+.memory-collage .collage-card,.memory-dialog .collage-card{break-inside:avoid;margin:0 0 1rem;padding:0;overflow:hidden;color:#251a16;background:#fffaf3;box-shadow:0 8px 24px #21181116}
+.collage-visual{position:relative}
+.memory-enlarge{display:block;width:100%;margin:0;padding:0;background:none;color:inherit;border-radius:0;text-align:left}
+.memory-enlarge img{width:100%;height:auto;aspect-ratio:auto;object-fit:contain;border-radius:0}
+.memory-credit{position:absolute;bottom:.45rem;left:.55rem;max-width:calc(100% - 1rem);padding:.2rem .5rem;border-radius:.4rem;background:#1f1612e8;color:#fff;font-size:.81rem}
+.memory-credit:hover{color:#ffe1c5}
+.memory-quote{display:block;margin:.85rem .85rem 2.5rem;padding:1.15rem;border:1px solid #dcc4b1;background:#f2e5d6;font:1.12rem/1.48 Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere}
+.memory-caption{padding:0 .75rem;white-space:pre-wrap;overflow-wrap:anywhere}
+.compact-collage .memory-caption{display:none}
+.compact-collage .memory-quote{max-height:9rem;overflow:hidden}
+.collage-actions{display:flex;gap:.3rem;align-items:center;padding:.25rem .55rem}
+.icon-action{display:inline-grid;place-items:center;width:2.4rem;height:2.4rem;padding:0;margin:0;background:transparent;color:#713b31;border-radius:50%}
+.icon-action:hover,.icon-action[aria-expanded=true]{background:#f0e2d3}
+.icon-action svg{width:1.25rem;height:1.25rem}
+.icon-action[aria-pressed=true] svg{fill:currentColor}
+.collage-actions [data-count]{font-size:.8rem}
+.memory-inline,.memory-result{padding:.4rem .75rem;color:#503c36}
+.memory-result:empty{display:none}
+.memory-inline textarea{min-height:3rem}
+.memory-inline [data-tag-results] button{display:block;margin:.25rem 0}
+.memory-dialog{width:min(94vw,860px);max-height:94dvh;border:0;border-radius:16px;padding:.6rem;background:#fffaf3}
+.memory-dialog::backdrop{background:#140e0cce}
+.memory-dialog>[data-close]{display:grid;margin:0 0 .35rem auto}
+.memory-dialog .collage-card{margin:0}
+.memory-dialog img{max-height:65dvh;width:100%;height:auto;background:#211812}
+.memory-dialog .memory-enlarge{cursor:default}
+.editable-field{position:relative;padding-right:1.5rem;min-width:0}
+.inline-edit summary{position:absolute;right:0;top:0;margin:0;list-style:none;color:#753a2e;padding:0 .25rem;font-size:1rem}
+.inline-edit summary::-webkit-details-marker{display:none}
+.inline-edit form{margin-top:.65rem}
+.profile-portrait [data-upload]{position:absolute;right:8px;top:8px;background:#fff;color:#753a2e;box-shadow:0 2px 8px #251a1635}
+.profile-portrait [data-edit-status]{position:absolute;top:100%;left:0;z-index:1;background:#fff;padding:.2rem;font-size:.8rem}
+@media(max-width:850px){.memory-collage{columns:2}.home-classmates .people-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:490px){.memory-collage{columns:1}.home-classmates .people-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 `;

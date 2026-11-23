@@ -56,7 +56,7 @@ async function route(req, env) {
   const member = token && await one(`SELECT m.*,r.name FROM sessions s JOIN members m ON m.id=s.member
     JOIN roster r ON r.id=m.id WHERE s.token=? AND s.expires>? AND m.suspended=0 AND (?=0 OR m.invited=1 OR m.role='admin')`,await hash(token),now(),+pilot);
   const visibleSeed = "(s.review_status='approved' OR (?=1 AND s.review_status='pending'))";
-  const portrait = `coalesce((SELECT 'yearbook/'||y.member||'/'||j.key FROM yearbook_public y,json_each(y.images) j
+  const portrait = `coalesce((SELECT 'portrait/'||r.id FROM profile_fields WHERE member=r.id AND field='portraitObject' AND value<>''),(SELECT 'yearbook/'||y.member||'/'||j.key FROM yearbook_public y,json_each(y.images) j
     JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
     WHERE y.member=r.id ORDER BY ph.slot='now' DESC,j.key LIMIT 1),
     CASE WHEN s.portrait_key IS NOT NULL THEN 'seed/'||r.id END)`;
@@ -135,11 +135,23 @@ async function route(req, env) {
   }
   if (!member) return redirect('/signin?next='+encode(path+u.search));
   const me = member.id;
+  if (path==='/social.js' && !post) return new Response(page.socialScript,{headers:{'Content-Type':'text/javascript; charset=utf-8'}});
+  if (path==='/tag-search' && !post) {
+    const q = (u.searchParams.get('q')||'').trim().slice(0,80);
+    if (q.length<2) return json([]);
+    return json(await all(`SELECT id,name,nickname FROM roster WHERE id<>? AND
+      instr(lower(name||' '||nickname),lower(?))>0 ORDER BY name LIMIT 12`,me,q));
+  }
   const admin = member.role === 'admin';
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
   const postQuery = `SELECT p.*,r.name AS author_name,t.title AS topic_title,subject.name AS subject_name,
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
     (SELECT a.id FROM uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
+    (SELECT json_group_array(media) FROM (
+      SELECT 'post/'||a.id AS media FROM uploads a WHERE a.post=p.id
+      UNION ALL SELECT 'legacy/'||p.id||'/'||row_number() OVER(ORDER BY ph.object_key)
+      FROM photos ph WHERE ph.submission=p.origin
+    )) AS collage_photos,
     (SELECT count(*) FROM likes l WHERE l.post=p.id) AS likes,
     (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked
     FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject`;
@@ -174,7 +186,8 @@ async function route(req, env) {
     const key = path.slice(7);
     const bits = key.split('/');
     let row;
-    if (bits[0]==='post') row = await one(`SELECT a.object_key,a.type FROM uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${postVisible}`,bits[1]);
+    if (bits[0]==='portrait') row = await one("SELECT value AS object_key FROM profile_fields WHERE member=? AND field='portraitObject'",Number(bits[1]));
+    else if (bits[0]==='post') row = await one(`SELECT a.object_key,a.type FROM uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${postVisible}`,bits[1]);
     else if (bits[0]==='seed') row = await one(`SELECT s.portrait_key AS object_key FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,Number(bits[1]),+pilot);
     else if (bits[0]==='yearbook') row = await one(`SELECT ph.object_key FROM yearbook_public y,json_each(y.images) j
       JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
@@ -193,7 +206,7 @@ async function route(req, env) {
     const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
     const last = rows.at(-1);
     const next = last && rows.length===25 ? '/memories?before='+last.created+'&cursor='+encode(last.id) : '';
-    return show('Memories',page.memories(rows,next,path+u.search));
+    return show('Memories',page.memories(rows,next));
   }
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
     + 2 * EXISTS(SELECT 1 FROM posts p WHERE p.subject=r.id AND p.author<>r.id AND ${postVisible}
@@ -203,12 +216,10 @@ async function route(req, env) {
     const before = Number(u.searchParams.get('before')) || now()+1;
     const cursor = u.searchParams.get('cursor') || '';
     const rows = await posts('p.created<? OR (p.created=? AND p.id<?)',[before,before,cursor]);
-    const last = rows.at(-1);
-    const next = last && rows.length===25 ? '/?before='+last.created+'&cursor='+encode(last.id) : '';
-    const people = await all(`SELECT r.id,r.name,${portrait} AS portrait FROM roster r ${seedJoin}
+    const people = await all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
       WHERE r.id<>? ORDER BY ${completeness} DESC, (r.id * 137 + ?) % 997, r.id LIMIT 6`,
       +pilot,me,Math.floor(now()/86400000)*351);
-    return render('Twenty years on',page.home(rows,next,people,member,path+u.search),member,{home:true});
+    return render('Twenty years on',page.home(rows,people),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
     const q = (u.searchParams.get('q')||'').slice(0,100), status = u.searchParams.get('status')||'';
@@ -228,7 +239,7 @@ async function route(req, env) {
     const seed = await one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot);
     const imported = parse(seed?.source_data);
     const published = await one('SELECT fields FROM yearbook_public WHERE member=?',key);
-    const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=?',key)).map(r=>[r.field,r.value]));
+    const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=? AND field!=?',key,'portraitObject')).map(r=>[r.field,r.value]));
     const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
     return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[row.status],details,await gallery(key),
       await posts('p.author=? OR (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status=\'accepted\')',[key,key,key]),me,pilot),member,{home:true});
@@ -239,6 +250,25 @@ async function route(req, env) {
       return show('Edit profile',page.editProfile(Object.fromEntries(fields.map(f=>[f.field,f.value])),member));
     }
     const f = await data();
+    const inline = f.get('field');
+    if (inline === 'portraitObject') {
+      const file = f.get('photo');
+      const photo = file instanceof File && file.size && file.size<=15*1024*1024
+        && cleanPhoto(new Uint8Array(await file.arrayBuffer()));
+      if (!photo) return invalid('Choose a JPEG or PNG up to 15 MB.');
+      const original = await one("SELECT value FROM profile_fields WHERE member=? AND field='portraitObject'",me);
+      const key = 'profile/'+id();
+      await env.MEDIA.put(key,photo.bytes,{httpMetadata:{contentType:photo.type}});
+      try { await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,key); }
+      catch (error) { await env.MEDIA.delete(key); throw error; }
+      if (original?.value) await Promise.allSettled([env.MEDIA.delete(original.value)]);
+      return redirect('/people/'+me);
+    }
+    if (inline) {
+      if (![...profileKeys,'country','section','displayName'].includes(inline)) return invalid('Field unavailable.');
+      await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,str(f,'value',inline==='displayName'?120:4000));
+      return redirect('/people/'+me);
+    }
     const jobs = ['life','city','company','education','dorm','family','nickname'].map(key => {
       if (f.has('hide_'+key)) return sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,key,'');
       const value = str(f,key);
@@ -382,6 +412,7 @@ async function route(req, env) {
       const comments = await all('SELECT c.*,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key);
       const tags = await all("SELECT t.*,r.name FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND (t.status='accepted' OR t.member=? OR ?=?)",key,me,me,item.author);
       const images = await all("SELECT 'post/'||id AS media,caption,'/posts/'||post AS source FROM uploads WHERE post=? UNION ALL SELECT 'legacy/'||?||'/'||ROW_NUMBER() OVER(ORDER BY object_key),caption,'/posts/'||? FROM photos WHERE submission=?",key,key,key,item.origin);
+      if (u.searchParams.get('panel')==='comments') return json(comments.map(({name,body})=>({name,body})));
       return show('A batch memory',page.post(item,comments,tags,images,me));
     }
     const f = await data(), action = f.get('action');
@@ -390,7 +421,14 @@ async function route(req, env) {
       else await run('DELETE FROM likes WHERE post=? AND member=?',key,me);
     } else if (action==='comment') {
       const body = str(f,'body',1200);
-      if (body && await limit('comment:'+me,10,30)) await run('INSERT INTO comments(id,post,author,body,created) VALUES(?,?,?,?,?)',id(),key,me,body,now());
+      if (!body) return invalid('Write a comment first.');
+      if (!await limit('comment:'+me,10,30)) return new Response('Please wait before commenting again.',{status:429});
+      await run('INSERT INTO comments(id,post,author,body,created) VALUES(?,?,?,?,?)',id(),key,me,body,now());
+    } else if (action==='tag-add') {
+      const tag = Number(f.get('tag'));
+      if (!tag || tag===me || !await one('SELECT id FROM roster WHERE id=?',tag)) return invalid('Choose a classmate.');
+      if (!await limit('tag:'+me,10,20)) return new Response('Please wait before tagging again.',{status:429});
+      await run("INSERT OR IGNORE INTO tags VALUES(?,?,'pending')",key,tag);
     } else if (action==='edit-comment' || action==='delete-comment') {
       const comment = str(f,'comment',50), body = str(f,'body',1200);
       if (action==='edit-comment' && body) await run('UPDATE comments SET body=? WHERE id=? AND post=? AND author=?',body,comment,key,me);
@@ -406,6 +444,13 @@ async function route(req, env) {
       const body = str(f,'body');
       if (body) await run('UPDATE posts SET body=? WHERE id=?',body,key);
     } else return invalid('Action unavailable.');
+    if (req.headers.get('Accept')==='application/json' && ['like','comment','tag-add'].includes(action)) {
+      if (action==='like') {
+        const updated = (await posts('p.id=?',[key],1))[0];
+        return json({liked:!!updated?.liked,likes:updated?.likes??0});
+      }
+      return json({ok:true});
+    }
     const back = destination(f.get('return'));
     return redirect(action==='like' && f.has('return') ? back : path);
   }

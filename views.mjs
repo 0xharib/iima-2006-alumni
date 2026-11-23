@@ -13,15 +13,169 @@ const action=(url,name,label,values={})=>form(url,field('action',name)+Object.en
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
 const labelFor=key=>({life:'Life, lately',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
-const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="/media/${e(row.media)}" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a><figcaption>${e(row.caption)} ${link(row.source,'Context')}</figcaption></figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
+const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="/media/${e(row.media)}" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a>${row.caption?`<figcaption>${e(row.caption)}</figcaption>`:''}</figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
 const portrait=(person,lazy=true)=>person.portrait
   ? `<img src="/media/${e(person.portrait)}" alt="" ${lazy?'loading="lazy"':''}>`
   : `<span class="initials" aria-hidden="true">${e(person.name.trim().split(/\s+/).slice(0,2).map(word=>word[0]).join(''))}</span>`;
+const paths={like:'M20 8c0 4-8 9-8 9S4 12 4 8a4 4 0 0 1 8-1 4 4 0 0 1 8 1Z',comment:'M5 5h14v10h-7l-4 4v-4H5z',tag:'M4 5h9l7 7-7 7-9-9z M8 8h.1',edit:'m4 16 11-11 4 4-11 11H4z M13 7l4 4',close:'m6 6 12 12M18 6 6 18'};
+const icon = (kind,label,attrs='') => `<button type="button" class="icon-action" aria-label="${e(label)}" title="${e(label)}" ${attrs}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[kind]}"/></svg></button>`;
+const classmate = row => `<strong>${e(row.name)}</strong>${row.nickname?badge(row.nickname):''}${row.dorm?badge(/^\d+$/.test(row.dorm)?'Dorm '+row.dorm:row.dorm):''}`;
 const card=(p,back)=>`<article><header>${link('/people/'+p.author,p.author_name)} <time datetime="${new Date(p.created).toISOString()}">${e(new Date(p.created).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'}))}</time></header>
   ${p.topic?link('/topics/'+p.topic,p.topic_title):''}${p.subject_name?`<small>About ${link('/people/'+p.subject,p.subject_name)}</small>`:''}
   ${p.feed_photo||p.has_legacy_photo?`<a class="feed-photos" href="/posts/${e(p.id)}"><img src="/media/${p.feed_photo?'post/'+e(p.feed_photo):'legacy/'+e(p.id)+'/1'}" alt="Yearbook memory photo" loading="lazy"></a>`:''}<p class="story">${e(p.body)}</p>${link('/posts/'+p.id,'Open memory')} ${action('/posts/'+p.id,'like',p.liked?'Unlike':'Like',{liked:p.liked?0:1,...(back?{return:back}:{})})} ${badge(p.likes+' likes')}</article>`;
 const cards=(rows,back)=>rows.map(row=>card(row,back)).join('')||'<p>No memories here yet.</p>';
 
+const collage = (rows,compact=false) => `<div class="memory-collage${compact?' compact-collage':''}">${rows.flatMap(post=>{
+  const photos=JSON.parse(post.collage_photos||'[]');
+  return (photos.length?photos:[null]).map(photo=>`<article class="collage-card" data-post="${e(post.id)}">
+    <div class="collage-visual">
+      <button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
+        ${photo?`<img src="/media/${e(photo)}" alt="Memory shared by ${e(post.author_name)}" loading="lazy">`:`<span class="memory-quote">${e(post.body)}</span>`}
+      </button>
+      <a class="memory-credit" href="/people/${post.author}">${e(post.author_name)}</a>
+    </div>
+    ${photo&&post.body&&post.body!=='Shared a yearbook photo.'?`<p class="memory-caption">${e(post.body)}</p>`:''}
+    <div class="collage-actions">
+      ${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span>
+      ${icon('comment','Comment','data-panel="comments" aria-expanded="false"')}
+      ${icon('tag','Tag a classmate','data-panel="tags" aria-expanded="false"')}
+    </div>
+    <div class="memory-inline" data-panel-content="comments" hidden><div data-comments></div>
+      <form data-social><textarea name="body" aria-label="Comment" placeholder="Write a comment…" maxlength="1200" required></textarea>
+      ${field('action','comment')}<button>Post</button></form></div>
+    <div class="memory-inline" data-panel-content="tags" hidden>
+      <input type="search" data-tag-search aria-label="Find a classmate" placeholder="Name or dorm name" autocomplete="off">
+      <div data-tag-results></div></div>
+    <div class="memory-result" role="status"></div>
+  </article>`);
+}).join('')||'<p>No memories here yet.</p>'}</div>
+<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
+function socialInteractions(){
+  const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
+  async function send(url,data){
+    const response=await fetch(url,{method:'POST',body:data,headers:{Accept:'application/json'}});
+    if(!response.ok) throw new Error(response.status===429?'Please wait and try again.':'Could not save. Try again.');
+    return response;
+  }
+  function message(card,text){card.querySelector('.memory-result').textContent=text;}
+  async function comments(card){
+    const response=await fetch(path(card)+'?panel=comments');
+    if(!response.ok) throw new Error('Could not load comments.');
+    const list=card.querySelector('[data-comments]');
+    const rows=await response.json();
+    list.replaceChildren(...rows.map(row=>{
+      const item=document.createElement('p'), name=document.createElement('strong');
+      name.textContent=row.name;
+      item.append(name,document.createTextNode(' '+row.body));
+      return item;
+    }));
+  }
+  document.addEventListener('click',async event=>{
+    const button=event.target.closest('button');
+    if(!button)return;
+    if(button.matches('[data-upload]')){button.form.elements.photo.click();return;}
+    if(button.matches('[data-close]')){button.closest('dialog').close();return;}
+    const card=button.closest('[data-post]');
+    if(!card)return;
+    try {
+      if(button.matches('[data-enlarge]')){
+        if(card.closest('dialog'))return;
+        const dialog=document.querySelector('.memory-dialog'), copy=card.cloneNode(true);
+        copy.querySelector('img')?.removeAttribute('loading');
+        dialog.querySelector('[data-dialog-content]').replaceChildren(copy);
+        dialog.showModal();
+      } else if(button.matches('[data-like]')){
+        button.disabled=true;
+        try {
+          const data=new FormData();
+          data.set('action','like');data.set('liked',button.getAttribute('aria-pressed')==='true'?'0':'1');
+          const {liked,likes}=await (await send(path(card),data)).json();
+          for(const other of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
+            const control=other.querySelector('[data-like]');
+            control.setAttribute('aria-pressed',String(liked));
+            control.setAttribute('aria-label',liked?'Unlike':'Like');
+            control.title=liked?'Unlike':'Like';
+            other.querySelector('[data-count]').textContent=likes||'';
+          }
+        } finally {button.disabled=false;}
+      } else if(button.matches('[data-panel]')){
+        const panel=card.querySelector('[data-panel-content="'+button.dataset.panel+'"]');
+        panel.hidden=!panel.hidden;
+        button.setAttribute('aria-expanded',String(!panel.hidden));
+        if(!panel.hidden){
+          panel.querySelector('input,textarea')?.focus();
+          if(button.dataset.panel==='comments') await comments(card);
+        }
+      } else if(button.matches('[data-tag-id]')){
+        button.disabled=true;
+        try {
+          const data=new FormData();
+          data.set('action','tag-add');data.set('tag',button.dataset.tagId);
+          await send(path(card),data);
+          message(card,'Tag sent for approval.');
+          button.closest('[data-panel-content]').querySelector('[data-tag-search]').value='';
+          button.parentElement.replaceChildren();
+        } finally {button.disabled=false;}
+      }
+    } catch(error){message(card,error.message);}
+  });
+  document.addEventListener('input',async event=>{
+    const input=event.target;
+    if(!input.matches('[data-tag-search]'))return;
+    const results=input.parentElement.querySelector('[data-tag-results]'), q=input.value.trim();
+    results.replaceChildren();
+    if(q.length<2)return;
+    try {
+      const response=await fetch('/tag-search?q='+encodeURIComponent(q));
+      if(!response.ok)throw new Error('Search unavailable.');
+      const rows=await response.json();
+      if(input.value.trim()!==q)return;
+      results.replaceChildren(...rows.map(row=>{
+        const button=document.createElement('button');
+        button.type='button';button.dataset.tagId=row.id;
+        button.textContent=row.nickname?row.name+' · '+row.nickname:row.name;
+        return button;
+      }));
+      if(!rows.length)results.textContent='No matches.';
+    } catch(error){if(input.value.trim()===q)results.textContent=error.message;}
+  });
+  document.addEventListener('change',event=>{
+    if(event.target.matches('[data-profile-edit] input[type=file]')&&event.target.files.length)event.target.form.requestSubmit();
+  });
+  document.addEventListener('submit',async event=>{
+    const form=event.target;
+    if(!form.matches('[data-social],[data-profile-edit]'))return;
+    event.preventDefault();
+    if(form.dataset.saving)return;
+    form.dataset.saving='true';
+    const card=form.closest('[data-post]');
+    let status=form.querySelector('[data-edit-status]');
+    try {
+      const data=new FormData(form);
+      if(card){
+        await send(path(card),data);
+        form.reset();
+        await comments(card);
+        message(card,'');
+      }else{
+        const response=await fetch(form.action,{method:'POST',body:data});
+        if(!response.ok)throw new Error(await response.text());
+        const next=new DOMParser().parseFromString(await response.text(),'text/html');
+        const updated=next.querySelector('.alumni-profile');
+        if(!updated)throw new Error('Could not update the profile. Try again.');
+        document.querySelector('.alumni-profile').replaceWith(updated);
+        const avatar=next.querySelector('.account summary');
+        if(avatar)document.querySelector('.account summary').replaceWith(avatar);
+      }
+    }catch(error){
+      if(card)message(card,error.message);
+      else{
+        if(!status){status=document.createElement('span');status.dataset.editStatus='';status.setAttribute('role','status');form.append(status);}
+        status.textContent=error.message;
+      }
+    }finally{delete form.dataset.saving;}
+  });
+}
 export function render(title,body,member,{home=false}={}) {
   const nav=member?`<nav aria-label="Main navigation">${link('/','Home')}${link('/memories','Memories')}${link('/reunion','Reunion')}
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
@@ -36,9 +190,10 @@ export function render(title,body,member,{home=false}={}) {
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body${home?' class="home"':''}><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body${home?' class="home"':''}><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
+  socialScript: '('+socialInteractions.toString()+')();',
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
     box.addEventListener('input',async()=>{const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
     try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
@@ -61,28 +216,22 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,next,people,member,back){
-    return `<section class="campus-hero"><div><p class="class-label">IIM Ahmedabad · Class of 2006</p>
-      <h1>Twenty years on.</h1><p>Welcome back, ${e(member.name.trim().split(/\s+/)[0])}.</p>
-      <div class="hero-actions"><a class="cta" href="/people">Find classmates</a><a class="cta secondary" href="/compose">Share a memory</a></div>
+  home(rows,people){
+    return `<div class="alumni-home"><section class="campus-hero"><div>
+      <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1>Twenty years on.</h1>
+      <div class="hero-actions"><a class="cta" href="/people">Find classmates</a><a class="cta secondary" href="/reunion">Reunion</a></div>
       </div></section>
-      <div class="home-links">
-        <a class="shortcut image steps" href="/reunion"><strong>December reunion</strong><small>See who’s coming</small></a>
-        <a class="shortcut image light" href="/memories"><strong>Memories</strong><small>Read stories and browse photos</small></a>
-        <a class="shortcut" href="/people/${member.id}"><strong>My profile</strong><small>View your yearbook and profile</small></a>
-      </div>
-      <div class="home-columns">
-        <section><div class="section-head"><h2>Batch memories</h2>${link('/memories','See all memories →')}</div>
-          ${cards(rows,back)}${next?'<a class="soft-link" href="'+e(next)+'">Older memories</a>':''}</section>
-        <section><div class="section-head"><h2>Classmates</h2>${link('/people','See directory →')}</div>
-          <div class="people-grid">${people.map(person=>`<a class="person-tile" href="/people/${person.id}">${person.portrait_key?`<img src="/media/seed/${person.id}" alt="" loading="lazy">`:`<span class="initials" aria-hidden="true">${e(person.name.trim().split(/\s+/).slice(0,2).map(word=>word[0]).join(''))}</span>`}<strong>${e(person.name)}</strong></a>`).join('')}</div></section>
-      </div>`;
+      <section class="home-classmates"><div class="section-head"><h2>Classmates</h2>${link('/people','See all →')}</div>
+        <div class="people-grid">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}</div></a>`).join('')}</div>
+      </section>
+      <section class="home-memories"><div class="section-head"><h2>Memories</h2>${link('/memories','See all →')}</div>${collage(rows.slice(0,6),true)}</section>
+    </div>`;
   },
-  memories(rows,next,back){return `<div class="memory-nav">${link('/gallery','Browse gallery')}${link('/topics','Browse topics')}${link('/compose','Share a memory')}</div>
-    <div class="memory-feed">${cards(rows,back)}${next?link(next,'Older memories'):''}</div>`;},
+  memories(rows,next){return `<div class="memory-nav">${link('/gallery','Gallery')}${link('/topics','Topics')}${link('/compose','Share a memory')}</div>
+    ${collage(rows)}${next?link(next,'Older memories'):''}`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
   directory(rows,statuses,q,status){return `<form class="directory-controls" method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div><strong>${e(row.name)}</strong>${badge(row.dorm)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:'<p>No classmates match.</p>'}`;},
+    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:'<p>No classmates match.</p>'}`;},
   person(row,status,details,photos,stories,me,pilot){
     const own = me === row.id;
     const profileUrl = '/people/'+row.id;
@@ -90,22 +239,30 @@ export const page={
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
     const hasValue = key => typeof details[key]==='string' && details[key].trim();
-    const factKeys = facts.filter(hasValue);
-    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&hasValue(key));
+    const factKeys = own ? facts : facts.filter(hasValue);
+    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||own));
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
       ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
-    const entry = key => `<div><dt>${e(labelFor(key))}</dt><dd>${e(details[key])}</dd></div>`;
+    const edit = (key,label,value) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">✎</summary>
+      ${form('/profile',field('field',key)+area('value',label,value,'maxlength="4000"'),'Save','data-profile-edit')}</details>` : '';
+    const entry = key => {
+      const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
+      return `<div class="editable-field"><dt>${e(label)}</dt><dd>${e(details[key]||'—')}</dd>${edit(key,label,details[key])}</div>`;
+    };
     return `<div class="alumni-profile">
       <header class="profile-header">
         <div class="profile-cover"></div>
         <div class="profile-identity">
-          <div class="profile-portrait">${portrait(row,false)}</div>
-          <div class="profile-name"><h1>${e(row.name)}</h1>
-            ${hasValue('dorm')||hasValue('city')?`<p>${e([details.dorm,details.city].filter(Boolean).join(' · '))}</p>`:''}
+          <div class="profile-portrait">${portrait(row,false)}
+            ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
+              ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
+              ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
+          <div class="profile-name editable-field"><h1>${e(details.displayName||row.name)}</h1>
+            ${edit('displayName','Name',details.displayName||row.name)}
             ${status?`<span class="profile-status">${e(status)}</span>`:''}
           </div>
           <div class="profile-actions">
-            ${own?`<a class="profile-primary" href="/profile">Edit profile</a><a class="profile-secondary" href="/yearbook">Review yearbook</a>`
+            ${own?`<a class="profile-secondary" href="/yearbook">Review yearbook</a>`
               : `<a class="profile-primary" href="/compose?person=${row.id}">Add a memory</a>`}
             ${linkedin}
           </div>
@@ -207,7 +364,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl, fee
     .shell { max-width:1240px; margin:auto; padding:0 clamp(16px,5vw,64px) 48px }
     .masthead { min-height:74px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line) }
     .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750; text-decoration:none }
-    .mark { display:grid; place-items:center; width:35px; height:35px; background:white; border-radius:50%; padding:2px; object-fit:contain }
+    .mark { display:grid; place-items:center; width:35px; height:35px; background:transparent; mix-blend-mode:multiply; border-radius:50%; padding:2px; object-fit:contain }
     .yearbook { font-size:.87rem; font-weight:650 }
     .intro { margin:22px 0; min-height:clamp(185px,32vw,370px); display:flex; align-items:end; border-radius:22px; padding:clamp(22px,5vw,58px); color:#fffaf0; background:linear-gradient(90deg,#160d0cda,#190e0c28),#251a16 url('/campus/arches.webp') center 49% / cover }
     h1,h2 { margin:0; line-height:1.08 }
