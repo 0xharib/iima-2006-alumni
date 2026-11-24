@@ -4,7 +4,7 @@ The application runs as a Cloudflare Worker. D1 holds roster and app records. R2
 
 ## Deployment configuration
 
-Use a separate configuration for each hosted environment. Fill in its own D1 database, R2 bucket, and application origin. Configure `MAIL_FROM` and `SITE_ORIGIN` for the intended environment and supply `RESEND_API_KEY` as a Worker secret. Keep database exports, member records, photos, local environment files, and credentials out of Git. Use dedicated test addresses and verify the sender domain and its DNS authentication before enabling mail.
+Cloudflare’s Git integration deploys main with the production `wrangler.toml`. For local commands use `--config wrangler.local.toml`. Use a separate configuration for any other hosted environment. Fill in its own D1 database, R2 bucket, and application origin. Configure `MAIL_FROM` and `SITE_ORIGIN` for the intended environment and supply `RESEND_API_KEY` as a Worker secret. Keep database exports, member records, photos, local environment files, and credentials out of Git. Use dedicated test addresses and verify the sender domain and its DNS authentication before enabling mail.
 
 `ACCESS_MODE=pilot` restricts entry to invited members and admins. `ACCESS_MODE=batch` lets eligible roster members sign in with the unique address on file. Sending the link to a small group in batch mode limits invitations only.
 

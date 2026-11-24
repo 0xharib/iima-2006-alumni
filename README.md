@@ -23,12 +23,12 @@ Tests use synthetic classmates, an isolated in-memory SQLite database, and an in
 
 ## Run locally
 
-The checked-in Wrangler configuration targets local development. Apply the schema and load the synthetic roster, then start the Worker.
+Use `wrangler.local.toml` for local development. The default `wrangler.toml` targets production and is used by Cloudflare’s Git integration. Apply the schema and load the synthetic roster, then start the Worker.
 
 ```sh
-npx wrangler d1 migrations apply DB --local
-npx wrangler d1 execute DB --local --file fixtures/demo.sql
-npx wrangler dev
+npx wrangler d1 migrations apply DB --config wrangler.local.toml --local
+npx wrangler d1 execute DB --config wrangler.local.toml --local --file fixtures/demo.sql
+npx wrangler dev --config wrangler.local.toml
 ```
 
 Open the URL Wrangler prints. Requesting a real sign-in email requires separate mail configuration. The automated suite exercises sign-in, albums, notifications, reunion details, and admin permissions with synthetic data.
@@ -37,7 +37,7 @@ The Worker reads campus illustrations from R2 under `campus-design-v1/`. To see 
 
 ```sh
 for file in assets/*; do
-  npx wrangler r2 object put "iima-2006-alumni-local/campus-design-v1/$(basename "$file")" --local --file "$file"
+  npx wrangler r2 object put "iima-2006-alumni-local/campus-design-v1/$(basename "$file")" --config wrangler.local.toml --local --file "$file"
 done
 ```
 
