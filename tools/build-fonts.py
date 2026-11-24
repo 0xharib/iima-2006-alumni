@@ -1,18 +1,17 @@
-"""Rebuild fonts.mjs inputs: subset web fonts and measure fallback metrics.
+"""Rebuild fonts.mjs inputs: trim web fonts and measure fallback metrics.
 
 Usage (Python 3 with fonttools and brotli):
   mkdir pkgs && cd pkgs
   for p in @fontsource-variable/source-serif-4 @fontsource-variable/source-sans-3 @fontsource/ibm-plex-mono \
-           @fontsource/tiro-devanagari-sanskrit @fontsource/tinos @fontsource/arimo; do npm pack "$p"; done
+           @fontsource/tinos @fontsource/arimo; do npm pack "$p"; done
   for f in *.tgz; do mkdir "${f%.tgz}" && tar -xzf "$f" -C "${f%.tgz}"; done; cd ..
   python3 tools/build-fonts.py pkgs out
-Then base64 the five .woff2 files in out/ into fonts.mjs, and copy the numbers in out/fallback.json into the
+Then base64 the four .woff2 files in out/ into fonts.mjs, and copy the numbers in out/fallback.json into the
 "Fallback" @font-face rules in theme.mjs.
 """
 import glob, os, json, sys
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
-from fontTools import subset
 
 P = sys.argv[1].rstrip('/') + '/'
 OUT = sys.argv[2].rstrip('/') + '/'
@@ -32,11 +31,6 @@ instance(pick('fontsource-variable-source-sans-3-*/package/files/source-sans-3-l
 mono = TTFont(pick('fontsource-ibm-plex-mono-*/package/files/ibm-plex-mono-latin-500-normal.woff2'))
 mono.flavor = 'woff2'; mono.save(OUT + 'plex-mono-500.woff2')
 
-# Devanagari: only the institute motto, so a few KB instead of 179 KB.
-motto = 'विद्याविनियोगाद्विकासः'
-opts = subset.Options(); opts.layout_features = ['*']; opts.flavor = 'woff2'; opts.hinting = False; opts.desubroutinize = True; opts.name_IDs = [1, 2, 3, 4, 6]; opts.notdef_outline = True
-sub = subset.Subsetter(opts); deva = TTFont(pick('fontsource-tiro-devanagari-sanskrit-*/package/files/tiro-devanagari-sanskrit-devanagari-400-normal.woff2'))
-sub.populate(text=motto + ' '); sub.subset(deva); deva.flavor = 'woff2'; deva.save(OUT + 'tiro-devanagari-motto.woff2')
 
 # Fallback metrics (the approach Next.js uses): match average glyph width on real prose, then line metrics.
 sample = ("Tikli has been one of my closest friends since day one at Ahmedabad. Confident, intimidating, inspiring "

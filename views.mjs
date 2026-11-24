@@ -110,8 +110,7 @@ export function render(title,body,member,{home=false}={}) {
   const slug = current==='/' ? 'home' : current ? current.slice(1).replace(/\/$/,'')||'other' : 'other';
   const banded = ['memories','people','gallery'].includes(slug);
   const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
-    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p>
-    <p class="motto" lang="sa" title="Vidya Viniyogadvikasah: development through the application of knowledge">विद्याविनियोगाद्विकासः</p></div>
+    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p></div>
     <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}${link('/wa/','WhatsApp')}${themeSwitch()}</nav></div></footer>` : '';
   const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">

@@ -1,14 +1,13 @@
 // The old 'IIMA Title' (a DejaVu Serif Bold subset) is retired: Kal · Aaj · Aur Kal is now Source Serif 4 at display optical size.
 
 // Self-hosted faces (see fonts.mjs). Source Serif 4 and Source Sans 3 share a skeleton and x-height (0.475 / 0.478), so
-// serif and sans sit together on one line; Plex Mono stamps registry data; Tiro Devanagari carries only the motto.
+// serif and sans sit together on one line; Plex Mono stamps registry data.
 // The two "Fallback" faces resize local Times New Roman / Arial to the web fonts' measured widths and line metrics,
 // so text does not reflow when the real fonts arrive.
 export const fontFaces = `@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4.woff2) format('woff2');font-weight:400 750;font-style:normal;font-display:swap}
 @font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4-italic.woff2) format('woff2');font-weight:400 700;font-style:italic;font-display:swap}
 @font-face{font-family:'Source Sans 3';src:url(/fonts/source-sans-3.woff2) format('woff2');font-weight:400 700;font-style:normal;font-display:swap}
 @font-face{font-family:'IBM Plex Mono';src:url(/fonts/plex-mono-500.woff2) format('woff2');font-weight:400 600;font-display:swap}
-@font-face{font-family:'Tiro Devanagari Sanskrit';src:url(/fonts/tiro-devanagari-motto.woff2) format('woff2');unicode-range:U+0900-097F,U+200C-200D;font-display:swap}
 @font-face{font-family:'Source Serif 4 Fallback';src:local('Times New Roman'),local('TimesNewRomanPSMT'),local('Liberation Serif'),local('Tinos');size-adjust:109.96%;ascent-override:94.22%;descent-override:30.47%;line-gap-override:0.00%}
 @font-face{font-family:'Source Sans 3 Fallback';src:local('Arial'),local('ArialMT'),local('Liberation Sans'),local('Arimo');size-adjust:93.01%;ascent-override:110.09%;descent-override:43.01%;line-gap-override:0.00%}`;
 
@@ -17,7 +16,7 @@ export const tokens = `:root{color-scheme:light;
 --brick:#8e3e30;--brick-deep:#6b2b21;--brick-fired:#b4583f;--brick-wash:#f3e4dc;--on-brick:#fff;
 --lime:#f4efe6;--paper:#fffcf6;--tile:#fffcf6;--tint:#f3ebe0;--concrete:#b8b2a7;--line:#e6ded2;
 --ink:#211e1b;--muted:#5f5a52;--night:#1c1816;--ochre:#c08a3e;--on-photo:#fffcf6;
---serif:'Source Serif 4','Source Serif 4 Fallback',Georgia,serif;--sans:'Source Sans 3','Source Sans 3 Fallback',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--deva:'Tiro Devanagari Sanskrit','Source Serif 4',serif;
+--serif:'Source Serif 4','Source Serif 4 Fallback',Georgia,serif;--sans:'Source Sans 3','Source Sans 3 Fallback',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
 --r:4px;--r-sm:2px}
 /* LKP at night: the default. Every text pair here is at least 4.5:1 (brick on wash 5.7, muted on card 7.0). */
 :root[data-theme=dark]{color-scheme:dark;
@@ -689,9 +688,6 @@ p,dd,.memory-quote{text-wrap:pretty}
 .collage-card:is(.memory-collage *,.memory-columns *){transition:box-shadow .16s,transform .16s}
 .collage-card:is(.memory-collage *,.memory-columns *):hover{box-shadow:0 8px 22px #21181216;transform:translateY(-2px)}
 
-/* Footer motto */
-.site-footer .motto{font:400 1.15rem/1.5 var(--deva)!important;letter-spacing:.02em!important;text-transform:none!important;color:#f3e4dc!important;margin-top:.6rem!important}
-
 @media(max-width:650px){
   .page-band main>h1,.reunion-cover,.profile-cover,.profile-header{border-radius:50% 50% var(--r) var(--r)/20px 20px var(--r) var(--r)}
   .alumni-home .campus-hero{border-radius:50% 50% 0 0/24px 24px 0 0;margin-top:6px}
@@ -796,7 +792,6 @@ h2{letter-spacing:-.01em}
 /* Small caps-style labels in the sans, lighter than before */
 label,.profile-facts dt,.profile-entry dt{font-weight:600}
 .field-empty{font:italic 400 1rem var(--serif)}
-.motto{font-family:var(--deva)!important;font-size:1.15rem!important;letter-spacing:0!important}
 /* Inline icons for glyphs no web font carries (✓, ↗) */
 .icon-inline{display:inline-block;width:.9em;height:.9em;vertical-align:-.08em;margin-inline:.1em .25em}
 .icon-ext{margin-inline:.2em 0;width:.75em;height:.75em}
