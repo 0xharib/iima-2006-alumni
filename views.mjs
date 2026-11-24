@@ -1,6 +1,6 @@
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
-import { theme, titleFont } from './theme.mjs';
+import { fontFaces, theme, tokens } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
 const link=(href,label)=>`<a href="${e(href)}">${e(label)}</a>`;
@@ -33,7 +33,28 @@ const shareMeta = `<meta name="description" content="${e(shareDescription)}">
 const paths={like:'M20 8c0 4-8 9-8 9S4 12 4 8a4 4 0 0 1 8-1 4 4 0 0 1 8 1Z',comment:'M5 5h14v10h-7l-4 4v-4H5z',tag:'M4 5h9l7 7-7 7-9-9z M8 8h.1',edit:'M3 21l2-6L17 3a2.8 2.8 0 0 1 4 4L9 19z M5 15l4 4 M15 5l4 4',close:'m6 6 12 12M18 6 6 18'};
 const iconGraphic = kind => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[kind]}"/></svg>`;
 const icon = (kind,label,attrs='') => `<button type="button" class="icon-action" aria-label="${e(label)}" data-tooltip="${e(label)}" ${attrs}>${iconGraphic(kind)}</button>`;
-const classmate = row => `<strong>${e(row.name)}</strong>${row.nickname?badge(row.nickname):''}${row.dorm?badge(/^\d+$/.test(row.dorm)?'Dorm '+row.dorm:row.dorm):''}`;
+const dormLabel = dorm => /^\d+$/.test(dorm) ? 'Dorm '+dorm : dorm;
+const classmate = (row,extra=[]) => {
+  const registry = [row.dorm&&dormLabel(row.dorm),...extra].filter(Boolean).join(' · ');
+  return `<strong>${e(row.name)}</strong>${row.nickname?`<small class="nickname">“${e(row.nickname)}”</small>`:''}${registry?`<small class="registry">${e(registry)}</small>`:''}`;
+};
+// "Looking to catch up": a count for the target, a private list for the picker.
+const checkIcon = '<svg class="icon-inline" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>', extIcon = '<svg class="icon-inline icon-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>';
+export const themeSwitch = (cls='') => `<form method="post" action="/theme" class="theme-switch ${cls}"><button type="submit" aria-label="Switch between dark and light mode"><span class="to-light">☀ Light mode</span><span class="to-dark">☾ Dark mode</span></button></form>`;
+const plural = (n,one,many) => n===1 ? one : many;
+const meetCountLine = count => count>0
+  ? `<strong class="meet-number">${count}</strong> <span>${plural(count,'WIMWIan is','WIMWIans are')} looking to catch up with you</span>`
+  : '<span>Which WIMWIans are you looking to catch up with?</span>';
+const meetForm = (action,target,next,label,cls='') => `<form method="post" action="/meet" class="meet-form ${cls}">${field('action',action)}${field('target',target)}${field('next',next)}<button type="submit">${label}</button></form>`;
+const meetFaces = people => people.slice(0,6).map(person=>`<a class="meet-face" href="/people/${person.id}" title="${e(person.name)}">${portrait(person,true,96)}</a>`).join('');
+// Days until the reunion opens in Jaipur (IST); a seal counts down on Home and Reunion.
+const reunionStart = Date.parse('2026-12-26T00:00:00+05:30');
+const countdown = () => {
+  const days = Math.ceil((reunionStart - Date.now()) / 86400000);
+  if (days > 0) return `<span class="seal" role="img" aria-label="${days} ${days===1?'day':'days'} to the reunion in Jaipur"><b>${days}</b><small>${days===1?'day':'days'} to Jaipur</small></span>`;
+  if (days > -3) return '<span class="seal"><small>Together in Jaipur</small></span>';
+  return '';
+};
 const memoryTags=(post)=> {
   const tags=JSON.parse(post.linked_tags||'[]');
   const item=tag=>link(tag.href,(tag.kind==='person'?'@':'#')+tag.label);
@@ -82,25 +103,33 @@ const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,pri
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 ${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
-  const menu=link('/','Home')+link('/memories','Memories')+link('/people','Classmates')+link('/reunion','Reunion');
+  const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications',WhatsApp:'/wa/'};
+  const current = title===reunionTitle ? '/' : sectionOf[title];
+  const tab = (href,label) => `<a href="${href}"${href===current?' aria-current="page"':''}>${label}</a>`;
+  const menu=tab('/','Home')+tab('/memories','Memories')+tab('/people','Classmates')+tab('/reunion','Reunion')+tab('/wa/','WhatsApp');
+  const slug = current==='/' ? 'home' : current ? current.slice(1).replace(/\/$/,'')||'other' : 'other';
+  const banded = ['memories','people','gallery'].includes(slug);
+  const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
+    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p></div>
+    <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}${link('/wa/','WhatsApp')}${themeSwitch()}</nav></div></footer>` : '';
   const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       ${member.unread?`<span aria-hidden="true">${member.unread>99?'99+':member.unread}</span>`:''}</a>
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
-      ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title>${shareMeta}<style>
-  :root{color-scheme:light;--ink:#251a16;--muted:#654138;--paper:#fbf3e7;--tile:#fffaf3;--brick:#883b2e;--line:#dfcabc}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 system-ui,sans-serif}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem Georgia,serif;text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:Georgia,serif}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:3px solid #296769;outline-offset:3px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
-  ${titleFont}
+      ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
+  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+  ${fontFaces}
   ${theme}
   .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
-  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5}
+  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
   .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
-  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
+  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
   socialScript,
@@ -126,11 +155,17 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people,next,key,me){
+  home(rows,people,next,key,me,meet={available:false}){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
-      <div class="hero-actions"><a class="cta" href="/people/${me}">Edit profile</a><a class="cta secondary" href="/compose" data-compose-open>Share a memory</a></div>
-      </div></section>
+      <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
+      <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
+      </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
+      ${meet.available?`<section class="meet-banner" aria-label="Looking to catch up">
+        <p class="meet-count">${meetCountLine(meet.count)}</p>
+        <div class="meet-mine">${meet.picked.length?`<span class="meet-faces">${meetFaces(meet.picked)}</span><span class="registry">You’ve picked ${meet.picked.length}</span>`:'<span class="meet-hint">Pick the WIMWIans you most want to catch up with in Jaipur. Only you see your list.</span>'}
+          <a class="cta cta-primary" href="/people/${me}#meet">${meet.picked.length?'Add more':'Choose who to catch up with'}</a></div>
+      </section>`:''}
       <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
         <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
@@ -148,7 +183,9 @@ export const page={
   reunion(member,tracker,saved,directory,showSaved){
     const values = reunionValues(tracker,saved);
     const party = partySummary(values.spouse,values.children);
-    const missingDetails = missingReunionDetails(values).length>0;
+    const missing = missingReunionDetails(values), missingDetails = missing.length>0;
+    // Same critical fields as missingReunionDetails: four for everyone, two more with a partner, two per child.
+    const critical = 4 + (values.spouse==='1'?2:0) + 2*(Number(values.children)||0), done = critical-missing.length;
     const yesNo = [['','Choose an option'],['1','Yes'],['0','No']];
     const names = [['','Choose an option'],...Array.from({length:11},(_,i)=>[String(i),String(i)])];
     const entries = rows => rows.map(([time,title,location])=>`<li><span>${e(time)}</span><div><strong>${e(title)}</strong>${location?`<small>${e(location)}</small>`:''}</div></li>`).join('');
@@ -170,10 +207,13 @@ export const page={
       <header class="reunion-cover"><p class="class-label">IIM Ahmedabad · Class of 2006</p>
         <h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
         <p>20-year reunion · 26–28 December 2026 · Taj Amer, Jaipur</p>
+        ${countdown()}
       </header>
       ${tracker?`<section class="reunion-confirmation" aria-label="Attendance confirmation">
         <strong>You’re confirmed for the reunion, ${e(member.name)}.</strong>
-        ${party?`<p>${e(party)}</p>`:''}${missingDetails?'<p class="reunion-missing">Your attendance details are missing some important information. Please help us complete this.</p>':''}<a href="#reunion-details">Review your reunion details</a>
+        ${party?`<p>${e(party)}</p>`:''}
+        <div class="reunion-progress"><progress max="${critical}" value="${done}" aria-label="Reunion details complete">${done} of ${critical}</progress><span class="registry">${done} of ${critical} key details complete</span></div>
+        ${missingDetails?'<p class="reunion-missing">Your attendance details are missing some important information. Please help us complete this.</p>':''}<a href="#reunion-details">Review your reunion details</a>
       </section>`:''}
       <section class="reunion-section" id="reunion-agenda"><h2>Reunion agenda</h2>
         <div class="reunion-days">${agenda.map(([date,theme,iso,rows,parallel])=>`<details>
@@ -208,23 +248,28 @@ export const page={
     </div>`;
   },
   directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}${!reunion&&row.section?badge('Section '+row.section):''}${reunion?'':badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={}){
+    ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
     const hasValue = key => typeof details[key]==='string' && details[key].trim();
-    const factKeys = own ? facts : facts.filter(hasValue);
-    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
+    const inHero = ['dorm','nickname','section'];
+    // Visitors see only what is filled in, without repeating the hero's dorm, nickname and section.
+    // Owners see their filled fields in place and every empty one gathered under "Complete your page".
+    const factKeys = facts.filter(key=>hasValue(key)&&(own||!inHero.includes(key)));
+    const allEntryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
+    const entryKeys = allEntryKeys.filter(key=>hasValue(key)&&key!=='life');
+    const todoKeys = own ? [...facts,...allEntryKeys].filter(key=>!hasValue(key)) : [];
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
-      ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
+      ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn${extIcon}</a>` : '';
     const profileLinks = (Array.isArray(row.profileLinks) ? row.profileLinks : []).flatMap(item => {
       if (typeof item?.label !== 'string' || !item.label.trim() || typeof item.url !== 'string') return [];
       try {
         const url = new URL(item.url);
         return url.protocol === 'https:' && !url.username && !url.password
-          ? [`<li><a href="${e(url.href)}" rel="noreferrer">${e(item.label)} ↗</a></li>`]
+          ? [`<li><a href="${e(url.href)}" rel="noreferrer">${e(item.label)}${extIcon}</a></li>`]
           : [];
       } catch { return []; }
     });
@@ -232,7 +277,7 @@ export const page={
       ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
     const entry = key => {
       const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
-      return `<div class="editable-field"><dt>${e(label)}</dt><dd class="field-display">${e(details[key]||'—')}</dd>${edit(key,label,details[key])}</div>`;
+      return `<div class="editable-field${key==='moment'?' entry-moment':''}"><dt>${e(label)}</dt><dd class="field-display">${details[key]?e(details[key]):'<span class="field-empty">Not added yet</span>'}</dd>${edit(key,label,details[key])}</div>`;
     };
     return `<div class="alumni-profile">
       <header class="profile-header">
@@ -243,6 +288,9 @@ export const page={
               ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
               ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
           <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
+            ${hasValue('nickname')?`<p class="nickname">“${e(details.nickname)}”</p>`:''}
+            ${(()=>{const reg=[hasValue('section')&&'Section '+details.section,hasValue('dorm')&&dormLabel(details.dorm.trim()),'PGP 2004–06'].filter(Boolean).join(' · ');return `<p class="registry profile-registry">${e(reg)}</p>`;})()}
+            ${hasValue('life')?`<div class="editable-field profile-lede-field"><p class="profile-lede field-display">${e(details.life)}</p>${edit('life',labelFor('life'),details.life)}</div>`:''}
             ${edit('displayName','Name',details.displayName||row.name)}
             <div class="editable-field profile-rsvp">
               ${status?`<span class="profile-status field-display">${e(status)}</span>`:''}
@@ -250,22 +298,38 @@ export const page={
             </div>
           </div>
           <div class="profile-actions">
+            ${own?'<button type="button" class="edit-toggle" data-edit-toggle aria-pressed="false" hidden>Edit page</button>':''}
+            ${!own&&meet.available?(meet.wanted
+              ? meetForm('remove',row.id,'/people/'+row.id,checkIcon+'On your catch-up list','is-on')
+              : meetForm('add',row.id,'/people/'+row.id,'I’d like to catch up with '+e((details.displayName||row.name).split(/\s+/)[0]))):''}
             ${linkedin}
           </div>
         </div>
       </header>
       ${pilot?'<p class="profile-pilot">Profiles are being checked during the pilot.</p>':''}
-      <div class="profile-layout${factKeys.length||photos.length?'':' profile-layout-wide'}">
-        ${factKeys.length||photos.length?`<aside class="profile-sidebar">
+      <div class="profile-layout${factKeys.length||photos.length||todoKeys.length?'':' profile-layout-wide'}">
+        ${factKeys.length||photos.length||todoKeys.length?`<aside class="profile-sidebar">
           ${factKeys.length?`<section class="profile-section"><h2>About</h2><dl class="profile-facts">${factKeys.map(entry).join('')}</dl></section>`:''}
+          ${todoKeys.length?`<section class="profile-section profile-todo"><details><summary><h2>Complete your page</h2><span class="registry">${todoKeys.length} to add · only you see this</span></summary>
+            <dl class="profile-facts">${todoKeys.map(entry).join('')}</dl></details></section>`:''}
           ${photos.length?`<section class="profile-section profile-photos"><div class="profile-section-head"><h2>Photos</h2>
             <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
         </aside>`:''}
         <div class="profile-main">
+          ${own&&meet.available?`<section class="profile-section profile-meet" id="meet"><h2>Looking to catch up</h2>
+            <p class="meet-count">${meetCountLine(meet.count)}</p>
+            <p class="meet-hint">Pick the WIMWIans you most want to catch up with in Jaipur. Only you can see this list; each of them sees how many WIMWIans are looking to catch up with them, never who.</p>
+            ${meet.picked.length?`<ul class="meet-list">${meet.picked.map(person=>`<li><a href="/people/${person.id}">${portrait(person,true,96)}<span><strong>${e(person.name)}</strong>${person.nickname?`<small class="nickname">“${e(person.nickname)}”</small>`:''}</span></a>${meetForm('remove',person.id,'/people/'+me+'#meet','Remove','meet-remove')}</li>`).join('')}</ul>`:''}
+            <div class="meet-search" data-meet-picker data-picked="${meet.picked.map(person=>person.id).join(',')}">
+              <label>Add a WIMWIan<input type="search" data-meet-search placeholder="Type a name or nickname" autocomplete="off"></label>
+              <div data-meet-results role="listbox" aria-label="Matching classmates"></div>
+              <form method="post" action="/meet" data-meet-add hidden>${field('action','add')}<input type="hidden" name="target" value="">${field('next','/people/'+me+'#meet')}</form>
+              <noscript><p class="meet-hint">Or open any WIMWIan’s profile and press “I’d like to catch up”.</p></noscript>
+            </div></section>`:''}
           ${own||Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
             <div class="then-now-grid">${['then','now'].map(slot=>{
               const photo=profilePhotos[slot], label=slot==='then'?'Then':'Now';
-              return `<div class="then-now-slot"><h3>${label}</h3>
+              return `<div class="then-now-slot"><h3>${label} <span>${slot==='then'?'2006':'2026'}</span></h3>
                 ${photo?`<a href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" alt="${e(photo.caption||label+' photo of '+row.name)}" loading="lazy"></a>`:
                  `<p>${own?'Add a '+label.toLowerCase()+' photo.':'No photo shared.'}</p>`}
                 ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
@@ -402,36 +466,46 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
       <p class="help">Need to edit this email or email unavailable? Email <a href="${e(mailHelp)}">Tahseen and Arun</a>.</p>
     </div>` : '';
   return new Response(`<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${e(shareTitle)}</title>
+  <link rel="icon" href="/campus/logo.png">
+  <link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>
   ${shareMeta}
   <style>
-    ${titleFont}
-    :root { color-scheme:light; --paper:#f6f4ef; --ink:#242721; --muted:#555a50; --accent:#873d31; --line:#dedbd3; font:16px/1.5 system-ui,sans-serif }
+    ${fontFaces}
+    ${tokens}
+    :root { --accent:var(--brick); font:16px/1.55 var(--sans) }
     * { box-sizing:border-box }
-    body { margin:0; background:var(--paper); color:var(--ink) }
+    body { margin:0; background:var(--lime); color:var(--ink) }
     a { color:var(--accent); text-decoration:none }
     a:hover { text-decoration:underline }
-    :focus-visible { outline:3px solid #975044; outline-offset:4px }
-    .shell { background:linear-gradient(90deg,#170d0ac9,#1a100e66),url('/campus/arches.webp') center/cover; background-color:#251a16 }
-    .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:#f5f3ee; border-bottom:1px solid #dedbd3 }
-    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750 }
+    :focus-visible { outline:2px solid var(--brick-fired); outline-offset:2px }
+    .shell { background:linear-gradient(90deg,#1c1816e6,#1c181670),url('/campus/arches.webp') center/cover; background-color:var(--night) }
+    .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:var(--paper); border-bottom:3px solid var(--brick) }
+    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font:700 1.05rem var(--serif) }
+    .brand small { font:600 .72rem var(--sans); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); padding-left:.6rem; border-left:1px solid var(--concrete) }
     .mark { width:29px; height:29px; object-fit:contain; mix-blend-mode:multiply }
     .sign-in-campus { min-height:calc(100svh - 47px); display:grid; align-items:center; padding:clamp(24px,7vw,100px) clamp(16px,7vw,100px) }
     .layout { width:min(1120px,100%); margin:auto; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); align-items:center; gap:clamp(20px,5vw,74px) }
     .intro { color:#fff3e3 }
     h1,h2 { margin:0; line-height:1.08 }
-    .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1.06 "IIMA Title",Georgia,serif; letter-spacing:-.06em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
-    .reunion-title [aria-hidden] { color:#e0a48e; font-size:.55em }
-    .card { background:#fffaf3f5; border:1px solid #fff8; border-radius:20px; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #130b0850; backdrop-filter:blur(12px) }
-    h2 { font-size:clamp(1.55rem,3vw,2rem); letter-spacing:-.045em }
+    html { font-synthesis:none; font-optical-sizing:auto }
+    .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1 var(--serif); letter-spacing:-.018em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
+    .reunion-title [aria-hidden] { color:var(--brick-fired); font-size:.55em }
+    .theme-switch { margin:0 } .theme-switch button { padding:.3rem .7rem; border-radius:999px; background:transparent; color:var(--ink); border:1px solid var(--concrete); font:600 .78rem var(--sans) }
+    :root[data-theme=dark] .theme-switch .to-dark, :root:not([data-theme=dark]) .theme-switch .to-light { display:none }
+    :root[data-theme=dark] .mark { mix-blend-mode:normal; background:#fffcf6; border-radius:50%; padding:2px }
+    :root[data-theme=dark] .card { box-shadow:0 18px 50px #00000080 }
+    .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.08em; text-transform:uppercase; color:#f3e4dc }
+    .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:50% 50% var(--r) var(--r)/28px 28px var(--r) var(--r); padding-top:clamp(28px,4vw,44px)!important; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
+    h2 { font:650 clamp(1.6rem,3vw,2.1rem)/1.1 var(--serif); letter-spacing:-.015em }
     p { margin:.65rem 0 }
     .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
-    label { display:block; margin-top:20px; font-weight:650; font-size:.84rem }
-    .search { display:flex; align-items:center; gap:10px; border:1px solid #a9ada0; background:#fafaf8; border-radius:10px; padding:0 12px; margin-top:7px }
+    label { display:block; margin-top:20px; font-weight:600; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--brick) }
+    .search { display:flex; align-items:center; gap:10px; border:1px solid var(--concrete); background:var(--paper); border-radius:var(--r-sm); padding:0 12px; margin-top:7px }
     .search svg { flex:0 0 18px; color:var(--muted) }
     .search:focus-within { outline:2px solid var(--accent); outline-offset:2px }
     input { width:100%; min-width:0; outline:none; border:0; background:transparent; padding:12px 0; color:var(--ink); font:inherit }
@@ -439,11 +513,11 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     ul { list-style:none; margin:6px 0 0; padding:0; font-size:.92rem }
     ul:empty { display:none }
     li a { display:block; padding:7px 9px; border-radius:7px }
-    li a:hover { background:#f4eee9 }
+    li a:hover { background:var(--brick-wash) }
     .selection { margin-top:16px; border-top:1px solid var(--line); padding-top:16px; overflow-wrap:anywhere }
     .selection p { margin:.15rem 0 .7rem }
-    button { padding:10px 15px; border:0; border-radius:9px; background:var(--accent); color:white; font:650 .9rem/1.4 system-ui,sans-serif; cursor:pointer }
-    button:hover { background:#703126 }
+    button { padding:11px 16px; border:0; border-radius:var(--r-sm); background:var(--brick); color:white; font:600 .92rem/1.4 var(--sans); cursor:pointer }
+    button:hover { background:var(--brick-deep) }
     .help { margin:20px 0 0 }
     @media(max-width:750px) {
       .masthead { min-height:44px }
@@ -456,11 +530,12 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
 <body>
   <div class="shell">
     <header class="masthead">
-      <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA Class of 2006</a>
+      <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA <small>Class of 2006</small></a>
+      ${themeSwitch()}
     </header>
     <main class="sign-in-campus">
       <div class="layout">
-        <div class="intro"><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1></div>
+        <div class="intro"><p class="eyebrow">IIM Ahmedabad · PGP 2004–06</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1></div>
         <section class="card" aria-labelledby="sign-in-title">
           <h2 id="sign-in-title">Sign in</h2>
           ${!selected&&feedback?`<p role="status" class="help">${e(feedback)}</p>`:''}

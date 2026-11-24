@@ -1,4 +1,6 @@
 import { render, signIn, page, form, field, escape } from './views.mjs';
+import { fonts } from './fonts.mjs';
+import { whatsappRoute } from './whatsapp.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -42,8 +44,13 @@ export default {
         if(ctx) ctx.waitUntil(write);
         return write;
       };
-      const response = await route(request, env, record, member=>{viewer=member;});
-      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$)/;
+      let response = await route(request, env, record, member=>{viewer=member;});
+      // Dark is the default; a visitor who picked light gets the attribute flipped before the page leaves.
+      if (/(?:^|;\s*)theme=light(?:;|$)/.test(request.headers.get('Cookie')||'') && response.headers.get('Content-Type')?.includes('text/html')) {
+        const html = (await response.text()).replace('<html lang="en" data-theme="dark"','<html lang="en" data-theme="light"');
+        response = new Response(html,{status:response.status,headers:response.headers});
+      }
+      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$|wa\/(?:batch)?$)/;
       const automated=/bot|crawler|spider|preview|whatsapp|facebookexternalhit/i.test(request.headers.get('User-Agent')||'');
       const intent=(request.headers.get('Sec-Purpose')||'')+' '+(request.headers.get('Purpose')||'');
       if(request.method==='GET' && response.ok && acceptedPage.test(path) &&
@@ -55,7 +62,7 @@ export default {
       if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
       if (!response.headers.has('Referrer-Policy')) response.headers.set('Referrer-Policy','strict-origin');
-      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+      if (!response.headers.has('Content-Security-Policy')) response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
       return new Response('The site could not complete that request. Please try again.', {status:500});
@@ -82,8 +89,19 @@ async function route(req, env, record, setViewer) {
     if (!object) return missing();
     return new Response(object.body,{headers:{'Content-Type':campusAssets[asset],'Cache-Control':'public, max-age=86400'}});
   }
+  if (!post && path.startsWith('/fonts/')) {
+    const name = path.slice('/fonts/'.length);
+    if (!Object.hasOwn(fonts,name)) return missing();
+    return new Response(Uint8Array.from(atob(fonts[name]),c=>c.charCodeAt(0)),{headers:{'Content-Type':'font/woff2','Cache-Control':'public, max-age=31536000, immutable'}});
+  }
   if (path==='/social.js' && !post) return new Response(page.socialScript,{
     headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300'}});
+  if (path==='/theme' && post) {
+    const light = !/(?:^|;\s*)theme=light(?:;|$)/.test(req.headers.get('Cookie')||'');
+    let back = '/';
+    try { const ref = new URL(req.headers.get('Referer')||'/', u.origin); if (ref.origin===u.origin) back = destination(ref.pathname+ref.search+ref.hash); } catch {}
+    return redirect(back,{'Set-Cookie':`theme=${light?'light':'dark'}; Path=/; Max-Age=31536000; Secure; SameSite=Lax`});
+  }
   const token = req.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-alumni=([a-f0-9-]+)/)?.[1];
   if (path==='/logout' && post) {
     if (token) await run('DELETE FROM sessions WHERE token=?',await hash(token));
@@ -203,6 +221,10 @@ async function route(req, env, record, setViewer) {
       instr(lower(name||' '||nickname),lower(?))>0 ORDER BY name LIMIT 12`,me,q));
   }
   const admin = member.role === 'admin';
+  if (!post && (path==='/wa' || path.startsWith('/wa/'))) {
+    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render});
+    if (response) return response;
+  }
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
   const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT)))`;
   const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
@@ -314,6 +336,33 @@ async function route(req, env, record, setViewer) {
     }
     return {rows:mixed,next};
   }
+  // "Looking forward to meeting": tolerant of a database where migration 0014 has not run yet.
+  const meetLimit = 60;
+  async function meetSummary(target=null) {
+    try {
+      const [count,picked,wanted] = await Promise.all([
+        one('SELECT count(*) AS n FROM meet_wishes WHERE target=?',me),
+        all(`SELECT r.id,r.name,r.nickname,r.dorm,${portrait} AS portrait FROM meet_wishes w JOIN roster r ON r.id=w.target ${seedJoin}
+          WHERE w.member=? ORDER BY w.created DESC,r.name`,+pilot,me),
+        target==null ? null : one('SELECT 1 AS yes FROM meet_wishes WHERE member=? AND target=?',me,target)
+      ]);
+      return {available:true,count:count.n,picked,wanted:!!wanted};
+    } catch { return {available:false,count:0,picked:[],wanted:false}; }
+  }
+  if (path==='/meet' && post) {
+    const f = await data();
+    const target = Number(str(f,'target',12));
+    const action = str(f,'action',10);
+    const back = destination(str(f,'next',300)||'/people/'+me);
+    if (!['add','remove'].includes(action) || !Number.isInteger(target) || target===me || !(await one('SELECT id FROM roster WHERE id=?',target)))
+      return invalid('Choose a classmate.');
+    if (action==='add') {
+      const {n} = await one('SELECT count(*) AS n FROM meet_wishes WHERE member=?',me);
+      if (n>=meetLimit) return invalid('You can pick up to '+meetLimit+' classmates.');
+      await run('INSERT OR IGNORE INTO meet_wishes(member,target,created) VALUES(?,?,?)',me,target,now());
+    } else await run('DELETE FROM meet_wishes WHERE member=? AND target=?',me,target);
+    return redirect(back);
+  }
   if (path==='/memories') {
     const q=(u.searchParams.get('q')||'').trim().slice(0,100);
     const {rows,next} = await feed(12,u.searchParams.get('featured')==='1',q);
@@ -336,10 +385,10 @@ async function route(req, env, record, setViewer) {
     return json([...people,...topics,...suggestions.filter(x=>!topics.some(t=>t.label.toLowerCase()===x.label.toLowerCase()))]);
   }
   if (path==='/') {
-    const [{rows,next},people] = await Promise.all([feed(9,true),all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
+    const [{rows,next},people,meet] = await Promise.all([feed(9,true),all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
       WHERE EXISTS(SELECT 1 FROM submissions y WHERE y.subject=r.id AND y.contributor=r.id AND y.kind='self')
-      ORDER BY random() LIMIT 12`,+pilot)]);
-    return render('Kal • Aaj • Aur Kal',page.home(rows,people,next,id(),me),member,{home:true});
+      ORDER BY random() LIMIT 12`,+pilot),meetSummary()]);
+    return render('Kal • Aaj • Aur Kal',page.home(rows,people,next,id(),me,meet),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
@@ -393,7 +442,7 @@ async function route(req, env, record, setViewer) {
     const row = await one(`SELECT r.*,a.status AS own_attendance,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
-    const [seed,selected,section,photos,stories,profilePhotos] = await Promise.all([
+    const [seed,selected,section,photos,stories,profilePhotos,meet] = await Promise.all([
       one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot),
       all(`SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=?
         AND field NOT IN ('thenPhotoObject','nowPhotoObject') ORDER BY priority`,key,+pilot),
@@ -405,7 +454,8 @@ async function route(req, env, record, setViewer) {
         JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
         WHERE y.member=? AND ph.slot IN ('then','now')
         UNION ALL SELECT substr(field,1,length(field)-11), 'profile-photo/'||member||'/'||substr(field,1,length(field)-11), ''
-        FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,key,key)
+        FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,key,key),
+      meetSummary(key)
     ]);
     const imported = parse(seed?.source_data);
     const details = {dorm:row.dorm,nickname:row.nickname,life:'',city:'',company:'',country:'',section:section?.section,education:'',professionalFocus:'',researchHighlight:''};
@@ -413,7 +463,7 @@ async function route(req, env, record, setViewer) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo]))),member,{home:true});
+    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true});
   }
 
   if (path==='/profile') {

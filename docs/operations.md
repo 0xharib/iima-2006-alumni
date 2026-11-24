@@ -14,6 +14,26 @@ New local databases can apply the checked-in migrations in order. Existing envir
 
 `0002_publish_imports.sql` is a historical data migration. It creates published profiles and memories from legacy rows and approves pending seeds. Review changes against an isolated copy first if a target contains any unpublished data. Treat legacy submissions and enrichment sources as distinct from owner edits. Profile pages resolve owner edits ahead of published yearbook data and selected enrichment. An explicitly blank owner value hides a fallback.
 
+`0014_meet_wishes.sql` adds the "Looking forward to meeting" table. It only creates a table and an index, so it is safe to run on its own against production: `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0014_meet_wishes.sql`. Until it runs, the Worker hides the feature rather than failing.
+
+## WhatsApp story
+
+`/wa/` shows each signed-in classmate their own WhatsApp story. `/wa/batch` is the batch story. It is not in any menu; personal pages link to it. Both come from the batch WhatsApp pipeline's microsite kit, which holds every batchmate's personal data. The kit lives only in R2 under `whatsapp-v1/` and must never be committed. Load or refresh it from an unzipped kit:
+
+```sh
+tools/import-whatsapp.sh path/to/iima06-whatsapp-microsite-kit --remote
+```
+
+The script uploads people files first and the login index last, and skips `organiser/` and `data/pages/`. Until a kit is loaded, `/wa/` says the story isn't up yet.
+
+- A classmate is matched to their story by the emails in `reminder_contacts`, then the numbers in `reminder_mobiles` (normalised to E.164), against the kit's `data/index.json`. The person id always comes from the session. Admins can preview anyone with `/wa/?person=P123`.
+- Classmates with fewer than 30 messages (`QUIET_BELOW` in `whatsapp.mjs`), including those who never posted, get a short page of their own ("You're a quiet one…") with a link to the batch story. So do classmates who weren't in the group, can't be matched, or opted out, each with their own wording.
+- The Worker reskins the kit pages as it serves them: site fonts instead of Google Fonts, site colours in both themes, the validated chart palette, and the site's bar. It adds a per-response nonce for their inline scripts. Responses are `private, no-store` and `noindex`.
+
+## Theme
+
+Pages are dark unless the visitor chooses light. The choice is a `theme` cookie, set by `POST /theme`, and the Worker flips `data-theme` on the `<html>` element before sending the page.
+
 ## Pilot checks
 
 - Request a link to a test address, check Inbox and Junk, open the link once, and confirm that signing out invalidates the session.

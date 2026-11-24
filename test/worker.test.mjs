@@ -380,3 +380,109 @@ test('logout invalidates the session and confirms sign-out even after a retry',a
  assert.equal((await call('/people/1',ck)).status,303);
  assert.match(await body(await call('/signin?signed-out=1')),/You’re signed out/);
 });
+
+test('WIMWIans pick who they want to catch up with; targets see only a count',async()=>{
+ const {call,session,sqlite}=fixture();
+ const admin=await session(1,'aaaa'), classmate=await session(2,'bbbb');
+ const banner=html=>html.match(/<section class="meet-banner"[\s\S]*?<\/section>/)?.[0]||'';
+ const meetSection=html=>html.match(/<section class="profile-section profile-meet"[\s\S]*?<\/section>/)?.[0]||'';
+ assert.match(banner(await body(await call('/',admin))),/Which WIMWIans are you looking to catch up with\?/);
+ const added=await call('/meet',classmate,{action:'add',target:'1',next:'/people/1'});
+ assert.equal(added.status,303);
+ assert.equal(added.headers.get('location'),'/people/1');
+ assert.equal((await call('/meet',classmate,{action:'add',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,1);
+ const adminHome=banner(await body(await call('/',admin)));
+ assert.match(adminHome,/<strong class="meet-number">1<\/strong> <span>WIMWIan is looking to catch up with you/);
+ assert.doesNotMatch(adminHome,/Test Classmate/);
+ const adminOwn=meetSection(await body(await call('/people/1',admin)));
+ assert.match(adminOwn,/WIMWIan is looking to catch up with you/);
+ assert.doesNotMatch(adminOwn,/Test Classmate/);
+ assert.match(await body(await call('/people/1',classmate)),/On your catch-up list/);
+ assert.match(meetSection(await body(await call('/people/2',classmate))),/href="\/people\/1"[\s\S]*Test Admin/);
+ assert.match(banner(await body(await call('/',classmate))),/You’ve picked 1/);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'2'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'999'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'wave',target:'1'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'1',next:'//elsewhere.example'})).headers.get('location'),'/');
+ assert.equal((await call('/meet',classmate,{action:'remove',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,0);
+ assert.equal((await call('/meet',null,{action:'add',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,0);
+});
+
+test('home and profiles still render before the catch-up migration is applied',async()=>{
+ const {call,session,sqlite}=fixture();
+ sqlite.exec('DROP TABLE meet_wishes');
+ const ck=await session(2,'bbbb');
+ const home=await body(await call('/',ck));
+ assert.doesNotMatch(home,/class="meet-banner"/);
+ const own=await body(await call('/people/2',ck));
+ assert.doesNotMatch(own,/id="meet"/);
+ assert.doesNotMatch(await body(await call("/people/1",ck)),/class="meet-form/);
+});
+
+test('WhatsApp pages: own page at 30+ messages, quiet ones to the batch story, data only for yourself',async()=>{
+ const {call,session,env}=fixture();
+ const admin=await session(1,'aaaa'), classmate=await session(2,'bbbb');
+ assert.match(await body(await call('/wa/',classmate)),/isn’t up yet/);
+ const put=(key,value)=>env.MEDIA.put('whatsapp-v1/'+key,new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)));
+ const template='<!doctype html><html lang="en" data-me-src="x"><head><link href="https://fonts.googleapis.com/css2?family=Inter" rel="stylesheet"></head><body><nav class="sitebar"><div>kit bar</div></nav>'+
+   '<script type="application/json" id="me">__ME__</script><script type="application/json" id="group">__GROUP__</script><script>render()</script></body></html>';
+ await put('site/index.html',template);
+ await put('site/story.html','<!doctype html><html lang="en" data-me-href="/wa/"><head></head><body><nav class="sitebar"><div>kit bar</div></nav><h1>Batch story</h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/d.gif"></picture><script src="assets/d3.js"></script></body></html>');
+ await put('site/assets/d3.js','/* d3 */');
+ await put('data/group.json',{messages:100,posters:3});
+ await put('data/index.json',{by_email:{'classmate@example.test':'P002','admin@example.test':'P003'},by_phone:{},people:{P002:{},P003:{},P004:{}}});
+ await put('data/people/P002.json',{person_id:'P002',name:'Test Classmate',in_group:true,messages:45});
+ await put('data/people/P003.json',{person_id:'P003',name:'Test Admin',in_group:true,messages:12});
+ await put('data/people/P004.json',{person_id:'P004',name:'Silent One',in_group:true,quiet:true,messages:0});
+
+ const mine=await call('/wa/',classmate);
+ const html=await body(mine);
+ assert.match(html,/"name":"Test Classmate"/);
+ assert.doesNotMatch(html,/fonts\.googleapis|kit bar|__ME__/);
+ assert.match(html,/<a id="navMe" href="\/wa\/" aria-current="page">Your page<\/a>/);
+ const nonce=mine.headers.get('content-security-policy').match(/'nonce-([a-f0-9]+)'/)[1];
+ assert.equal((html.match(/<script /g)||[]).length,(html.match(new RegExp('<script nonce="'+nonce+'"','g'))||[]).length);
+ assert.equal(mine.headers.get('cache-control'),'private, no-store');
+
+ const quiet=await body(await call('/wa/',admin));
+ assert.match(quiet,/You’re a quiet one, Test/);
+ assert.match(quiet,/few drinks at the reunion will get you talking/);
+ assert.match(quiet,/12 messages in the batch group/);
+ assert.match(quiet,/href="\/wa\/batch">See how the batch has been chatting/);
+ assert.doesNotMatch(quiet,/__ME__|"messages":12/);
+ const story=await body(await call('/wa/batch',admin));
+ assert.match(story,/<h1>Batch story<\/h1>/);
+ assert.doesNotMatch(story,/quiet one/);
+ assert.match(story,/media="all" srcset="assets\/d\.gif"/);
+ assert.match(await body(await call('/wa/?person=P004',admin)),/Admin preview: Silent One[\s\S]*Not a single message/);
+ assert.match(await body(await call('/wa/?person=P002',admin)),/Admin preview: Test Classmate/);
+
+ assert.equal((await (await call('/wa/api/me',classmate)).json()).person_id,'P002');
+ assert.equal((await (await call('/wa/api/me?person=P003',classmate)).json()).person_id,'P002');
+ assert.equal((await call('/wa/?person=P003',classmate)).status,200);
+ assert.match(await body(await call('/wa/?person=P003',classmate)),/"name":"Test Classmate"/);
+ assert.equal((await call('/wa/assets/..%2Fdata%2Findex.json',classmate)).status,404);
+ assert.equal(await (await call('/wa/assets/d3.js',classmate)).text(),'/* d3 */');
+ assert.equal((await call('/wa/story.html',classmate)).headers.get('location'),'/wa/batch');
+ assert.doesNotMatch(await body(await call('/',classmate)),/href="\/wa\/batch"/);
+ assert.equal((await call('/wa',classmate)).headers.get('location'),'/wa/');
+ assert.match((await call('/wa/')).headers.get('location'),/^\/signin/);
+ assert.match((await call('/wa/api/me')).headers.get('location'),/^\/signin/);
+});
+
+test('dark by default, light by choice, switch works without JavaScript',async()=>{
+ const {call,session}=fixture();
+ const ck=await session(2,'bbbb');
+ assert.match(await body(await call('/',ck)),/<html lang="en" data-theme="dark"/);
+ assert.match(await body(await call('/',ck+'; theme=light')),/<html lang="en" data-theme="light"/);
+ assert.match(await body(await call('/signin')),/<html lang="en" data-theme="dark"/);
+ const toLight=await call('/theme',ck,{},{Referer:'https://test.example/people/2'});
+ assert.equal(toLight.status,303);
+ assert.equal(toLight.headers.get('location'),'/people/2');
+ assert.match(toLight.headers.get('set-cookie'),/^theme=light;/);
+ assert.match((await call('/theme',ck+'; theme=light',{},{Referer:'https://elsewhere.example/x'})).headers.get('set-cookie'),/^theme=dark;/);
+ assert.equal((await call('/theme',ck,{},{Referer:'https://elsewhere.example/x'})).headers.get('location'),'/');
+});

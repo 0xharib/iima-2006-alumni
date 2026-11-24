@@ -1,5 +1,33 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  // "Looking to catch up": search WIMWIans and add one with a normal form post.
+  const meet=document.querySelector('[data-meet-picker]');
+  if(meet){
+    const box=meet.querySelector('[data-meet-search]'), list=meet.querySelector('[data-meet-results]'), add=meet.querySelector('[data-meet-add]');
+    const picked=new Set((meet.dataset.picked||'').split(',').filter(Boolean));
+    let revision=0, timer=0;
+    box.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{
+      const request=++revision, q=box.value.trim(); list.replaceChildren(); if(q.length<2) return;
+      try{
+        const rows=await (await fetch('/tag-search?q='+encodeURIComponent(q))).json(); if(request!==revision) return;
+        const fresh=rows.filter(row=>!picked.has(String(row.id)));
+        if(!fresh.length){const p=document.createElement('p');p.className='meet-hint';p.textContent=rows.length?'Already on your list.':'No matching classmates.';list.append(p);return;}
+        for(const row of fresh){const b=document.createElement('button');b.type='button';b.setAttribute('role','option');
+          b.textContent=row.name+(row.nickname?' · '+row.nickname:'');
+          b.addEventListener('click',()=>{add.elements.target.value=row.id;b.disabled=true;add.submit();});list.append(b);}
+      }catch{const p=document.createElement('p');p.className='meet-hint';p.textContent='Search unavailable. Try again.';list.append(p);}
+    },180);});
+  }
+  // Owners: one "Edit page" switch instead of a pencil on every field. Without this script the pencils stay visible.
+  const profile=document.querySelector('.alumni-profile'), toggle=document.querySelector('[data-edit-toggle]');
+  if(profile && toggle){
+    profile.dataset.editable='';
+    toggle.hidden=false;
+    const set=on=>{profile.classList.toggle('is-editing',on);toggle.setAttribute('aria-pressed',String(on));toggle.textContent=on?'Done editing':'Edit page';};
+    toggle.addEventListener('click',()=>set(!profile.classList.contains('is-editing')));
+    try{if(sessionStorage.getItem('profile-editing')==='1') set(true);}catch{}
+    addEventListener('pagehide',()=>{try{sessionStorage.setItem('profile-editing',profile.classList.contains('is-editing')?'1':'0');}catch{}});
+  }
   const strip=document.querySelector('[data-classmate-strip]');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   if(strip && !reducedMotion.matches){
