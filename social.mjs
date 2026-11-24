@@ -1,6 +1,6 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
-  // "Looking forward to meeting": search classmates and add one with a normal form post.
+  // "Looking to catch up": search WIMWIans and add one with a normal form post.
   const meet=document.querySelector('[data-meet-picker]');
   if(meet){
     const box=meet.querySelector('[data-meet-search]'), list=meet.querySelector('[data-meet-results]'), add=meet.querySelector('[data-meet-add]');
