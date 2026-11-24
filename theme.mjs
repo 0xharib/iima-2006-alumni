@@ -626,4 +626,86 @@ time,small{color:var(--muted)}
   .site-footer{margin-top:2rem!important}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}.directory-card:hover{transform:none}}
+
+/* ===== Pass 2: arches, ledes, progress, finer type ===== */
+/* Segmental arch tops: a wide horizontal radius over a shallow vertical one */
+.page-band main>h1,.reunion-cover,.profile-cover{border-radius:50% 50% var(--r) var(--r)/34px 34px var(--r) var(--r)}
+.profile-header{border-radius:50% 50% var(--r) var(--r)/34px 34px var(--r) var(--r)}
+.alumni-home .campus-hero{border-radius:50% 50% 0 0/46px 46px 0 0;margin-top:clamp(10px,2vw,22px)}
+h1,h2,h3,.reunion-confirmation strong{text-wrap:balance}
+p,dd,.memory-quote{text-wrap:pretty}
+.registry,.seal,.album-photo-count,.directory-count{font-variant-numeric:tabular-nums}
+::selection{background:var(--brick-wash);color:var(--brick-deep)}
+.member-site main{line-height:1.6}
+.hero-lede{max-width:34rem;margin:.6rem 0 1.4rem!important;font:italic 400 clamp(1.05rem,1.6vw,1.25rem)/1.5 var(--serif);color:#f3e4dc!important}
+.seal-link{color:inherit}.seal-link:hover .seal{background:var(--brick-deep)}
+.seal{transition:background-color .16s}
+
+/* Profile lede and owner checklist */
+.profile-lede{margin:.7rem 0 .2rem!important;max-width:40rem;font:italic 400 clamp(1.05rem,1.7vw,1.3rem)/1.5 var(--serif);color:var(--ink)!important}
+.profile-todo{background:var(--lime);border-style:dashed;border-top-style:solid}
+.profile-todo summary{list-style:none;display:flex;flex-direction:column;gap:.2rem;margin:0}
+.profile-todo summary::-webkit-details-marker{display:none}
+.profile-todo summary h2{margin:0;display:flex;align-items:center;gap:.5rem}
+.profile-todo summary h2::after{content:'+';margin-left:auto;font:400 1.4rem/1 var(--sans);color:var(--brick)}
+.profile-todo details[open] summary h2::after{content:'–'}
+.profile-todo details[open] summary{margin-bottom:1rem}
+.profile-todo .field-display{display:none}
+.profile-todo .editable-field{padding:.55rem 1.8rem .55rem 0;border-bottom:1px solid var(--line)}
+.profile-todo .profile-facts{grid-template-columns:1fr;gap:0}
+.profile-todo .inline-edit summary{opacity:1}
+
+/* Initials as a circular opening, not a flat fill */
+.directory-card .initials,.person-tile .initials{background:radial-gradient(circle at 50% 50%,var(--paper) 0 30%,var(--brick) calc(30% + 1px) calc(30% + 2px),var(--brick-wash) calc(30% + 3px))!important}
+.home-classmates .person-tile .initials{background:radial-gradient(circle at 50% 42%,#2a221e 0 28%,var(--brick-fired) calc(28% + 1px) calc(28% + 2px),#211b18 calc(28% + 3px))!important;color:#f3e4dc!important;place-items:start center;padding-top:28%}
+
+/* Directory count */
+.directory-count{margin:0 0 .8rem;color:var(--muted)}
+.reunion-page .directory-count{font-size:.85rem;color:var(--brick)}
+
+/* Reunion: progress and three-day agenda */
+.reunion-progress{display:flex;align-items:center;gap:.8rem;margin:.8rem 0 .4rem}
+.reunion-progress progress{-webkit-appearance:none;appearance:none;width:min(260px,55%);height:8px;border:0;border-radius:999px;background:var(--line);overflow:hidden}
+.reunion-progress progress::-webkit-progress-bar{background:var(--line);border-radius:999px}
+.reunion-progress progress::-webkit-progress-value{background:var(--brick);border-radius:999px}
+.reunion-progress progress::-moz-progress-bar{background:var(--brick);border-radius:999px}
+@media(min-width:900px){
+  .reunion-days{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;align-items:start}
+  .reunion-days details{margin:0}
+  .reunion-days details[open]{grid-column:1/-1}
+}
+
+/* Memory cards: a little lift, photo captions breathe */
+.collage-card:is(.memory-collage *,.memory-columns *){transition:box-shadow .16s,transform .16s}
+.collage-card:is(.memory-collage *,.memory-columns *):hover{box-shadow:0 8px 22px #21181216;transform:translateY(-2px)}
+
+/* Footer motto */
+.site-footer .motto{font:400 1rem/1.4 var(--serif)!important;letter-spacing:.02em!important;text-transform:none!important;color:#f3e4dc!important;margin-top:.6rem!important}
+
+@media(max-width:650px){
+  .page-band main>h1,.reunion-cover,.profile-cover,.profile-header{border-radius:50% 50% var(--r) var(--r)/20px 20px var(--r) var(--r)}
+  .alumni-home .campus-hero{border-radius:50% 50% 0 0/24px 24px 0 0;margin-top:6px}
+  .hero-lede{font-size:1rem}
+  .reunion-progress{flex-direction:column;align-items:flex-start}
+  .reunion-progress progress{width:100%}
+}
+@media(prefers-reduced-motion:reduce){.collage-card:hover{transform:none!important}}
+.profile-lede-field{padding-right:1.8rem}.profile-lede-field .inline-edit summary{top:.7rem}
+
+/* Phones: stories first, facts after */
+@media(max-width:730px){
+  .profile-layout{display:flex;flex-direction:column}
+  .profile-sidebar,.profile-main{display:contents}
+  .profile-layout .profile-section{order:3}
+  .profile-layout .profile-then-now{order:1}
+  .profile-layout .profile-section:has(>.profile-entry){order:2}
+  .profile-layout .profile-todo{order:4}
+  .profile-layout .profile-photos{order:5}
+  .profile-layout .profile-memories{order:6}
+}
+@media(max-width:650px){
+  .memory-toolbar{align-items:end}
+  .memory-toolbar :is(input,button,.share-memory){height:44px;min-height:44px;margin:0}
+  .memory-toolbar .share-memory{display:inline-flex;align-items:center}
+}
 `;

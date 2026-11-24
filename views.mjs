@@ -101,7 +101,8 @@ export function render(title,body,member,{home=false}={}) {
   const slug = current==='/' ? 'home' : current ? current.slice(1) : 'other';
   const banded = ['memories','people','gallery'].includes(slug);
   const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
-    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p></div>
+    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p>
+    <p class="motto" lang="sa" title="Vidya Viniyogadvikasah: development through the application of knowledge">विद्याविनियोगाद्विकासः</p></div>
     <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}</nav></div></footer>` : '';
   const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
@@ -110,7 +111,7 @@ export function render(title,body,member,{home=false}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title>${shareMeta}<style>
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png">${shareMeta}<style>
   ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
   ${titleFont}
   ${fontFaces}
@@ -150,8 +151,9 @@ export const page={
   home(rows,people,next,key,me){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
+      <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
-      </div>${countdown()}</section>
+      </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
       <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
         <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
@@ -169,7 +171,9 @@ export const page={
   reunion(member,tracker,saved,directory,showSaved){
     const values = reunionValues(tracker,saved);
     const party = partySummary(values.spouse,values.children);
-    const missingDetails = missingReunionDetails(values).length>0;
+    const missing = missingReunionDetails(values), missingDetails = missing.length>0;
+    // Same critical fields as missingReunionDetails: four for everyone, two more with a partner, two per child.
+    const critical = 4 + (values.spouse==='1'?2:0) + 2*(Number(values.children)||0), done = critical-missing.length;
     const yesNo = [['','Choose an option'],['1','Yes'],['0','No']];
     const names = [['','Choose an option'],...Array.from({length:11},(_,i)=>[String(i),String(i)])];
     const entries = rows => rows.map(([time,title,location])=>`<li><span>${e(time)}</span><div><strong>${e(title)}</strong>${location?`<small>${e(location)}</small>`:''}</div></li>`).join('');
@@ -195,7 +199,9 @@ export const page={
       </header>
       ${tracker?`<section class="reunion-confirmation" aria-label="Attendance confirmation">
         <strong>You’re confirmed for the reunion, ${e(member.name)}.</strong>
-        ${party?`<p>${e(party)}</p>`:''}${missingDetails?'<p class="reunion-missing">Your attendance details are missing some important information. Please help us complete this.</p>':''}<a href="#reunion-details">Review your reunion details</a>
+        ${party?`<p>${e(party)}</p>`:''}
+        <div class="reunion-progress"><progress max="${critical}" value="${done}" aria-label="Reunion details complete">${done} of ${critical}</progress><span class="registry">${done} of ${critical} key details complete</span></div>
+        ${missingDetails?'<p class="reunion-missing">Your attendance details are missing some important information. Please help us complete this.</p>':''}<a href="#reunion-details">Review your reunion details</a>
       </section>`:''}
       <section class="reunion-section" id="reunion-agenda"><h2>Reunion agenda</h2>
         <div class="reunion-days">${agenda.map(([date,theme,iso,rows,parallel])=>`<details>
@@ -230,15 +236,20 @@ export const page={
     </div>`;
   },
   directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
+    ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={}){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
     const hasValue = key => typeof details[key]==='string' && details[key].trim();
-    const factKeys = own ? facts : facts.filter(hasValue);
-    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
+    const inHero = ['dorm','nickname','section'];
+    // Visitors see only what is filled in, without repeating the hero's dorm, nickname and section.
+    // Owners see their filled fields in place and every empty one gathered under "Complete your page".
+    const factKeys = facts.filter(key=>hasValue(key)&&(own||!inHero.includes(key)));
+    const allEntryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
+    const entryKeys = allEntryKeys.filter(key=>hasValue(key)&&key!=='life');
+    const todoKeys = own ? [...facts,...allEntryKeys].filter(key=>!hasValue(key)) : [];
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
       ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
     const profileLinks = (Array.isArray(row.profileLinks) ? row.profileLinks : []).flatMap(item => {
@@ -267,6 +278,7 @@ export const page={
           <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
             ${hasValue('nickname')?`<p class="nickname">“${e(details.nickname)}”</p>`:''}
             ${(()=>{const reg=[hasValue('section')&&'Section '+details.section,hasValue('dorm')&&dormLabel(details.dorm.trim()),'PGP 2004–06'].filter(Boolean).join(' · ');return `<p class="registry profile-registry">${e(reg)}</p>`;})()}
+            ${hasValue('life')?`<div class="editable-field profile-lede-field"><p class="profile-lede field-display">${e(details.life)}</p>${edit('life',labelFor('life'),details.life)}</div>`:''}
             ${edit('displayName','Name',details.displayName||row.name)}
             <div class="editable-field profile-rsvp">
               ${status?`<span class="profile-status field-display">${e(status)}</span>`:''}
@@ -279,9 +291,11 @@ export const page={
         </div>
       </header>
       ${pilot?'<p class="profile-pilot">Profiles are being checked during the pilot.</p>':''}
-      <div class="profile-layout${factKeys.length||photos.length?'':' profile-layout-wide'}">
-        ${factKeys.length||photos.length?`<aside class="profile-sidebar">
+      <div class="profile-layout${factKeys.length||photos.length||todoKeys.length?'':' profile-layout-wide'}">
+        ${factKeys.length||photos.length||todoKeys.length?`<aside class="profile-sidebar">
           ${factKeys.length?`<section class="profile-section"><h2>About</h2><dl class="profile-facts">${factKeys.map(entry).join('')}</dl></section>`:''}
+          ${todoKeys.length?`<section class="profile-section profile-todo"><details><summary><h2>Complete your page</h2><span class="registry">${todoKeys.length} to add · only you see this</span></summary>
+            <dl class="profile-facts">${todoKeys.map(entry).join('')}</dl></details></section>`:''}
           ${photos.length?`<section class="profile-section profile-photos"><div class="profile-section-head"><h2>Photos</h2>
             <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
         </aside>`:''}
@@ -431,6 +445,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${e(shareTitle)}</title>
+  <link rel="icon" href="/campus/logo.png">
   ${shareMeta}
   <style>
     ${titleFont}
@@ -454,7 +469,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1.06 "IIMA Title",Georgia,serif; letter-spacing:-.06em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
     .reunion-title [aria-hidden] { color:var(--brick-fired); font-size:.55em }
     .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.16em; text-transform:uppercase; color:#f3e4dc }
-    .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:var(--r); padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
+    .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:50% 50% var(--r) var(--r)/28px 28px var(--r) var(--r); padding-top:clamp(28px,4vw,44px)!important; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
     h2 { font:650 clamp(1.6rem,3vw,2.1rem)/1.1 var(--serif); letter-spacing:-.015em }
     p { margin:.65rem 0 }
     .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
