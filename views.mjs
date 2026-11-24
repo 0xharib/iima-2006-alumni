@@ -40,6 +40,7 @@ const classmate = (row,extra=[]) => {
 };
 // "Looking to catch up": a count for the target, a private list for the picker.
 const checkIcon = '<svg class="icon-inline" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>', extIcon = '<svg class="icon-inline icon-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>';
+export const themeSwitch = (cls='') => `<form method="post" action="/theme" class="theme-switch ${cls}"><button type="submit" aria-label="Switch between dark and light mode"><span class="to-light">☀ Light mode</span><span class="to-dark">☾ Dark mode</span></button></form>`;
 const plural = (n,one,many) => n===1 ? one : many;
 const meetCountLine = count => count>0
   ? `<strong class="meet-number">${count}</strong> <span>${plural(count,'WIMWIan is','WIMWIans are')} looking to catch up with you</span>`
@@ -111,22 +112,22 @@ export function render(title,body,member,{home=false}={}) {
   const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
     <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p>
     <p class="motto" lang="sa" title="Vidya Viniyogadvikasah: development through the application of knowledge">विद्याविनियोगाद्विकासः</p></div>
-    <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}</nav></div></footer>` : '';
+    <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}${link('/wa/','WhatsApp')}${themeSwitch()}</nav></div></footer>` : '';
   const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       ${member.unread?`<span aria-hidden="true">${member.unread>99?'99+':member.unread}</span>`:''}</a>
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
-      ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
-  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+      ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
+  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
   ${fontFaces}
   ${theme}
   .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
-  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5}
+  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
   .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
-  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
+  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
   </style><body class="${home?'home ':''}${member?'member-site ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
@@ -466,7 +467,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
       <p class="help">Need to edit this email or email unavailable? Email <a href="${e(mailHelp)}">Tahseen and Arun</a>.</p>
     </div>` : '';
   return new Response(`<!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -495,13 +496,17 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     html { font-synthesis:none; font-optical-sizing:auto }
     .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1 var(--serif); letter-spacing:-.018em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
     .reunion-title [aria-hidden] { color:var(--brick-fired); font-size:.55em }
+    .theme-switch { margin:0 } .theme-switch button { padding:.3rem .7rem; border-radius:999px; background:transparent; color:var(--ink); border:1px solid var(--concrete); font:600 .78rem var(--sans) }
+    :root[data-theme=dark] .theme-switch .to-dark, :root:not([data-theme=dark]) .theme-switch .to-light { display:none }
+    :root[data-theme=dark] .mark { mix-blend-mode:normal; background:#fffcf6; border-radius:50%; padding:2px }
+    :root[data-theme=dark] .card { box-shadow:0 18px 50px #00000080 }
     .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.08em; text-transform:uppercase; color:#f3e4dc }
     .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:50% 50% var(--r) var(--r)/28px 28px var(--r) var(--r); padding-top:clamp(28px,4vw,44px)!important; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
     h2 { font:650 clamp(1.6rem,3vw,2.1rem)/1.1 var(--serif); letter-spacing:-.015em }
     p { margin:.65rem 0 }
     .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
     label { display:block; margin-top:20px; font-weight:600; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--brick) }
-    .search { display:flex; align-items:center; gap:10px; border:1px solid var(--concrete); background:#fff; border-radius:var(--r-sm); padding:0 12px; margin-top:7px }
+    .search { display:flex; align-items:center; gap:10px; border:1px solid var(--concrete); background:var(--paper); border-radius:var(--r-sm); padding:0 12px; margin-top:7px }
     .search svg { flex:0 0 18px; color:var(--muted) }
     .search:focus-within { outline:2px solid var(--accent); outline-offset:2px }
     input { width:100%; min-width:0; outline:none; border:0; background:transparent; padding:12px 0; color:var(--ink); font:inherit }
@@ -527,6 +532,7 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
   <div class="shell">
     <header class="masthead">
       <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA <small>Class of 2006</small></a>
+      ${themeSwitch()}
     </header>
     <main class="sign-in-campus">
       <div class="layout">

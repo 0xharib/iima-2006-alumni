@@ -43,7 +43,12 @@ export default {
         if(ctx) ctx.waitUntil(write);
         return write;
       };
-      const response = await route(request, env, record, member=>{viewer=member;});
+      let response = await route(request, env, record, member=>{viewer=member;});
+      // Dark is the default; a visitor who picked light gets the attribute flipped before the page leaves.
+      if (/(?:^|;\s*)theme=light(?:;|$)/.test(request.headers.get('Cookie')||'') && response.headers.get('Content-Type')?.includes('text/html')) {
+        const html = (await response.text()).replace('<html lang="en" data-theme="dark"','<html lang="en" data-theme="light"');
+        response = new Response(html,{status:response.status,headers:response.headers});
+      }
       const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$)/;
       const automated=/bot|crawler|spider|preview|whatsapp|facebookexternalhit/i.test(request.headers.get('User-Agent')||'');
       const intent=(request.headers.get('Sec-Purpose')||'')+' '+(request.headers.get('Purpose')||'');
@@ -90,6 +95,12 @@ async function route(req, env, record, setViewer) {
   }
   if (path==='/social.js' && !post) return new Response(page.socialScript,{
     headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300'}});
+  if (path==='/theme' && post) {
+    const light = !/(?:^|;\s*)theme=light(?:;|$)/.test(req.headers.get('Cookie')||'');
+    let back = '/';
+    try { const ref = new URL(req.headers.get('Referer')||'/', u.origin); if (ref.origin===u.origin) back = destination(ref.pathname+ref.search+ref.hash); } catch {}
+    return redirect(back,{'Set-Cookie':`theme=${light?'light':'dark'}; Path=/; Max-Age=31536000; Secure; SameSite=Lax`});
+  }
   const token = req.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-alumni=([a-f0-9-]+)/)?.[1];
   if (path==='/logout' && post) {
     if (token) await run('DELETE FROM sessions WHERE token=?',await hash(token));
