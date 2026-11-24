@@ -1,5 +1,6 @@
+import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
-import { theme } from './theme.mjs';
+import { theme, titleFont } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
 const link=(href,label)=>`<a href="${e(href)}">${e(label)}</a>`;
@@ -13,43 +14,67 @@ export const form=(action,body,label,extra='')=>`<form method="post" action="${e
 const action=(url,name,label,values={})=>form(url,field('action',name)+Object.entries(values).map(([key,val])=>field(key,val)).join(''),label,'class="inline"');
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
-const labelFor=key=>({life:'Life, lately',professionalFocus:'Professional focus',researchHighlight:'Research highlight',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
-const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="/media/${e(row.media)}" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a>${row.caption?`<figcaption>${e(row.caption)}</figcaption>`:''}</figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
-const portrait=(person,lazy=true)=>person.portrait
-  ? `<img src="/media/${e(person.portrait)}" alt="" ${lazy?'loading="lazy"':''}>`
+const labelFor=key=>({life:'Life, Lately',professionalFocus:'Professional focus',researchHighlight:'Selected work and achievements',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
+const mediaSrc = (media,width) => `/media/${e(media)}?w=${width}`;
+const mediaSet = (media,widths) => widths.map(width=>`${mediaSrc(media,width)} ${width}w`).join(', ');
+const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="${mediaSrc(row.media,256)}" srcset="${mediaSet(row.media,[256,480])}" sizes="(max-width: 520px) 45vw, 200px" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a>${row.caption?`<figcaption>${e(row.caption)}</figcaption>`:''}</figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
+const portrait=(person,lazy=true,width=96)=>person.portrait
+  ? `<img src="${mediaSrc(person.portrait,width)}" alt="" ${lazy?'loading="lazy"':''}>`
   : `<span class="initials" aria-hidden="true">${e(person.name.trim().split(/\s+/).slice(0,2).map(word=>word[0]).join(''))}</span>`;
-const paths={like:'M20 8c0 4-8 9-8 9S4 12 4 8a4 4 0 0 1 8-1 4 4 0 0 1 8 1Z',comment:'M5 5h14v10h-7l-4 4v-4H5z',tag:'M4 5h9l7 7-7 7-9-9z M8 8h.1',edit:'m4 16 11-11 4 4-11 11H4z M13 7l4 4',close:'m6 6 12 12M18 6 6 18'};
-const icon = (kind,label,attrs='') => `<button type="button" class="icon-action" aria-label="${e(label)}" title="${e(label)}" ${attrs}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[kind]}"/></svg></button>`;
+const reunionTitle='Kal • Aaj • Aur Kal';
+const titleCreative=()=>`<span>Kal</span><span aria-hidden="true">•</span><span>Aaj</span><span aria-hidden="true">•</span><span>Aur Kal</span>`;
+const shareTitle = 'Kal · Aaj · Aur Kal | IIMA Class of 2006';
+const shareDescription = 'Reconnect with classmates, revisit campus memories, and get ready for the IIMA Class of 2006 reunion.';
+const shareMeta = `<meta name="description" content="${e(shareDescription)}">
+  <meta property="og:type" content="website"><meta property="og:title" content="${e(shareTitle)}">
+  <meta property="og:description" content="${e(shareDescription)}"><meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://iima-class-of-2006.in/campus/logo.png">
+  <meta property="og:image:alt" content="IIM Ahmedabad logo">`;
+const paths={like:'M20 8c0 4-8 9-8 9S4 12 4 8a4 4 0 0 1 8-1 4 4 0 0 1 8 1Z',comment:'M5 5h14v10h-7l-4 4v-4H5z',tag:'M4 5h9l7 7-7 7-9-9z M8 8h.1',edit:'M3 21l2-6L17 3a2.8 2.8 0 0 1 4 4L9 19z M5 15l4 4 M15 5l4 4',close:'m6 6 12 12M18 6 6 18'};
+const iconGraphic = kind => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[kind]}"/></svg>`;
+const icon = (kind,label,attrs='') => `<button type="button" class="icon-action" aria-label="${e(label)}" data-tooltip="${e(label)}" ${attrs}>${iconGraphic(kind)}</button>`;
 const classmate = row => `<strong>${e(row.name)}</strong>${row.nickname?badge(row.nickname):''}${row.dorm?badge(/^\d+$/.test(row.dorm)?'Dorm '+row.dorm:row.dorm):''}`;
-const card=(p,back)=>`<article><header>${link('/people/'+p.author,p.author_name)} <time datetime="${new Date(p.created).toISOString()}">${e(new Date(p.created).toLocaleDateString('en-IN',{timeZone:'Asia/Kolkata'}))}</time></header>
-  ${p.topic?link('/topics/'+p.topic,p.topic_title):''}${p.subject_name?`<small>About ${link('/people/'+p.subject,p.subject_name)}</small>`:''}
-  ${p.feed_photo||p.has_legacy_photo?`<a class="feed-photos" href="/posts/${e(p.id)}"><img src="/media/${p.feed_photo?'post/'+e(p.feed_photo):'legacy/'+e(p.id)+'/1'}" alt="Yearbook memory photo" loading="lazy"></a>`:''}<p class="story">${e(p.body)}</p>${link('/posts/'+p.id,'Open memory')} ${action('/posts/'+p.id,'like',p.liked?'Unlike':'Like',{liked:p.liked?0:1,...(back?{return:back}:{})})} ${badge(p.likes+' likes')}</article>`;
-const cards=(rows,back)=>rows.map(row=>card(row,back)).join('')||'<p>No memories here yet.</p>';
-
-const memoryCards = (rows,priority=false) => rows.flatMap((post,index)=>{
+const memoryTags=(post)=> {
+  const tags=JSON.parse(post.linked_tags||'[]');
+  const item=tag=>link(tag.href,(tag.kind==='person'?'@':'#')+tag.label);
+  return tags.length?`<div class="memory-tags">${tags.slice(0,3).map(item).join('')}${tags.length>3?`<details><summary>View ${tags.length-3} more</summary><div>${tags.slice(3).map(item).join('')}</div></details>`:''}</div>`:'';
+};
+const tagPanel=()=>`<div class="memory-inline" data-panel-content="tags" hidden>
+  <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
+  <div data-tag-results></div></div>`;
+const tagControls=(scope)=>`${icon('tag','Tag '+scope,'data-panel="tags" aria-expanded="false"')}${tagPanel()}
+  <div class="memory-result" role="status"></div>`;
+const memoryAuthor=post=>`<div class="memory-author"><a href="/people/${post.author}">${portrait({name:post.author_name,portrait:post.author_portrait})}${e(post.author_name)}</a></div>`;
+const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
   const photos=JSON.parse(post.collage_photos||'[]');
-  const about=[...new Set([post.subject_name,post.topic_title,...JSON.parse(post.about_labels||'[]')].filter(Boolean))].join(', ');
-  return (photos.length?photos:[null]).map(photo=>`<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}">
+  const album=photos.length>1, photo=post.album_cover?'post/'+post.album_cover:photos[0];
+  const title=post.album_title||'Photo album';
+  const image=photo?`<img src="${mediaSrc(photo,480)}" srcset="${mediaSet(photo,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" data-full-src="/media/${e(photo)}" alt="${e(album?title:'Memory shared by '+post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:'';
+  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}">
+    ${memoryAuthor(post)}
     <div class="collage-visual">
-      <button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
-        ${photo?`<img src="/media/${e(photo)}" alt="Memory shared by ${e(post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:`<span class="memory-quote">${e(post.body)}</span>`}
-      </button>
-      <div class="memory-credit"><a href="/people/${post.author}">${e(post.author_name)}</a>${about?` <span class="memory-about"><span aria-label="about">→</span> ${e(about)}</span>`:''}</div>
+      ${album?`<a class="album-cover" href="/posts/${e(post.id)}">${image}<span class="album-photo-count">${photos.length} photos</span></a>`:
+        `<button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
+        ${photo?image:`<span class="memory-quote">${e(post.body)}</span>${post.body.length>240?'<span class="memory-read-more">Read full memory</span>':''}`}</button>`}
     </div>
-    ${photo&&post.body&&post.body!=='Shared a yearbook photo.'?`<p class="memory-caption">${e(post.body)}</p>`:''}
+    <div class="memory-card-footer">
+    ${album?`<h3 class="memory-album-title">${link('/posts/'+post.id,title)}</h3>`:''}
+    ${photo&&post.body&&!['Shared a yearbook photo.','Shared a photo.'].includes(post.body)?`<p class="memory-caption">${e(post.body)}</p>`:''}
+    <div data-memory-tags>${memoryTags(post)}</div>
     <div class="collage-actions">
-      ${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span>
+      <div class="memory-like">${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span></div>
       ${icon('comment','Comment','data-panel="comments" aria-expanded="false"')}
-      ${icon('tag','Tag a classmate','data-panel="tags" aria-expanded="false"')}
+      ${icon('tag','Add tags','data-panel="tags" aria-expanded="false"')}
+    </div>
     </div>
     <div class="memory-inline" data-panel-content="comments" hidden><div data-comments></div>
       <form data-social><textarea name="body" aria-label="Comment" placeholder="Write a comment…" maxlength="1200" required></textarea>
-      ${field('action','comment')}<button>Post</button></form></div>
+      ${field('action','comment')}<button>Post</button></form><button type="button" data-comment-again hidden>Add another comment</button></div>
     <div class="memory-inline" data-panel-content="tags" hidden>
-      <input type="search" data-tag-search aria-label="Find a classmate" placeholder="Name or dorm name" autocomplete="off">
+      <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
       <div data-tag-results></div></div>
     <div class="memory-result" role="status"></div>
-  </article>`);
+  </article>`;
 }).join('');
 const memoryDialog=()=>`<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
 const memoryBatch=(rows,priority=false)=>`<div class="memory-collage">${memoryCards(rows,priority)||'<p>No memories here yet.</p>'}</div>`;
@@ -57,12 +82,17 @@ const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,pri
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 ${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
-  const nav=member?`<nav aria-label="Main navigation">${link('/','Home')}${link('/memories','Memories')}${link('/reunion','Reunion')}
+  const menu=link('/','Home')+link('/memories','Memories')+link('/people','Classmates')+link('/reunion','Reunion');
+  const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary>Menu</summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
+    <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+      ${member.unread?`<span aria-hidden="true">${member.unread>99?'99+':member.unread}</span>`:''}</a>
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
-      <div class="account-menu">${link('/people/'+member.id,'View profile')}${link('/notifications','Notifications')}
-      ${member.role==='admin'?link('/admin','Admin'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><style>
+      <div class="account-menu">${link('/people/'+member.id,'View profile')}
+      ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title>${shareMeta}<style>
   :root{color-scheme:light;--ink:#251a16;--muted:#654138;--paper:#fbf3e7;--tile:#fffaf3;--brick:#883b2e;--line:#dfcabc}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 system-ui,sans-serif}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem Georgia,serif;text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:Georgia,serif}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:3px solid #296769;outline-offset:3px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+  ${titleFont}
   ${theme}
   .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
   .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5}
@@ -70,7 +100,7 @@ export function render(title,body,member,{home=false}={}) {
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=3" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
   socialScript,
@@ -96,35 +126,97 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people,next,key){
+  home(rows,people,next,key,me){
     return `<div class="alumni-home"><section class="campus-hero"><div>
-      <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1>Twenty years on.</h1>
-      <div class="hero-actions"><a class="cta" href="/people">Find classmates</a><a class="cta secondary" href="/reunion">Reunion</a></div>
+      <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
+      <div class="hero-actions"><a class="cta" href="/people/${me}">Complete your profile</a><a class="cta secondary" href="/compose" data-compose-open>Share your memories</a></div>
       </div></section>
-      <section class="home-classmates"><div class="section-head"><h2>Classmates</h2>${link('/people','See all →')}</div>
-        <div class="people-grid">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}</div></a>`).join('')}</div>
+      <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','Browse all classmates →')}</div>
+        <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
       <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add your memory</a>${link('/memories','See all →')}</div></div>${collage(rows,next)}</section>
-      <dialog class="memory-dialog compose-dialog" aria-label="Add your memory">${icon('close','Close','data-close')}<h2>Add your memory</h2>${page.compose(key)}</dialog>
+      ${page.composeDialog(key)}
     </div>`;
   },
   memories(rows,next,q,key){return `<div class="memory-toolbar">
     <form method="get" action="/memories"><label>Search memories<input type="search" name="q" value="${e(q)}" placeholder="People, topics, photos or comments"></label><button>Search</button></form>
     <a href="/compose" class="profile-primary share-memory" data-compose-open>Share a memory</a></div>
     ${collage(rows,next,true)}
-    <dialog class="memory-dialog compose-dialog" aria-label="Share a memory">${icon('close','Close','data-close')}<h2>Share a memory</h2>${page.compose(key)}</dialog>`;},
+    ${page.composeDialog(key)}`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
-  memoryCards,
-  directory(rows,statuses,q,status,dorms,dorm){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get">${input('q','Name, nickname or dorm',q)}${select('status','Attendance',[['','All classmates'],...Object.entries(statuses)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row)}<div>${classmate(row)}${badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
-  person(row,status,details,photos,stories,me,pilot){
+  memoryCards, memoryTags,
+  reunion(member,tracker,saved,directory,showSaved){
+    const values = reunionValues(tracker,saved);
+    const party = partySummary(values.spouse,values.children);
+    const missingDetails = missingReunionDetails(values).length>0;
+    const yesNo = [['','Choose an option'],['1','Yes'],['0','No']];
+    const names = [['','Choose an option'],...Array.from({length:11},(_,i)=>[String(i),String(i)])];
+    const entries = rows => rows.map(([time,title,location])=>`<li><span>${e(time)}</span><div><strong>${e(title)}</strong>${location?`<small>${e(location)}</small>`:''}</div></li>`).join('');
+    const row = (key,label,value,options,type='text',prompt='') => {
+      const shown=options && value ? options.find(([id])=>id===value)?.[1] : value;
+      const control=options?select('value',label,options,value):input('value',label,value,`type="${type}" maxlength="120"${type==='number'?' min="0" max="25"':''}`);
+      return `<div class="editable-field${prompt&&!shown?' reunion-needs-detail':''}"><dt>${e(label)}</dt><dd class="field-display">${e(shown||prompt||'Not provided')}</dd>
+        <details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">${iconGraphic('edit')}</summary>
+        ${form('/reunion',field('field',key)+control,'Save')}</details></div>`;
+    };
+    const group = (title,rows,id='') => `<div class="reunion-group" id="${e(id||title.toLowerCase().replaceAll(' ','-'))}"><h3>${e(title)}</h3><dl class="reunion-fields">${rows}</dl></div>`;
+    const kids = Array.from({length:Number(values.children)||0},(_,i)=>{
+      const kid=values.kids?.[i]||{};
+      return group('Child '+(i+1),
+        row('kidName'+i,'Name',kid.name)+row('kidGender'+i,'Gender',kid.gender)+
+        row('kidAge'+i,'Age',kid.age,null,'number','Add age for activity planning')+row('kidShirt'+i,'T-shirt size',kid.shirt,null,'text','Add size for the reunion kit'),i===0?'reunion-children':'');
+    }).join('');
+    return `<div class="reunion-page">
+      <header class="reunion-cover"><p class="class-label">IIM Ahmedabad · Class of 2006</p>
+        <h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
+        <p>20-year reunion · 26–28 December 2026 · Taj Amer, Jaipur</p>
+      </header>
+      ${tracker?`<section class="reunion-confirmation" aria-label="Attendance confirmation">
+        <strong>You’re confirmed for the reunion, ${e(member.name)}.</strong>
+        ${party?`<p>${e(party)}</p>`:''}${missingDetails?'<p class="reunion-missing">Your attendance details are missing some important information. Please help us complete this.</p>':''}<a href="#reunion-details">Review your reunion details</a>
+      </section>`:''}
+      <section class="reunion-section" id="reunion-agenda"><h2>Reunion agenda</h2>
+        <div class="reunion-days">${agenda.map(([date,theme,iso,rows,parallel])=>`<details>
+          <summary><time datetime="${iso}">${e(date)}</time><span>${e(theme)}</span></summary>
+          <ol class="reunion-timeline">${entries(rows)}</ol>
+          ${parallel.length?`<h3>Activities for families and alumni</h3><ol class="reunion-timeline">${entries(parallel)}</ol>`:''}
+        </details>`).join('')}</div>
+      </section>
+      ${tracker?`<section class="reunion-section" id="reunion-details">
+        <h2>Your reunion details</h2>
+        ${missingDetails?'<p class="reunion-priority"><strong>Please complete the highlighted fields.</strong> The reunion team needs this information to plan for you and your guests.</p>':''}
+        <p>Use the pencil next to a field to update it. Your responses are visible to you and the reunion admins.</p>
+        ${showSaved&&saved?'<p class="reunion-saved" role="status">Your reunion details are saved.</p>':''}
+        ${group('Your group',
+          `<div class="editable-field"><dt>Your name</dt><dd>${e(member.name)}</dd></div>`+
+          row('shirt','Your T-shirt size',values.shirt,null,'text','Add size for your reunion kit')+
+          row('spouse','Is your spouse or partner joining?',values.spouse,yesNo,'text','Confirm who’s joining')+
+          row('children','How many children are joining?',values.children,names,'text','Confirm number of children')+
+          row('help','Is a nanny or helper joining?',values.help,yesNo))}
+        ${values.spouse==='1'?group('Spouse or partner',
+          row('spouseName','Name',values.spouseName)+row('spouseShirt','T-shirt size',values.spouseShirt,null,'text','Add size for the reunion kit')+
+          row('outing','Sunday outing',values.outing,outings,'text','Choose an outing or select Skip the outing')):''}
+        ${kids}
+        ${group('Hotel arrival and departure',
+          row('bothNights','Staying both reunion nights?',values.bothNights,yesNo,'text','Confirm your hotel stay')+
+          row('arrivalDate','Arrival date',values.arrivalDate,null,'date')+
+          row('arrivalTime','Arrival time',values.arrivalTime,null,'time')+
+          row('departureDate','Departure date',values.departureDate,null,'date')+
+          row('departureTime','Departure time',values.departureTime,null,'time'))}
+      </section>`:''}
+      <section class="reunion-section" id="reunion-attendees"><h2>Classmates attending</h2>${directory}</section>
+    </div>`;
+  },
+  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
+    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}${!reunion&&row.section?badge('Section '+row.section):''}${reunion?'':badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={}){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
     const hasValue = key => typeof details[key]==='string' && details[key].trim();
     const factKeys = own ? facts : facts.filter(hasValue);
-    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||own));
+    const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
       ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
     const profileLinks = (Array.isArray(row.profileLinks) ? row.profileLinks : []).flatMap(item => {
@@ -136,7 +228,7 @@ export const page={
           : [];
       } catch { return []; }
     });
-    const edit = (key,label,value,control=area('value',label,value,'maxlength="4000"')) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">✎</summary>
+    const edit = (key,label,value,control=area('value',label,value,'maxlength="4000"')) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">${iconGraphic('edit')}</summary>
       ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
     const entry = key => {
       const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
@@ -146,20 +238,18 @@ export const page={
       <header class="profile-header">
         <div class="profile-cover"></div>
         <div class="profile-identity">
-          <div class="profile-portrait">${portrait(row,false)}
+          <div class="profile-portrait">${portrait(row,false,256)}
             ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
               ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
               ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
           <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
             ${edit('displayName','Name',details.displayName||row.name)}
             <div class="editable-field profile-rsvp">
-              ${status||own?`<span class="profile-status field-display">${e(status||'No response')}</span>`:''}
-              ${edit('attendance','Reunion attendance','',select('value','Reunion attendance',[['attending','Attending'],['declined','Not attending'],['unknown','No response']],row.own_attendance||'unknown'))}
+              ${status?`<span class="profile-status field-display">${e(status)}</span>`:''}
+              ${edit('attendance','Reunion attendance','',select('value','Reunion attendance',[['unknown','Choose an option'],['attending','Attending'],['declined','Not attending']],row.own_attendance||''))}
             </div>
           </div>
           <div class="profile-actions">
-            ${own?`<a class="profile-secondary" href="/yearbook">Review yearbook</a>`
-              : `<a class="profile-primary" href="/compose?person=${row.id}">Add a memory</a>`}
             ${linkedin}
           </div>
         </div>
@@ -172,63 +262,127 @@ export const page={
             <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
         </aside>`:''}
         <div class="profile-main">
-          ${entryKeys.length?`<section class="profile-section"><h2>Yearbook</h2><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
+          ${own||Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
+            <div class="then-now-grid">${['then','now'].map(slot=>{
+              const photo=profilePhotos[slot], label=slot==='then'?'Then':'Now';
+              return `<div class="then-now-slot"><h3>${label}</h3>
+                ${photo?`<a href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" alt="${e(photo.caption||label+' photo of '+row.name)}" loading="lazy"></a>`:
+                 `<p>${own?'Add a '+label.toLowerCase()+' photo.':'No photo shared.'}</p>`}
+                ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
+                  ${field('field',slot+'PhotoObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
+                  ${icon('edit','Upload '+label+' photo','data-upload')}</form>`:''}</div>`;
+            }).join('')}</div></section>`:''}
+          ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
-          <section class="profile-section profile-memories"><h2>Memories from classmates</h2>
+          <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories from classmates</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
             ${received.length?memoryBatch(received):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
           </section>
           ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${memoryBatch(shared)}</section>`:''}
         </div>
       </div>
       ${memoryDialog()}
+      ${own?'':page.composeDialog(composeKey,[{value:'person:'+row.id,label:row.name}])}
       <div class="profile-report">${report('profile',row.id)}</div>
     </div>`;
   },
   editProfile(fields,member){const keys=['life','city','company','education','dorm','family','nickname'];
     return form('/profile',keys.map(k=>area(k,labelFor(k),fields[k])+checkbox('hide_'+k,'Hide '+labelFor(k),fields[k]==='')).join('')+checkbox('attendance_private','Hide my attendance status',!!member.attendance_private),'Save profile');},
-  intake(roster,me,payload,keys) {
-    const photos = slot => '<fieldset><legend>'+e(labelFor(slot))+' photo</legend><label>JPEG or PNG<input name="'+slot+'" type="file" accept="image/jpeg,image/png"></label>'+
-      input('caption_'+slot,'Photo caption')+checkbox('remove_'+slot,'Remove saved photo')+'</fieldset>';
-    return '<h2>My entry</h2>'+form('/submit',field('kind','self')+keys.map(k=>area(k,labelFor(k),payload[k])).join('')+
-      photos('then')+photos('now'),'Save my entry','enctype="multipart/form-data"')+
-      '<h2>Contribute to a classmate’s entry</h2>'+form('/submit',field('kind','memory')+
-      select('subject','Classmate',roster.filter(row=>row.id!==me).map(row=>[row.id,row.name]))+
-      area('story','Your memory','','required maxlength="4000"')+photos('memory'),'Save contribution','enctype="multipart/form-data"');
-  },
-  yearbook(entry,payload,photos,selected,keys){
-    if(!entry)return '<p>We have no self-entry on file for you.</p><p>'+link('/submit','Submit your entry')+'</p>';
-    const values=JSON.parse(selected?.fields||'{}'), publicPhotos=JSON.parse(selected?.images||'[]');
-    return `<p>Choose which parts classmates can see.</p>`+form('/yearbook',keys.filter(k=>typeof payload[k]==='string'&&payload[k]).map(k=>`<fieldset><legend>${e(labelFor(k))}</legend><p class="story">${e(payload[k])}</p>${checkbox(k,'Publish this answer',Object.hasOwn(values,k))}</fieldset>`).join('')+
-      photos.map((p,i)=>`<fieldset><legend>${e(p.slot)}</legend><img src="/yearbook-preview/${i}" alt="${e(p.caption||p.slot)}">${checkbox('image_'+i,'Publish this photo',publicPhotos.some(x=>x.submission===entry.id&&x.key===p.object_key))}</fieldset>`).join('')+checkbox('announce','Announce in the feed'),'Save published selection');},
   images,
   topics(rows,q){return `<form method="get">${input('q','Find a memory topic',q)}<button>Search</button></form><p>${link('/compose','Create a topic and add a memory')}</p>`+list(rows.map(r=>link('/topics/'+r.id,r.title)+' '+badge(r.kind)),'No topics yet.');},
-  topic(row,rows){return `${badge(row.kind)}<p>${link('/compose?topic='+row.id,'Add your memory')}</p>${cards(rows)}${report('topic',row.id)}`;},
+  topic(row,rows){return `${badge(row.kind)}<p>${link('/compose?topic='+row.id,'Add your memory')}</p>${memoryBatch(rows)}${memoryDialog()}${report('topic',row.id)}`;},
+  composeDialog(key,selected=[]){return `<dialog class="memory-dialog compose-dialog" aria-label="Add a memory">${icon('close','Close','data-close')}<h2>Add a memory</h2>${page.compose(key,selected)}</dialog>`;},
   compose(key,selected=[]){
-    const chip = ({value,label}) => `<span class="topic-chip">${field('about',value)}<span>${e(label)}</span><button type="button" data-remove-topic aria-label="Remove ${e(label)}">×</button></span>`;
-    return form('/compose',field('id',key)+area('body','Your memory','','maxlength="4000"')+
-      `<div class="memory-targets"><label>About<input type="search" data-target-search placeholder="Find a classmate, place or topic" autocomplete="off"></label>
+    const chip = ({value,label}) => `<span class="topic-chip">${field('about',value)}<span>${value.startsWith('person:')?'@':'#'}${e(label)}</span><button type="button" data-remove-topic aria-label="Remove ${e(label)}">×</button></span>`;
+    return form('/compose',field('id',key)+area('body','What do you remember?','','maxlength="4000" placeholder="Share a story or add a caption…"')+
+      `<label class="memory-file-picker">Add photos<input type="file" name="images" accept="image/jpeg,image/png" multiple></label>
+      <div data-album-title hidden>${input('title','Album title','','maxlength="120"')}</div>
+      <p data-cover-hint hidden>Tap a thumbnail to choose the album cover.</p>
+      <ol class="photo-queue" data-photo-queue></ol>
+      <div class="memory-targets"><label>Add tags<input type="search" data-target-search placeholder="@classmate or #place or event" autocomplete="off"></label>
         <div data-target-results></div><div data-topic-chips>${selected.map(chip).join('')}</div>
-        <details><summary>Add Topic +</summary><div class="add-topic"><input data-new-topic maxlength="100" aria-label="New topic" placeholder="Topic name"><button type="button" data-add-topic>Add</button></div></details>
       </div>
-      <label>Photos<input type="file" name="images" accept="image/jpeg,image/png" multiple></label>
       <p data-compose-status role="status"></p>`,'Publish memory','enctype="multipart/form-data" data-compose');},
-  post(item,comments,tags,photos,me){
+  post(item,comments,tags,photos,me,commentPosted=false){
     const url='/posts/'+item.id;
-    return card(item)+images(photos)+
-      (item.author===me?`<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',item.body,'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
+    const isAlbum=photos.length>1;
+    const caption=['Shared a yearbook photo.','Shared a photo.'].includes(item.body)?'':item.body;
+    const gallery=isAlbum?`<section aria-label="Album photos" class="album-panels memory-collage">${photos.map((photo,i)=>`<article class="album-photo-panel collage-card" data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" id="photo-${e(photo.media.replaceAll('/','-'))}">
+      <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
+      <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
+        <div data-memory-tags>${memoryTags(photo)}</div>${tagControls('this photo')}</div></article>`).join('')}</section>
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos);
+    return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
+      ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
+      <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
+      ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${isAlbum?gallery:''}`+
+      (item.author===me?`<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',caption,photos.length?'':'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
       (item.subject===me||item.is_about_me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
       (tags.length?'<h2>Tags</h2>'+list(tags.map(t=>link('/people/'+t.member,t.name)+' '+badge(t.status)+
        (t.member===me?(t.status==='pending'?action(url,'tag-accept','Accept tag'):'')+action(url,'tag-remove','Remove tag'):'')),''):'')+
-      '<h2>Comments</h2>'+list(comments.map(c=>`${link('/people/'+c.author,c.name)}<p class="story">${e(c.body)}</p>${c.author===me?
-      `<details><summary>Edit comment</summary>${form(url,field('action','edit-comment')+field('comment',c.id)+input('body','Comment',c.body,'required'),'Save')}</details>${action(url,'delete-comment','Delete comment',{comment:c.id})}`:''}${report('comment',c.id)}`),'No comments yet.')+
-      form(url,field('action','comment')+area('body','Add a comment','','required maxlength="1200"'),'Post comment');
+      '<h2 id="comments">Comments</h2>'+list(comments.map(c=>`<div class="comment-row" id="comment-${e(c.id)}">${link('/people/'+c.author,c.name)}${c.author===me?
+      `<details class="comment-menu"><summary aria-label="Comment options">⋯</summary><div>${action(url,'delete-comment','Delete comment',{comment:c.id})}</div></details><details><summary>Edit comment</summary>${form(url,field('action','edit-comment')+field('comment',c.id)+input('body','Comment',c.body,'required'),'Save')}</details>`:''}${report('comment',c.id)}<p class="story">${e(c.body)}</p></div>`),'No comments yet.')+
+      (()=>{const composer=form(url,field('action','comment')+area('body','Add a comment','','required maxlength="1200"'),'Post comment');return commentPosted?`<details><summary>Add another comment</summary>${composer}</details>`:composer;})();
   },
-  notifications(rows,seen){return list(rows.map(n=>`<span class="${n.created>seen?'new':''}">${link('/posts/'+n.id,n.label)}</span>`),'No notifications yet.')+form('/notifications','','Mark all read');},
+  notifications(rows){
+    const labels={mention:'mentioned you',like:'liked your memory',comment:'commented on your memory',tag:'added a tag to your memory'};
+    const dates=new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kolkata'});
+    return `<div class="notification-actions">${rows.some(n=>!n.is_read)?form('/notifications',field('action','read-all'),'Mark all read'):''}
+      ${rows.some(n=>n.sample)?form('/notifications',field('action','clear-samples'),'Remove test notifications'):''}</div>
+      ${rows.length?`<section aria-label="Recent activity" class="notification-feed">${rows.map(n=>{
+        const url='/notifications?open='+n.id;
+        const body=['Shared a yearbook photo.','Shared a photo.'].includes(n.memory_text)?'':n.memory_text;
+        const photo=n.anchor.startsWith('photo-');
+        const summary=n.comment_text||body;
+        return `<article class="notification-card${n.is_read?'':' new'}">
+          <div class="notification-byline">
+             ${n.actor_name?`<a href="/people/${n.actor}">${portrait({name:n.actor_name,portrait:n.actor_portrait})}${e(n.actor_name)}</a>`:`<strong>${n.sample?'Test activity':'A classmate'}</strong>`}
+            <small>${n.sample?'Test · ':''}${dates.format(n.created*1000)}${n.is_read?'':' · Unread'}</small>
+          </div>
+          <a class="notification-preview" href="${url}">
+            ${n.preview_media?`<img src="${mediaSrc(n.preview_media,256)}" srcset="${mediaSet(n.preview_media,[256,480])}" sizes="(max-width: 600px) 100px, 170px" alt="${photo?'Tagged photo':'Memory preview'}" loading="lazy">`:''}
+            <div><strong>${labels[n.kind]}${photo?' on a photo':''}</strong>
+              ${n.album_title?`<span class="notification-album">${e(n.album_title)}</span>`:''}
+              ${summary?`<p>${e(summary.slice(0,240))}${summary.length>240?'…':''}</p>`:''}
+              <span class="notification-open">${n.kind==='comment'&&!n.sample?'View comment':photo?'View photo':n.post?'Open memory':'Mark as read'}</span>
+            </div>
+          </a>
+        </article>`;
+      }).join('')}</section>`:'<p>No notifications yet.</p>'}`;
+  },
+  analytics(totals,pages,events,days,next){
+    const labels={page_view:'Page view',sign_in:'Successful sign-in',email_accepted:'Email accepted by provider',email_failed:'Email request failed',link_invalid:'Invalid or expired link'};
+    const time=new Intl.DateTimeFormat('en-IN',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kolkata'});
+    return `<p>${link('/admin','Back to admin')} · ${link('/admin/analytics?days=30','30 days')} · ${link('/admin/analytics?days=90','90 days')} · ${link('/admin/analytics?days='+days+'&format=json','Export events')}</p>
+      <h2>Last ${days} days</h2>${list(totals.map(r=>e(labels[r.event])+ ' · '+r.total+
+        (r.event==='page_view'?' · '+r.members+' signed-in classmates · '+r.anonymous+' anonymous views':'')),'No activity yet.')}
+      <h2>Most viewed pages</h2>${list(pages.map(r=>e(r.path)+' · '+r.total),'No page views yet.')}
+      <h2>Recent activity (IST)</h2>${list(events.map(r=>e(time.format(r.occurred))+' · '+e(r.name||'Anonymous')+' · '+e(labels[r.event])+' · '+e(r.path)),'No activity yet.')}
+      ${next?'<p>The export includes a link to the next batch of events.</p>':''}`;
+  },
+  adminSummary(coverage,attendees){
+    const stats=[
+      ['Yearbook submissions',coverage.filter(r=>r.submitted).length,coverage.length],
+      ['Profile details saved on this site',coverage.filter(r=>r.edited).length,coverage.length],
+      ['Photo available',coverage.filter(r=>r.portrait||r.has_photos).length,coverage.length],
+      ['Enriched information',coverage.filter(r=>r.enriched).length,coverage.length],
+      ['Attendees with all critical details',attendees.filter(r=>!r.missing.length).length,attendees.length],
+      ['Attendees with all applicable T-shirt sizes',attendees.filter(r=>!r.missing.some(field=>/T-shirt|Spouse attendance|Number of children/.test(field))).length,attendees.length]
+    ];
+    const yes=value=>value?'Yes':'Missing';
+    const table=(head,rows)=>`<div class="admin-table-wrap"><table class="admin-table"><thead><tr>${head.map(label=>`<th scope="col">${e(label)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(([person,...cells])=>`<tr><th scope="row">${link('/people/'+person.id,person.name)}</th>${cells.map(value=>`<td>${e(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    return `<p>${link('/admin?view=tools','Admin tools')} · ${link('/admin/analytics','Site analytics')} · ${link('/admin/export?kind=reunion','Download attendee logistics')}</p>
+      <div class="admin-stats">${stats.map(([label,number,total])=>`<div><strong>${number} / ${total}</strong><span>${e(label)}</span></div>`).join('')}</div>
+      <h2>Confirmed attendees</h2><p>See which critical details are missing, including sizes for everyone in the party.</p>
+      ${table(['Classmate','Details saved','Missing critical details'],attendees.map(row=>[row,row.saved?'Yes':'Tracker only',row.missing.join(', ')||'Complete']))}
+      <h2>Classmate profiles</h2>
+      ${table(['Classmate','Yearbook submitted','Profile details saved','Photo','Enriched information'],coverage.map(row=>[row,yes(row.submitted),yes(row.edited),yes(row.portrait||row.has_photos),yes(row.enriched)]))}`;
+  },
   admin(reports,seeds,topics,memories){const actions=['invite','revoke','approve-seed','hold-seed','resolve-report','hide-post','restore-post','hide-comment','restore-comment','rename-topic','hide-topic','merge-topic','publish-memory'];
-    return `<h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
+    return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
       <h2>Take action</h2>${form('/admin',select('action','Action',actions.map(a=>[a,a.replaceAll('-',' ')]))+input('target','Target ID','','required')+
       input('reason','Reason','','required')+input('into','Merge destination topic ID')+input('title','New topic title'),'Apply action')}
-      <h2>Reunion tracker</h2>${form('/admin',field('action','attendance-preview')+area('rsvp','CSV with roster_id,status (attending, declined, unknown)','','required'),'Preview import')}
+      <h2>Reunion tracker</h2><p>${link('/admin/export?kind=reunion','Download attendee logistics')}</p>${form('/admin',field('action','attendance-preview')+area('rsvp','CSV with roster_id,status (attending, declined, unknown)','','required'),'Preview import')}
       <p>${link('/admin/export','Submission data')} · ${link('/admin/export?kind=pending','Pending contact data')}</p>
       <details><summary>Yearbook memories awaiting publication</summary>${list(memories.map(m=>e(m.name)+' · '+e(m.id)),'No pending memories.')}</details>
       <details><summary>Profile seeds</summary>${list(seeds.map(s=>`${link('/people/'+s.roster_id,s.name)} · ${e(s.roster_id)} · ${e(s.review_status)}`),'No seeds.')}</details>
@@ -237,13 +391,13 @@ export const page={
   attendancePreview(rows,csv){return `<p>${rows.length} RSVP updates.</p>${list(rows.map(r=>e(r.join(' · '))),'')}${form('/admin',field('action','attendance-apply')+field('rsvp',csv),'Apply import')}`;}
 };
 
-export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl, feedback }) {
-  const photoUrl = 'https://archives.iima.ac.in/public/convocation/groupphoto/2006.jpg';
+export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
   const selection = selected ? `
     <div class="selection">
       <strong>${e(selected.name)}</strong>
       <p>${e(maskedEmail || 'No usable email on file')}</p>
       <div class="request-feedback" role="status">${e(feedback)}</div>
+      ${maskedEmail?'<p class="instructions">If your sign-in email doesn’t arrive, check your Spam or Junk folder.</p>':''}
       ${maskedEmail && !feedback.startsWith('Check your inbox') ? form('/request-link',field('id',selected.id)+field('next',next),'Email me a sign-in link') : ''}
       <p class="help">Need to edit this email or email unavailable? Email <a href="${e(mailHelp)}">Tahseen and Arun</a>.</p>
     </div>` : '';
@@ -252,27 +406,27 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl, fee
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in · IIMA Class of 2006</title>
+  <title>${e(shareTitle)}</title>
+  ${shareMeta}
   <style>
+    ${titleFont}
     :root { color-scheme:light; --paper:#f6f4ef; --ink:#242721; --muted:#555a50; --accent:#873d31; --line:#dedbd3; font:16px/1.5 system-ui,sans-serif }
     * { box-sizing:border-box }
     body { margin:0; background:var(--paper); color:var(--ink) }
     a { color:var(--accent); text-decoration:none }
     a:hover { text-decoration:underline }
     :focus-visible { outline:3px solid #975044; outline-offset:4px }
-    .shell { max-width:1240px; margin:auto; padding:0 clamp(16px,5vw,64px) 48px }
-    .masthead { min-height:74px; display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid var(--line) }
-    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750; text-decoration:none }
-    .mark { display:grid; place-items:center; width:35px; height:35px; background:transparent; mix-blend-mode:multiply; border-radius:50%; padding:2px; object-fit:contain }
-    .yearbook { font-size:.87rem; font-weight:650 }
-    .intro { margin:22px 0; min-height:clamp(185px,32vw,370px); display:flex; align-items:end; border-radius:22px; padding:clamp(22px,5vw,58px); color:#fffaf0; background:linear-gradient(90deg,#160d0cda,#190e0c28),#251a16 url('/campus/arches.webp') center 49% / cover }
+    .shell { background:linear-gradient(90deg,#170d0ac9,#1a100e66),url('/campus/arches.webp') center/cover; background-color:#251a16 }
+    .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:#f5f3ee; border-bottom:1px solid #dedbd3 }
+    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750 }
+    .mark { width:29px; height:29px; object-fit:contain; mix-blend-mode:multiply }
+    .sign-in-campus { min-height:calc(100svh - 47px); display:grid; align-items:center; padding:clamp(24px,7vw,100px) clamp(16px,7vw,100px) }
+    .layout { width:min(1120px,100%); margin:auto; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); align-items:center; gap:clamp(20px,5vw,74px) }
+    .intro { color:#fff3e3 }
     h1,h2 { margin:0; line-height:1.08 }
-    h1 { font:500 clamp(2.9rem,8vw,6.4rem)/.97 Georgia,serif; letter-spacing:-.072em }
-    .layout { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(300px,1fr); align-items:start; gap:clamp(18px,3vw,36px) }
-    figure { margin:0; min-width:0 }
-    figure img { display:block; width:100%; height:auto; border-radius:17px; background:#e7e1d6 }
-    figcaption { margin:10px 2px 0; font-size:.8rem; color:var(--muted) }
-    .card { background:#fff; border:1px solid var(--line); border-radius:17px; padding:clamp(18px,3vw,32px); box-shadow:0 12px 32px #3024190a }
+    .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1.06 "IIMA Title",Georgia,serif; letter-spacing:-.06em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
+    .reunion-title [aria-hidden] { color:#e0a48e; font-size:.55em }
+    .card { background:#fffaf3f5; border:1px solid #fff8; border-radius:20px; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #130b0850; backdrop-filter:blur(12px) }
     h2 { font-size:clamp(1.55rem,3vw,2rem); letter-spacing:-.045em }
     p { margin:.65rem 0 }
     .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
@@ -292,9 +446,10 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl, fee
     button:hover { background:#703126 }
     .help { margin:20px 0 0 }
     @media(max-width:750px) {
-      .masthead { min-height:60px }
-      .layout { grid-template-columns:1fr }
-      figure img { max-height:32vh; object-fit:contain; background:#e9e4d9 }
+      .masthead { min-height:44px }
+      .sign-in-campus { min-height:calc(100svh - 44px); align-items:start }
+      .layout { grid-template-columns:1fr; margin:0 auto }
+      .reunion-title { font-size:clamp(2.55rem,10vw,4rem) }
     }
   </style>
 </head>
@@ -302,17 +457,13 @@ export function signIn({ selected, maskedEmail, next, mailHelp, yearbookUrl, fee
   <div class="shell">
     <header class="masthead">
       <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA Class of 2006</a>
-      ${yearbookUrl ? `<a class="yearbook" href="${e(yearbookUrl)}">Submit yearbook entry</a>` : ''}
     </header>
-    <main>
-      <div class="intro"><h1>Twenty years on.</h1></div>
+    <main class="sign-in-campus">
       <div class="layout">
-        <figure>
-          <img src="${photoUrl}" alt="IIM Ahmedabad Class of 2006 convocation group photograph" fetchpriority="high">
-          <figcaption>Class of 2006 convocation · <a href="${photoUrl}">IIMA Archives</a></figcaption>
-        </figure>
+        <div class="intro"><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1></div>
         <section class="card" aria-labelledby="sign-in-title">
           <h2 id="sign-in-title">Sign in</h2>
+          ${!selected&&feedback?`<p role="status" class="help">${e(feedback)}</p>`:''}
           <p class="instructions">Find your name and we’ll send a sign-in link to your email on the batch roster.</p>
           <label for="name-search">Find your name</label>
           <div class="search">

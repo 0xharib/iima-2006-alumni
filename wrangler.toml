@@ -1,19 +1,19 @@
-name = "iima-2006-alumni"
+name = "iima-2006-alumni-local"
 main = "worker.mjs"
 compatibility_date = "2025-11-23"
-keep_vars = true
 
 [vars]
-ACCESS_MODE = "batch"
-SITE_ORIGIN = "https://iima-class-of-2006.in"
-LEGACY_YEARBOOK_URL = "https://iima-2006-reunion-yearbook.arun-devanathan.workers.dev"
-MAIL_FROM = "IIMA Class of 2006 Batch Admin <signin@iima-class-of-2006.in>"
+ACCESS_MODE = "pilot"
+MAIL_FROM = "IIMA Alumni Test <signin@example.test>"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "iima-2006-alumni"
-database_id = "65f8c7f3-44ae-455a-98d0-17dcd12bd1ca"
+database_name = "iima-2006-alumni-local"
+database_id = "00000000-0000-0000-0000-000000000000"
 
 [[r2_buckets]]
 binding = "MEDIA"
-bucket_name = "iima-2006-alumni-media"
+bucket_name = "iima-2006-alumni-local"
+
+[images]
+binding = "IMAGES"

@@ -1,3 +1,9 @@
 .wrangler/
 .dev.vars*
 node_modules/
+.env
+.env.*
+*.sqlite*
+*.db
+*.csv
+*.zip

@@ -1,12 +1,77 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  const strip=document.querySelector('[data-classmate-strip]');
+  const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+  if(strip && !reducedMotion.matches){
+    let visible=false, stopped=false, frame=0, last=0, position=0, direction=1;
+    const stop=()=>{
+      stopped=true;
+      cancelAnimationFrame(frame);
+      strip.classList.remove('is-drifting');
+      observer.disconnect();
+    };
+    const tick=time=>{
+      if(stopped||!visible||document.hidden)return;
+      const edge=strip.scrollWidth-strip.clientWidth;
+      if(edge>1){
+        position+=direction*Math.min(time-last,50)*.025;
+        if(position>=edge||position<=0)direction=position>=edge?-1:1;
+        position=Math.min(edge,Math.max(0,position));
+        strip.scrollLeft=position;
+      }
+      last=time;
+      frame=requestAnimationFrame(tick);
+    };
+    const sync=()=>{
+      cancelAnimationFrame(frame);
+      if(stopped||!visible||document.hidden||strip.matches(':hover'))return;
+      strip.classList.add('is-drifting');
+      position=strip.scrollLeft;
+      last=performance.now();
+      frame=requestAnimationFrame(tick);
+    };
+    const observer=new IntersectionObserver(([entry])=>{visible=entry.isIntersecting;sync();});
+    observer.observe(strip);
+    strip.addEventListener('pointerenter',sync);
+    strip.addEventListener('pointerleave',sync);
+    for(const event of ['pointerdown','wheel','focusin'])strip.addEventListener(event,stop,{once:true,passive:true});
+    reducedMotion.addEventListener('change',stop,{once:true});
+    document.addEventListener('visibilitychange',sync);
+  }
   const feed=document.querySelector('[data-feed]');
+  const cards=feed?[...feed.querySelectorAll('.collage-card')]:[];
+  const narrow=matchMedia('(max-width:490px)'), medium=matchMedia('(max-width:850px)');
+  let columns=[];
+  const columnCount=()=>narrow.matches?1:medium.matches?2:3;
+  function arrange(){
+    if(!feed||!cards.length)return;
+    columns=Array.from({length:columnCount()},()=>{
+      const column=document.createElement('div');
+      column.className='memory-column';
+      return column;
+    });
+    cards.forEach((card,index)=>columns[index%columns.length].append(card));
+    feed.classList.add('memory-columns');
+    feed.replaceChildren(...columns);
+  }
+  arrange();
+  for(const query of [narrow,medium])query.addEventListener('change',()=>{
+    if(columns.length!==columnCount())arrange();
+  });
   const addBatch=(html,prepend=false)=>{
-    const batch=document.createElement('div');
-    batch.className='memory-collage';
+    const batch=document.createElement('template');
     batch.innerHTML=html;
-    if(prepend)feed.prepend(batch);
-    else feed.append(batch);
+    const incoming=[...batch.content.querySelectorAll('.collage-card')];
+    if(!incoming.length)return;
+    const start=cards.length;
+    if(prepend){
+      cards.unshift(...incoming);
+      arrange();
+    }else{
+      cards.push(...incoming);
+      if(!columns.length)arrange();
+      else incoming.forEach((card,index)=>columns[(start+index)%columns.length].append(card));
+    }
   };
   const next=document.querySelector('[data-feed-next]');
   if(next&&'IntersectionObserver' in window){
@@ -34,17 +99,86 @@ export const socialScript = String.raw`
     next.addEventListener('click',event=>{event.preventDefault();loadMore();});
     observer.observe(next);
   }
-  document.querySelector('[data-compose-open]')?.addEventListener('click',event=>{
-    event.preventDefault();
-    document.querySelector('.compose-dialog').showModal();
-  });
+  for(const trigger of document.querySelectorAll('[data-compose-open]')){
+    trigger.addEventListener('click',event=>{
+      const dialog=document.querySelector('.compose-dialog');
+      if(!dialog)return;
+      event.preventDefault();
+      dialog.showModal();
+    });
+  }
+  const drafts=new WeakMap();
+  const redrawPhotos=form=>{
+    const draft=drafts.get(form);
+    const {photos}=draft;
+    const album=photos.length>1;
+    const title=form.querySelector('[data-album-title]');
+    title.hidden=!album;form.elements.title.required=album;
+    form.querySelector('[data-cover-hint]').hidden=!album;
+    form.querySelector('[data-photo-queue]').replaceChildren(...photos.map((photo,index)=>{
+      const item=document.createElement('li'), preview=document.createElement('img');
+      preview.src=photo.url;preview.alt=photo.file.name;
+      if(album){
+        const cover=document.createElement('button');
+        cover.type='button';cover.className='cover-thumb';
+        cover.setAttribute('aria-label','Set '+photo.file.name+' as cover');
+        cover.setAttribute('aria-pressed',String(draft.cover===photo.id));
+        cover.append(preview);
+        if(draft.cover===photo.id){
+          const badge=document.createElement('span');badge.textContent='Cover';cover.append(badge);
+        }
+        cover.onclick=()=>{draft.cover=photo.id;redrawPhotos(form);form.querySelectorAll('.cover-thumb')[index]?.focus();};
+        item.append(cover);
+      }else item.append(preview);
+      const remove=document.createElement('button');
+      remove.type='button';remove.className='remove-thumb';remove.textContent='×';
+      remove.setAttribute('aria-label','Remove '+photo.file.name);
+      remove.onclick=()=>{
+        photos.splice(index,1);URL.revokeObjectURL(photo.url);
+        if(draft.cover===photo.id)draft.cover=photos[0]?.id;
+        redrawPhotos(form);
+      };
+      item.append(remove);
+      return item;
+    }));
+  };
+  for(const composer of document.querySelectorAll('[data-compose]')){
+    drafts.set(composer,{photos:[],cover:null,initialTags:composer.querySelector('[data-topic-chips]').innerHTML});
+  }
+  const viewer=document.querySelector('.album-viewer');
+  if(viewer){
+    const albumPhotos=[...document.querySelectorAll('[data-album-photo]')];
+    let current=0, touchStart;
+    const show=index=>{
+      current=(index+albumPhotos.length)%albumPhotos.length;
+      const photo=albumPhotos[current];
+      const image=viewer.querySelector('img');
+      image.src=photo.href;image.alt=photo.querySelector('img').alt;
+      viewer.querySelector('[role=status]').textContent=(current+1)+' of '+albumPhotos.length;
+    };
+    albumPhotos.forEach((photo,index)=>photo.addEventListener('click',event=>{
+      event.preventDefault();show(index);viewer.showModal();
+    }));
+    viewer.querySelector('[data-album-prev]').onclick=()=>show(current-1);
+    viewer.querySelector('[data-album-next]').onclick=()=>show(current+1);
+    viewer.addEventListener('keydown',event=>{
+      if(event.key==='ArrowLeft'||event.key==='ArrowRight'){
+        event.preventDefault();show(current+(event.key==='ArrowRight'?1:-1));
+      }
+    });
+    viewer.addEventListener('touchstart',event=>{touchStart=event.changedTouches[0].clientX;},{passive:true});
+    viewer.addEventListener('touchend',event=>{
+      const distance=event.changedTouches[0].clientX-touchStart;
+      if(Math.abs(distance)>45)show(current+(distance<0?1:-1));
+    },{passive:true});
+  }
   const addSelection=(form,value,label)=>{
     const list=form.querySelector('[data-topic-chips]');
     if([...list.querySelectorAll('input')].some(input=>input.value.toLowerCase()===value.toLowerCase()))return;
     const chip=document.createElement('span'), field=document.createElement('input');
     const name=document.createElement('span'), close=document.createElement('button');
     chip.className='topic-chip';field.type='hidden';field.name='about';field.value=value;
-    name.textContent=label;
+    name.textContent=(value.startsWith('person:')?'@':'#')+label;
     close.type='button';close.dataset.removeTopic='';close.textContent='×';
     close.setAttribute('aria-label','Remove '+label);
     chip.append(field,name,close);list.append(chip);
@@ -55,7 +189,7 @@ export const socialScript = String.raw`
       const control=card.querySelector('[data-like]');
       control.setAttribute('aria-pressed',String(liked));
       control.setAttribute('aria-label',liked?'Unlike':'Like');
-      control.title=liked?'Unlike':'Like';
+      control.dataset.tooltip=liked?'Unlike':'Like';
       card.querySelector('[data-count]').textContent=likes||'';
     }
   };
@@ -71,12 +205,28 @@ export const socialScript = String.raw`
     if(!response.ok) throw new Error('Could not load comments.');
     const list=card.querySelector('[data-comments]');
     const rows=await response.json();
-    list.replaceChildren(...rows.map(row=>{
-      const item=document.createElement('p'), name=document.createElement('strong');
+    list.replaceChildren(...rows.map(commentElement));
+  }
+  function commentElement(row){
+      const item=document.createElement('div'), name=document.createElement('strong');
+      item.className='comment-row';
       name.textContent=row.name;
-      item.append(name,document.createTextNode(' '+row.body));
+      item.append(name);
+      if(row.canDelete){
+        const menu=document.createElement('details'), trigger=document.createElement('summary'), actions=document.createElement('div');
+        const remove=document.createElement('button');
+        menu.className='comment-menu';
+        trigger.textContent='⋯';
+        trigger.setAttribute('aria-label','Comment options');
+        remove.type='button';
+        remove.dataset.deleteComment=row.id;
+        remove.textContent='Delete comment';
+        actions.append(remove);menu.append(trigger,actions);item.append(menu);
+      }
+      const body=document.createElement('p');
+      body.textContent=row.body;
+      item.append(body);
       return item;
-    }));
   }
   document.addEventListener('click',async event=>{
     const button=event.target.closest('button');
@@ -87,14 +237,11 @@ export const socialScript = String.raw`
     if(compose){
       if(button.matches('[data-remove-topic]'))button.closest('.topic-chip').remove();
       if(button.matches('[data-target-option]')){
-        addSelection(compose,button.dataset.targetOption,button.textContent);
+        addSelection(compose,button.dataset.targetOption,button.dataset.label);
         compose.querySelector('[data-target-search]').value='';
-        button.parentElement.replaceChildren();
+        compose.querySelector('[data-target-results]').replaceChildren();
       }
-      if(button.matches('[data-add-topic]')){
-        const input=compose.querySelector('[data-new-topic]'), title=input.value.trim();
-        if(title){addSelection(compose,'new:'+title,title);input.value='';input.closest('details').open=false;}
-      }
+
     }
     const card=button.closest('[data-post]');
     if(!card)return;
@@ -102,7 +249,13 @@ export const socialScript = String.raw`
       if(button.matches('[data-enlarge]')){
         if(card.closest('dialog'))return;
         const dialog=document.querySelector('.memory-dialog'), copy=card.cloneNode(true);
-        copy.querySelector('img')?.removeAttribute('loading');
+        const photo=copy.querySelector('[data-full-src]');
+        if(photo){
+          photo.removeAttribute('loading');
+          photo.removeAttribute('srcset');
+          photo.removeAttribute('sizes');
+          photo.src=photo.dataset.fullSrc;
+        }
         dialog.querySelector('[data-dialog-content]').replaceChildren(copy);
         dialog.showModal();
       } else if(button.matches('[data-like]')){
@@ -127,67 +280,131 @@ export const socialScript = String.raw`
         panel.hidden=!panel.hidden;
         button.setAttribute('aria-expanded',String(!panel.hidden));
         if(!panel.hidden){
+          if(button.dataset.panel==='comments'){
+            panel.querySelector('form').hidden=false;
+            panel.querySelector('[data-comment-again]').hidden=true;
+          }
           panel.querySelector('input,textarea')?.focus();
           if(button.dataset.panel==='comments') await comments(card);
         }
-      } else if(button.matches('[data-tag-id]')){
+      } else if(button.matches('[data-comment-again]')){
+        button.hidden=true;
+        const form=button.parentElement.querySelector('form');
+        form.hidden=false;
+        form.querySelector('textarea').focus();
+      } else if(button.matches('[data-delete-comment]')){
         button.disabled=true;
+        try{
+          const data=new FormData();
+          data.set('action','delete-comment');data.set('comment',button.dataset.deleteComment);
+          await send(path(card),data);
+          await comments(card);
+        } finally {button.disabled=false;}
+      } else if(button.matches('[data-tag-id]')){
+        const panel=card.querySelector('[data-panel-content="tags"]');
+        const toggle=card.querySelector('[data-panel="tags"]');
+        button.disabled=true;
+        panel.hidden=true;
+        toggle.setAttribute('aria-expanded','false');
         try {
           const data=new FormData();
           data.set('action','tag-add');data.set('tag',button.dataset.tagId);
-          await send(path(card),data);
-          message(card,'Tag sent for approval.');
-          button.closest('[data-panel-content]').querySelector('[data-tag-search]').value='';
-          button.parentElement.replaceChildren();
-        } finally {button.disabled=false;}
+          if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
+          const {tags}=await (await send(path(card),data)).json();
+          for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
+            if(rendered.dataset.photoScope===card.dataset.photoScope) rendered.querySelector('[data-memory-tags]').innerHTML=tags;
+          }
+          message(card,'Tag added.');
+          panel.querySelector('[data-tag-search]').value='';
+          panel.querySelector('[data-tag-results]').replaceChildren();
+        }catch(error){
+          panel.hidden=false;
+          toggle.setAttribute('aria-expanded','true');
+          throw error;
+        }finally{button.disabled=false;}
       }
     } catch(error){message(card,error.message);}
   });
   document.addEventListener('input',async event=>{
     const input=event.target;
-    if(input.matches('[data-target-search]')){
-      const results=input.form.querySelector('[data-target-results]'), q=input.value.trim();
+    if(input.matches('[data-target-search],[data-tag-search]')){
+      const inCard=input.matches('[data-tag-search]');
+      const results=inCard?input.parentElement.querySelector('[data-tag-results]'):input.form.querySelector('[data-target-results]');
+      const q=input.value.trim();
+      clearTimeout(input.searchTimer);
+      input.searchRequest?.abort();
       results.replaceChildren();
       if(!q)return;
+      input.searchTimer=setTimeout(async()=>{
+      const controller=new AbortController();input.searchRequest=controller;
       try{
-        const response=await fetch('/memory-targets?q='+encodeURIComponent(q));
+        const response=await fetch('/memory-targets?q='+encodeURIComponent(q),{signal:controller.signal});
         if(!response.ok)throw new Error();
         const rows=await response.json();
         if(input.value.trim()!==q)return;
-        results.replaceChildren(...rows.map(({value,label})=>{
+        const suggestion=({value,label,dorm})=>{
           const option=document.createElement('button');
-          option.type='button';option.dataset.targetOption=value;option.textContent=label;
+          option.type='button';
+          if(inCard)option.dataset.tagId=value;
+          else option.dataset.targetOption=value;
+          option.dataset.label=label;
+          option.textContent=label+(dorm?' · Dorm '+dorm:'');
           return option;
-        }));
-        if(!rows.length)results.textContent='No matches';
-      }catch{if(input.value.trim()===q)results.textContent='Search unavailable.';}
+        };
+        for(const category of ['Classmates','Places','Events','Tags']){
+          const matches=rows.filter(row=>row.category===category);
+          if(!matches.length)continue;
+          const group=document.createElement('div'), heading=document.createElement('strong');
+          heading.textContent=category;group.append(heading,...matches.map(suggestion));results.append(group);
+        }
+        const label=q.replace(/^[@#]/,'').trim();
+        if(!q.startsWith('@') && label && !rows.some(row=>!row.value.startsWith('person:') && row.label.toLowerCase()===label.toLowerCase())){
+          const group=document.createElement('div');
+          for(const type of ['place','event']){
+            const option=suggestion({value:'new-'+type+':'+label,label});
+            option.textContent='Create '+type+' tag “'+label+'”';group.append(option);
+          }
+          results.append(group);
+        }
+        if(!results.children.length)results.textContent='No matches';
+
+      }catch(error){if(error.name!=='AbortError'&&input.value.trim()===q)results.textContent='Search unavailable.';}
+      },150);
       return;
     }
-    if(!input.matches('[data-tag-search]'))return;
-    const results=input.parentElement.querySelector('[data-tag-results]'), q=input.value.trim();
-    results.replaceChildren();
-    if(q.length<2)return;
-    try {
-      const response=await fetch('/tag-search?q='+encodeURIComponent(q));
-      if(!response.ok)throw new Error('Search unavailable.');
-      const rows=await response.json();
-      if(input.value.trim()!==q)return;
-      results.replaceChildren(...rows.map(row=>{
-        const button=document.createElement('button');
-        button.type='button';button.dataset.tagId=row.id;
-        button.textContent=row.nickname?row.name+' · '+row.nickname:row.name;
-        return button;
-      }));
-      if(!rows.length)results.textContent='No matches.';
-    } catch(error){if(input.value.trim()===q)results.textContent=error.message;}
   });
   document.addEventListener('change',event=>{
+    if(event.target.matches('[data-compose] input[type=file]')){
+      const picker=event.target, draft=drafts.get(picker.form);
+      const status=picker.form.querySelector('[data-compose-status]');
+      status.textContent='';
+      for(const file of picker.files){
+        if(draft.photos.length===50){status.textContent='An album can hold up to 50 photos.';break;}
+        if(file.size>15*1024*1024){status.textContent='Each photo must be 15 MB or smaller.';continue;}
+        const photo={id:crypto.randomUUID(),file,url:URL.createObjectURL(file),uploaded:false};
+        draft.photos.push(photo);
+        draft.cover ||= photo.id;
+      }
+      picker.value='';
+      redrawPhotos(picker.form);
+    }
     if(event.target.matches('[data-directory-filters] select'))event.target.form.requestSubmit();
     if(event.target.matches('[data-profile-edit] input[type=file]')&&event.target.files.length)event.target.form.requestSubmit();
   });
   document.addEventListener('submit',async event=>{
     const form=event.target;
-    if(form.matches('.compose-dialog [data-compose]')){
+    if(form.matches('form[action="/logout"]')){
+      const button=form.querySelector('button[type="submit"]');
+      if(button.disabled){event.preventDefault();return;}
+      button.textContent='Signing out…';
+      button.disabled=true;
+      window.addEventListener('pageshow',()=>{
+        button.textContent='Log out';
+        button.disabled=false;
+      },{once:true});
+      return;
+    }
+    if(form.matches('[data-compose]')){
       event.preventDefault();
       if(form.dataset.saving)return;
       form.dataset.saving='true';
@@ -195,19 +412,46 @@ export const socialScript = String.raw`
       const button=form.querySelector('button[type=submit]');
       button.disabled=true;
       try{
-        const response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{Accept:'application/json'}});
+        const draft=drafts.get(form), data=new FormData(form);
+        data.delete('images');
+        if(!draft.photos.length&&!String(data.get('body')).trim())throw new Error('Add a photo or write a memory.');
+        const picker=form.elements.images;
+        picker.disabled=true;
+        form.querySelectorAll('[data-photo-queue] button').forEach(control=>{control.disabled=true;});
+        let done=draft.photos.filter(photo=>photo.uploaded).length;
+        const pending=draft.photos.filter(photo=>!photo.uploaded);
+        for(let start=0;start<pending.length;start+=3){
+          status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';
+          const batch=await Promise.allSettled(pending.slice(start,start+3).map(async photo=>{
+            const upload=new FormData();upload.set('photo',photo.file);
+            const response=await fetch('/compose/photo?id='+encodeURIComponent(photo.id),{method:'POST',body:upload});
+            if(!response.ok)throw new Error(await response.text()||'Could not upload a photo.');
+            photo.uploaded=true;done++;
+            status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';
+          }));
+          const failed=batch.find(result=>result.status==='rejected');
+          if(failed)throw failed.reason;
+        }
+        for(const photo of draft.photos)data.append('photoId',photo.id);
+        if(draft.cover)data.set('cover',draft.cover);
+        status.textContent='Publishing memory…';
+        const response=await fetch(form.action,{method:'POST',body:data,headers:{Accept:'application/json'}});
         if(!response.ok)throw new Error(await response.text());
         const result=await response.json();
+        if(!feed){location.assign(result.url);return;}
         if(!feed.querySelector('[data-post]'))feed.replaceChildren();
         addBatch(result.html,true);
+        draft.photos.forEach(photo=>URL.revokeObjectURL(photo.url));
+        draft.photos.length=0;draft.cover=null;
         form.reset();
-        form.querySelector('[data-topic-chips]').replaceChildren();
+        form.querySelector('[data-topic-chips]').innerHTML=draft.initialTags;
         form.querySelector('[data-target-results]').replaceChildren();
         form.elements.id.value=crypto.randomUUID();
         status.textContent='';
-        form.closest('dialog').close();
+        form.closest('dialog')?.close();
+
       }catch(error){status.textContent=error.message;}
-      finally{delete form.dataset.saving;button.disabled=false;}
+      finally{delete form.dataset.saving;button.disabled=false;form.elements.images.disabled=false;redrawPhotos(form);}
       return;
     }
     if(!form.matches('[data-social],[data-profile-edit]'))return;
@@ -219,13 +463,27 @@ export const socialScript = String.raw`
     try {
       const data=new FormData(form);
       if(card){
-        await send(path(card),data);
-        form.reset();
-        await comments(card);
-        message(card,'');
+        const list=card.querySelector('[data-comments]');
+        const optimistic=commentElement({name:'You',body:String(data.get('body'))});
+        list.append(optimistic);
+        form.hidden=true;
+        try{
+          const {comment}=await (await send(path(card),data)).json();
+          optimistic.replaceWith(commentElement(comment));
+          form.reset();
+          form.parentElement.querySelector('[data-comment-again]').hidden=false;
+          message(card,'');
+        }catch(error){optimistic.remove();form.hidden=false;throw error;}
       }else{
-        const response=await fetch(form.action,{method:'POST',body:data});
+        const response=await fetch(form.action,{method:'POST',body:data,headers:{Accept:'application/json'}});
         if(!response.ok)throw new Error(await response.text());
+        if(response.headers.get('Content-Type')?.includes('application/json')){
+          const {value}=await response.json();
+          const editor=form.closest('details');
+          editor.parentElement.querySelector('.field-display').textContent=value||'—';
+          editor.open=false;
+          return;
+        }
         const next=new DOMParser().parseFromString(await response.text(),'text/html');
         const updated=next.querySelector('.alumni-profile');
         if(!updated)throw new Error('Could not update the profile. Try again.');
