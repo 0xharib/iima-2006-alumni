@@ -1,6 +1,6 @@
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
-import { theme, titleFont } from './theme.mjs';
+import { fontFaces, theme, titleFont, tokens } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
 const link=(href,label)=>`<a href="${e(href)}">${e(label)}</a>`;
@@ -33,7 +33,19 @@ const shareMeta = `<meta name="description" content="${e(shareDescription)}">
 const paths={like:'M20 8c0 4-8 9-8 9S4 12 4 8a4 4 0 0 1 8-1 4 4 0 0 1 8 1Z',comment:'M5 5h14v10h-7l-4 4v-4H5z',tag:'M4 5h9l7 7-7 7-9-9z M8 8h.1',edit:'M3 21l2-6L17 3a2.8 2.8 0 0 1 4 4L9 19z M5 15l4 4 M15 5l4 4',close:'m6 6 12 12M18 6 6 18'};
 const iconGraphic = kind => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${paths[kind]}"/></svg>`;
 const icon = (kind,label,attrs='') => `<button type="button" class="icon-action" aria-label="${e(label)}" data-tooltip="${e(label)}" ${attrs}>${iconGraphic(kind)}</button>`;
-const classmate = row => `<strong>${e(row.name)}</strong>${row.nickname?badge(row.nickname):''}${row.dorm?badge(/^\d+$/.test(row.dorm)?'Dorm '+row.dorm:row.dorm):''}`;
+const dormLabel = dorm => /^\d+$/.test(dorm) ? 'Dorm '+dorm : dorm;
+const classmate = (row,extra=[]) => {
+  const registry = [row.dorm&&dormLabel(row.dorm),...extra].filter(Boolean).join(' · ');
+  return `<strong>${e(row.name)}</strong>${row.nickname?`<small class="nickname">“${e(row.nickname)}”</small>`:''}${registry?`<small class="registry">${e(registry)}</small>`:''}`;
+};
+// Days until the reunion opens in Jaipur (IST); a seal counts down on Home and Reunion.
+const reunionStart = Date.parse('2026-12-26T00:00:00+05:30');
+const countdown = () => {
+  const days = Math.ceil((reunionStart - Date.now()) / 86400000);
+  if (days > 0) return `<span class="seal" role="img" aria-label="${days} ${days===1?'day':'days'} to the reunion in Jaipur"><b>${days}</b><small>${days===1?'day':'days'} to Jaipur</small></span>`;
+  if (days > -3) return '<span class="seal"><small>Together in Jaipur</small></span>';
+  return '';
+};
 const memoryTags=(post)=> {
   const tags=JSON.parse(post.linked_tags||'[]');
   const item=tag=>link(tag.href,(tag.kind==='person'?'@':'#')+tag.label);
@@ -82,7 +94,15 @@ const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,pri
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 ${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
-  const menu=link('/','Home')+link('/memories','Memories')+link('/people','Classmates')+link('/reunion','Reunion');
+  const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications'};
+  const current = title===reunionTitle ? '/' : sectionOf[title];
+  const tab = (href,label) => `<a href="${href}"${href===current?' aria-current="page"':''}>${label}</a>`;
+  const menu=tab('/','Home')+tab('/memories','Memories')+tab('/people','Classmates')+tab('/reunion','Reunion');
+  const slug = current==='/' ? 'home' : current ? current.slice(1) : 'other';
+  const banded = ['memories','people','gallery'].includes(slug);
+  const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
+    <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p></div>
+    <nav aria-label="Footer">${link('/','Home')}${link('/memories','Memories')}${link('/people','Classmates')}${link('/reunion','Reunion')}</nav></div></footer>` : '';
   const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
@@ -91,8 +111,9 @@ export function render(title,body,member,{home=false}={}) {
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
   return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title>${shareMeta}<style>
-  :root{color-scheme:light;--ink:#251a16;--muted:#654138;--paper:#fbf3e7;--tile:#fffaf3;--brick:#883b2e;--line:#dfcabc}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:1rem/1.5 system-ui,sans-serif}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem Georgia,serif;text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:Georgia,serif}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:3px solid #296769;outline-offset:3px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
   ${titleFont}
+  ${fontFaces}
   ${theme}
   .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
   .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5}
@@ -100,7 +121,7 @@ export function render(title,body,member,{home=false}={}) {
   .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:#ead7c5;border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  </style><body class="${home?'home ':''}${member?'member-site':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/"><img src="/campus/logo.png" alt="">IIMA Class of ’06</a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?'<script src="/social.js?v=13" defer></script>':''}</html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export const page={
   socialScript,
@@ -129,8 +150,8 @@ export const page={
   home(rows,people,next,key,me){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
-      <div class="hero-actions"><a class="cta" href="/people/${me}">Edit profile</a><a class="cta secondary" href="/compose" data-compose-open>Share a memory</a></div>
-      </div></section>
+      <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
+      </div>${countdown()}</section>
       <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
         <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
@@ -170,6 +191,7 @@ export const page={
       <header class="reunion-cover"><p class="class-label">IIM Ahmedabad · Class of 2006</p>
         <h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
         <p>20-year reunion · 26–28 December 2026 · Taj Amer, Jaipur</p>
+        ${countdown()}
       </header>
       ${tracker?`<section class="reunion-confirmation" aria-label="Attendance confirmation">
         <strong>You’re confirmed for the reunion, ${e(member.name)}.</strong>
@@ -208,7 +230,7 @@ export const page={
     </div>`;
   },
   directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
-    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}${!reunion&&row.section?badge('Section '+row.section):''}${reunion?'':badge(statuses[row.status])}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
+    ${rows.length?`<div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={}){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
@@ -232,7 +254,7 @@ export const page={
       ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
     const entry = key => {
       const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
-      return `<div class="editable-field"><dt>${e(label)}</dt><dd class="field-display">${e(details[key]||'—')}</dd>${edit(key,label,details[key])}</div>`;
+      return `<div class="editable-field${key==='moment'?' entry-moment':''}"><dt>${e(label)}</dt><dd class="field-display">${details[key]?e(details[key]):'<span class="field-empty">Not added yet</span>'}</dd>${edit(key,label,details[key])}</div>`;
     };
     return `<div class="alumni-profile">
       <header class="profile-header">
@@ -243,6 +265,8 @@ export const page={
               ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
               ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
           <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
+            ${hasValue('nickname')?`<p class="nickname">“${e(details.nickname)}”</p>`:''}
+            ${(()=>{const reg=[hasValue('section')&&'Section '+details.section,hasValue('dorm')&&dormLabel(details.dorm.trim()),'PGP 2004–06'].filter(Boolean).join(' · ');return `<p class="registry profile-registry">${e(reg)}</p>`;})()}
             ${edit('displayName','Name',details.displayName||row.name)}
             <div class="editable-field profile-rsvp">
               ${status?`<span class="profile-status field-display">${e(status)}</span>`:''}
@@ -265,7 +289,7 @@ export const page={
           ${own||Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
             <div class="then-now-grid">${['then','now'].map(slot=>{
               const photo=profilePhotos[slot], label=slot==='then'?'Then':'Now';
-              return `<div class="then-now-slot"><h3>${label}</h3>
+              return `<div class="then-now-slot"><h3>${label} <span>${slot==='then'?'2006':'2026'}</span></h3>
                 ${photo?`<a href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" alt="${e(photo.caption||label+' photo of '+row.name)}" loading="lazy"></a>`:
                  `<p>${own?'Add a '+label.toLowerCase()+' photo.':'No photo shared.'}</p>`}
                 ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
@@ -410,28 +434,32 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
   ${shareMeta}
   <style>
     ${titleFont}
-    :root { color-scheme:light; --paper:#f6f4ef; --ink:#242721; --muted:#555a50; --accent:#873d31; --line:#dedbd3; font:16px/1.5 system-ui,sans-serif }
+    ${fontFaces}
+    ${tokens}
+    :root { --accent:var(--brick); font:16px/1.55 var(--sans) }
     * { box-sizing:border-box }
-    body { margin:0; background:var(--paper); color:var(--ink) }
+    body { margin:0; background:var(--lime); color:var(--ink) }
     a { color:var(--accent); text-decoration:none }
     a:hover { text-decoration:underline }
-    :focus-visible { outline:3px solid #975044; outline-offset:4px }
-    .shell { background:linear-gradient(90deg,#170d0ac9,#1a100e66),url('/campus/arches.webp') center/cover; background-color:#251a16 }
-    .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:#f5f3ee; border-bottom:1px solid #dedbd3 }
-    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font-size:.94rem; font-weight:750 }
+    :focus-visible { outline:2px solid var(--brick-fired); outline-offset:2px }
+    .shell { background:linear-gradient(90deg,#1c1816e6,#1c181670),url('/campus/arches.webp') center/cover; background-color:var(--night) }
+    .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:var(--paper); border-bottom:3px solid var(--brick) }
+    .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font:700 1.05rem var(--serif) }
+    .brand small { font:600 .68rem var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); padding-left:.6rem; border-left:1px solid var(--concrete) }
     .mark { width:29px; height:29px; object-fit:contain; mix-blend-mode:multiply }
     .sign-in-campus { min-height:calc(100svh - 47px); display:grid; align-items:center; padding:clamp(24px,7vw,100px) clamp(16px,7vw,100px) }
     .layout { width:min(1120px,100%); margin:auto; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); align-items:center; gap:clamp(20px,5vw,74px) }
     .intro { color:#fff3e3 }
     h1,h2 { margin:0; line-height:1.08 }
     .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1.06 "IIMA Title",Georgia,serif; letter-spacing:-.06em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
-    .reunion-title [aria-hidden] { color:#e0a48e; font-size:.55em }
-    .card { background:#fffaf3f5; border:1px solid #fff8; border-radius:20px; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #130b0850; backdrop-filter:blur(12px) }
-    h2 { font-size:clamp(1.55rem,3vw,2rem); letter-spacing:-.045em }
+    .reunion-title [aria-hidden] { color:var(--brick-fired); font-size:.55em }
+    .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.16em; text-transform:uppercase; color:#f3e4dc }
+    .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:var(--r); padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
+    h2 { font:650 clamp(1.6rem,3vw,2.1rem)/1.1 var(--serif); letter-spacing:-.015em }
     p { margin:.65rem 0 }
     .instructions,.help,.selection p { color:var(--muted); font-size:.92rem }
-    label { display:block; margin-top:20px; font-weight:650; font-size:.84rem }
-    .search { display:flex; align-items:center; gap:10px; border:1px solid #a9ada0; background:#fafaf8; border-radius:10px; padding:0 12px; margin-top:7px }
+    label { display:block; margin-top:20px; font-weight:600; font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--brick) }
+    .search { display:flex; align-items:center; gap:10px; border:1px solid var(--concrete); background:#fff; border-radius:var(--r-sm); padding:0 12px; margin-top:7px }
     .search svg { flex:0 0 18px; color:var(--muted) }
     .search:focus-within { outline:2px solid var(--accent); outline-offset:2px }
     input { width:100%; min-width:0; outline:none; border:0; background:transparent; padding:12px 0; color:var(--ink); font:inherit }
@@ -439,11 +467,11 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     ul { list-style:none; margin:6px 0 0; padding:0; font-size:.92rem }
     ul:empty { display:none }
     li a { display:block; padding:7px 9px; border-radius:7px }
-    li a:hover { background:#f4eee9 }
+    li a:hover { background:var(--brick-wash) }
     .selection { margin-top:16px; border-top:1px solid var(--line); padding-top:16px; overflow-wrap:anywhere }
     .selection p { margin:.15rem 0 .7rem }
-    button { padding:10px 15px; border:0; border-radius:9px; background:var(--accent); color:white; font:650 .9rem/1.4 system-ui,sans-serif; cursor:pointer }
-    button:hover { background:#703126 }
+    button { padding:11px 16px; border:0; border-radius:var(--r-sm); background:var(--brick); color:white; font:600 .92rem/1.4 var(--sans); cursor:pointer }
+    button:hover { background:var(--brick-deep) }
     .help { margin:20px 0 0 }
     @media(max-width:750px) {
       .masthead { min-height:44px }
@@ -456,11 +484,11 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
 <body>
   <div class="shell">
     <header class="masthead">
-      <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA Class of 2006</a>
+      <a href="/" class="brand"><img class="mark" src="/campus/logo.png" alt="">IIMA <small>Class of 2006</small></a>
     </header>
     <main class="sign-in-campus">
       <div class="layout">
-        <div class="intro"><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1></div>
+        <div class="intro"><p class="eyebrow">IIM Ahmedabad · PGP 2004–06</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1></div>
         <section class="card" aria-labelledby="sign-in-title">
           <h2 id="sign-in-title">Sign in</h2>
           ${!selected&&feedback?`<p role="status" class="help">${e(feedback)}</p>`:''}

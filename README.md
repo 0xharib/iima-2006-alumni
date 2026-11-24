@@ -47,6 +47,8 @@ done
 | --- | --- |
 | `worker.mjs` | Routing, authentication, data access, photo delivery and administration |
 | `views.mjs`, `theme.mjs`, `social.mjs` | Server-rendered pages, CSS and browser interactions |
+| `theme.mjs` tokens | The Kahn design system: brick, lime, concrete and night colours, radii and type tokens, plus the final style layer |
+| `fonts.mjs` | Self-hosted Source Serif 4 and IBM Plex Sans / Mono (SIL Open Font License), served from `/fonts/` |
 | `reunion.mjs` | Agenda, attendee detail validation and completeness rules |
 | `migrations/` | D1 schema and historical import migrations |
 | `test/worker.test.mjs` | Worker integration tests using synthetic data |

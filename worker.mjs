@@ -1,4 +1,5 @@
 import { render, signIn, page, form, field, escape } from './views.mjs';
+import { fonts } from './fonts.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -55,7 +56,7 @@ export default {
       if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
       if (!response.headers.has('Referrer-Policy')) response.headers.set('Referrer-Policy','strict-origin');
-      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
       return new Response('The site could not complete that request. Please try again.', {status:500});
@@ -81,6 +82,11 @@ async function route(req, env, record, setViewer) {
     const object = await env.MEDIA.get('campus-design-v1/'+asset);
     if (!object) return missing();
     return new Response(object.body,{headers:{'Content-Type':campusAssets[asset],'Cache-Control':'public, max-age=86400'}});
+  }
+  if (!post && path.startsWith('/fonts/')) {
+    const name = path.slice('/fonts/'.length);
+    if (!Object.hasOwn(fonts,name)) return missing();
+    return new Response(Uint8Array.from(atob(fonts[name]),c=>c.charCodeAt(0)),{headers:{'Content-Type':'font/woff2','Cache-Control':'public, max-age=31536000, immutable'}});
   }
   if (path==='/social.js' && !post) return new Response(page.socialScript,{
     headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300'}});

@@ -1,9 +1,23 @@
 export const titleFont = `@font-face{font-family:'IIMA Title';src:url(data:font/woff;base64,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) format('woff');font-weight:700;font-display:swap}`;
 
+// Self-hosted text faces (see fonts.mjs). "IIMA Title" above only covers the "Kal · Aaj · Aur Kal" glyphs.
+export const fontFaces = `@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4.woff2) format('woff2');font-weight:200 900;font-style:normal;font-display:swap}
+@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4-italic.woff2) format('woff2');font-weight:200 900;font-style:italic;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url(/fonts/plex-sans-400.woff2) format('woff2');font-weight:400;font-display:swap}
+@font-face{font-family:'IBM Plex Sans';src:url(/fonts/plex-sans-600.woff2) format('woff2');font-weight:500 700;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url(/fonts/plex-mono-500.woff2) format('woff2');font-weight:400 600;font-display:swap}`;
+
+// Design tokens: the "Kahn system". Brick carries structure; lime, paper and concrete carry the rest.
+export const tokens = `:root{color-scheme:light;
+--brick:#8e3e30;--brick-deep:#6b2b21;--brick-fired:#b4583f;--brick-wash:#f3e4dc;
+--lime:#f4efe6;--paper:#fffcf6;--tile:#fffcf6;--concrete:#b8b2a7;--line:#e6ded2;
+--ink:#211e1b;--muted:#5f5a52;--night:#1c1816;--ochre:#c08a3e;
+--serif:'Source Serif 4',Georgia,serif;--sans:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
+--r:4px;--r-sm:2px}`;
+
 export const theme = `
-:root{--paper:#f5f3ee;--tile:#fffdf8;--ink:#211e1b;--muted:#656058;--brick:#8e3e30;--line:#e8e1d6}
-body{background:var(--paper)}a{color:inherit;text-decoration:none}a:hover{color:var(--brick)}a,button{transition:background-color .16s,color .16s,box-shadow .16s}
-.bar{background:#faf8f3;border-bottom:1px solid var(--line)}.bar .mast,main,footer{max-width:1280px;padding-inline:clamp(16px,4vw,52px)}.mast{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px}.wordmark{display:flex;align-items:center;gap:10px;font:750 1rem system-ui,sans-serif}.wordmark img{width:39px;height:39px;aspect-ratio:1;object-fit:contain;background:white;padding:3px;border-radius:50%}
+body{background:var(--lime)}a{color:inherit;text-decoration:none}a:hover{color:var(--brick)}a,button{transition:background-color .16s,color .16s,box-shadow .16s}
+.bar{background:#faf8f3;border-bottom:1px solid var(--line)}.bar .mast,main,footer{max-width:1280px;padding-inline:clamp(16px,4vw,52px)}.mast{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px}.wordmark{display:flex;align-items:center;gap:10px;font:750 1rem var(--sans)}.wordmark img{width:39px;height:39px;aspect-ratio:1;object-fit:contain;background:white;padding:3px;border-radius:50%}
 nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .68rem;border-radius:8px}nav a:hover{background:#eee6db}h1,h2,h3{letter-spacing:-.035em}article,fieldset,.panel{box-shadow:0 6px 24px #26201608;border-radius:16px}article a{font-weight:650}.plain li a:hover,figcaption a:hover{text-decoration:underline}
 .home main{padding-top:20px}.home h1{margin:0;font-size:clamp(3.3rem,7.4vw,7rem);font-weight:500;line-height:.94;letter-spacing:-.073em}
 .campus-hero{min-height:clamp(390px,47vw,560px);border-radius:27px;overflow:hidden;display:flex;align-items:end;color:#fffaf2;background:#201611 linear-gradient(90deg,#150d0ce8 0%,#160d0c99 37%,#170e1010 75%);background-image:linear-gradient(90deg,#150d0cee 0%,#160d0ca0 39%,#170e1020 78%),url('/campus/arches.webp');background-size:cover;background-position:center 53%;padding:clamp(24px,6vw,72px)}
@@ -21,7 +35,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .profile-identity{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:1.4rem;align-items:center;padding:0 clamp(1rem,3vw,2rem) 1.5rem}
 .profile-portrait{position:relative;margin-top:-3.6rem;width:clamp(105px,15vw,177px);aspect-ratio:1;padding:5px;background:var(--profile-card);border-radius:25px;box-shadow:0 8px 24px #23130e28}
 .profile-portrait img,.profile-portrait .initials{display:grid;place-items:center;width:100%;height:100%;aspect-ratio:1;object-fit:cover;object-position:center 34%;border-radius:20px;background:#e9d8c9;color:#704133;font-size:clamp(2.5rem,6vw,4.8rem);font-weight:700}
-.alumni-profile .profile-name h1{font:750 clamp(1.8rem,4.6vw,3.4rem)/1.07 system-ui,sans-serif;letter-spacing:-.055em;margin:.65rem 0 .25rem;overflow-wrap:anywhere}
+.alumni-profile .profile-name h1{font:750 clamp(1.8rem,4.6vw,3.4rem)/1.07 var(--sans);letter-spacing:-.055em;margin:.65rem 0 .25rem;overflow-wrap:anywhere}
 .profile-name p,.profile-pilot,.profile-empty{color:var(--muted);margin:.25rem 0}
 .profile-status{display:inline-block;margin-top:.45rem;padding:.22rem .55rem;background:#f1e9de;border-radius:99px;font-size:.78rem;font-weight:650}
 .profile-actions{display:flex;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;padding-top:.7rem}
@@ -30,7 +44,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .profile-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.8fr);gap:1rem;margin-top:1rem;align-items:start}
 .profile-sidebar,.profile-main{display:grid;gap:1rem;min-width:0}.profile-layout-wide{grid-template-columns:minmax(0,1fr)}
 .profile-section{padding:clamp(1rem,2.8vw,1.65rem);min-width:0}
-.profile-section h2{font:750 clamp(1.15rem,2.4vw,1.45rem)/1.2 system-ui,sans-serif;letter-spacing:-.035em;margin:0 0 1rem}
+.profile-section h2{font:750 clamp(1.15rem,2.4vw,1.45rem)/1.2 var(--sans);letter-spacing:-.035em;margin:0 0 1rem}
 .profile-section-head{display:flex;justify-content:space-between;align-items:baseline;gap:.75rem}.profile-section-head a{font-size:.85rem;font-weight:700;color:var(--brick)}
 .profile-facts,.profile-entry{margin:0;display:grid;gap:1rem}.profile-facts{grid-template-columns:repeat(auto-fit,minmax(min(115px,100%),1fr))}
 .profile-facts dt,.profile-entry dt{font-size:.78rem;color:var(--muted);margin-bottom:.18rem}.profile-facts dd,.profile-entry dd{margin:0}
@@ -65,7 +79,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .memory-enlarge img{width:100%;height:auto;aspect-ratio:auto;object-fit:contain;border-radius:0}
 .memory-credit{position:absolute;bottom:.45rem;left:.55rem;max-width:calc(100% - 1rem);padding:.2rem .5rem;border-radius:.4rem;background:#1f1612e8;color:#fff;font-size:.81rem}
 .memory-credit:hover{color:#ffe1c5}
-.memory-quote{display:block;margin:.85rem .85rem 2.5rem;padding:1.15rem;border:1px solid #dcc4b1;background:#f2e5d6;font:1.12rem/1.48 Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere}
+.memory-quote{display:block;margin:.85rem .85rem 2.5rem;padding:1.15rem;border:1px solid #dcc4b1;background:#f2e5d6;font:1.12rem/1.48 var(--serif);white-space:pre-wrap;overflow-wrap:anywhere}
 .memory-caption{padding:0 .75rem;white-space:pre-wrap;overflow-wrap:anywhere}
 .compact-collage .memory-caption{display:none}
 .compact-collage .memory-quote{max-height:9rem;overflow:hidden}
@@ -117,14 +131,13 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
   .directory-controls:has([name=dorm]){grid-template-columns:1fr 1fr}
 }
 
-.member-site{min-height:100vh;background:#26201c;isolation:isolate}.member-site::before{content:'';position:fixed;inset:0;z-index:-1;background:linear-gradient(#1e171284,#1e1712b8),url('/campus/arches.webp') center / cover no-repeat}
-.member-site main>h1,.member-site .memory-toolbar,.member-site .feed-more{color:#fff6eb}
-.member-site main:has(>.classmates-directory),.member-site main:has(>.memory-toolbar){color:#fff6eb}
+.member-site{min-height:100vh;background:var(--lime);isolation:isolate}
+.member-site main>h1,.member-site .memory-toolbar,.member-site .feed-more{color:var(--ink)}
 .member-site .directory-card{color:#251a16}
 .member-site main:has(>.alumni-profile)>h1{display:none}
-.member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.classmates-directory)){background:#f5f3eef2;margin-block:1rem;border-radius:1rem}
+.member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.classmates-directory,.reunion-page)){background:var(--paper);border:1px solid var(--line);border-top:2px solid var(--concrete);margin-block:1.5rem;border-radius:var(--r)}
 .member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.classmates-directory))>h1,.member-site .alumni-profile,.member-site .collage-card{color:#251a16}
-.alumni-profile .profile-report{color:#fff6eb}
+.alumni-profile .profile-report{color:var(--muted)}
 .editable-field:has(> .inline-edit[open])>.field-display{display:none}
 .editable-field .inline-edit[open] form{margin-top:.3rem}
 .profile-rsvp:empty{display:none}.profile-rsvp{margin-top:.25rem}
@@ -142,21 +155,21 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .classmates-directory .directory-controls{background:#fff8ef;color:#2b1b15;border:1px solid #e4d4c5;border-radius:.8rem;padding:.8rem 1rem}
 .classmates-directory .directory-controls label{margin:0}
 .classmates-directory .directory-controls button{margin:0}
-.classmates-directory>p{color:#fff6eb}
+.classmates-directory>p{color:var(--muted)}
 [data-feed]>.memory-collage{margin:0}
 .profile-memories .memory-collage{columns:2}
 .profile-memories .memory-collage .collage-card{margin:0 0 .8rem}
 @media(max-width:580px){.profile-memories .memory-collage{columns:1}}
 
-.reunion-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .24em;font-family:'IIMA Title',Georgia,serif;font-weight:700;line-height:1.06}
-.reunion-title [aria-hidden]{color:#e0a48e;font-size:.55em}
+.reunion-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .24em;font-family:'IIMA Title',var(--serif);font-weight:700;line-height:1.06}
+.reunion-title [aria-hidden]{color:var(--brick-fired);font-size:.55em}
 .featured-note{color:#f4dfd1;margin:0 0 1rem}.featured-note a{color:inherit;text-decoration:underline}
 .memory-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(.65rem,2vw,1.25rem);align-items:start}
 .memory-column{min-width:0}
 .memory-columns .collage-card{margin:0 0 1rem;padding:0;overflow:hidden;color:#251a16;background:#fffaf3;box-shadow:0 8px 24px #21181116}
 .memory-columns .text-memory{background:#f1e2d1;border-color:#e1cbb5}
 .icon-action[data-tooltip]{position:relative}
-.icon-action[data-tooltip]::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 4px);left:0;z-index:3;pointer-events:none;opacity:0;padding:.23rem .5rem;border-radius:.35rem;background:#291d17;color:#fff9ec;font:650 .75rem/1.4 system-ui,sans-serif;white-space:nowrap}
+.icon-action[data-tooltip]::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 4px);left:0;z-index:3;pointer-events:none;opacity:0;padding:.23rem .5rem;border-radius:.35rem;background:#291d17;color:#fff9ec;font:650 .75rem/1.4 var(--sans);white-space:nowrap}
 .icon-action[data-tooltip]:is(:hover,:focus-visible)::after{opacity:1}
 .comment-row{position:relative;padding:.35rem 2rem .35rem .65rem;border-radius:.65rem;background:#f3e8de;margin:.4rem 0}
 .memory-inline [data-comments] .comment-row p{padding:0;margin:.2rem 0;background:transparent}
@@ -176,15 +189,15 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .reunion-cover .reunion-title{margin:.3em 0 .2em}
 .reunion-cover p:last-child{margin-bottom:0}
 .reunion-confirmation,.reunion-section{padding:clamp(1rem,3vw,2rem);border:1px solid #dfcabc;border-radius:1rem;margin-top:1rem;background:#fff8ef}
-.reunion-confirmation{background:#e9eddf;border-color:#c1c9af;color:#27381e}
+.reunion-confirmation{background:var(--paper);border-color:var(--line);border-inline-start:4px solid var(--brick);color:var(--ink)}
 .reunion-confirmation strong{font-size:1.25rem}
 .reunion-confirmation p{margin:.25rem 0}
 .reunion-confirmation a{display:inline-block;margin-top:.3rem}
 .reunion-section h2{margin:0 0 .75rem}
 .reunion-days details{background:#fbefdf;border:1px solid #dfcabc;border-radius:.7rem;margin:.65rem 0;padding:.65rem 1rem}
-.reunion-days summary{font:700 1.22rem Georgia,serif;color:#74291d}
+.reunion-days summary{font:700 1.22rem var(--serif);color:#74291d}
 .reunion-days summary time{color:inherit}
-.reunion-days summary span{display:block;font:500 .9rem/1.5 system-ui;margin:.2rem 0 0 1.05rem;color:#654138}
+.reunion-days summary span{display:block;font:500 .9rem/1.5 var(--sans);margin:.2rem 0 0 1.05rem;color:#654138}
 .reunion-timeline{list-style:none;margin:.8rem 0;padding:0}
 .reunion-timeline li{display:grid;grid-template-columns:minmax(6rem,9rem) 1fr;gap:.5rem 1rem;padding:.55rem 0;border-top:1px solid #dfcabc}
 .reunion-timeline li span{font-size:.9rem;color:#654138}
@@ -206,12 +219,9 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .member-site .bar .wordmark,.member-site .mast nav>a{color:#fff3e3}
 .member-site .wordmark img{background:#faf8f3;padding:4px;border-radius:6px;mix-blend-mode:normal}
 .member-site .bar .account-menu a{color:#74291d}
-.member-site:has(.alumni-home)::before{background-position:center 22%}
-.alumni-home .campus-hero{background:none}
-.alumni-home{background:linear-gradient(transparent clamp(270px,48svh,440px),#211812 clamp(365px,56svh,516px))}
-.reunion-priority,.reunion-missing{background:#fff0d3;color:#593a13;border-inline-start:4px solid #ad6a16;border-radius:.45rem;padding:.7rem .85rem}
-.reunion-group .reunion-needs-detail{background:#fff0d3;border:1px solid #d6a24e;border-inline-start:4px solid #ad6a16;border-radius:.45rem;padding-left:.65rem}
-.reunion-needs-detail .field-display{color:#684214;font-size:.92rem;font-weight:650}
+.reunion-priority,.reunion-missing{background:var(--brick-wash);color:var(--brick-deep);border:1px dashed var(--brick-fired);border-inline-start:4px solid var(--brick);border-radius:var(--r);padding:.7rem .85rem}
+.reunion-group .reunion-needs-detail{background:var(--brick-wash);border:1px dashed var(--brick-fired);border-inline-start:3px solid var(--brick);border-radius:var(--r);padding-left:.65rem}
+.reunion-needs-detail .field-display{color:var(--brick-deep);font-size:.92rem;font-weight:600}
 
 .member-site .bar{position:sticky;top:0;background:#faf8f3;border-bottom:1px solid var(--line);backdrop-filter:none}
 .member-site .bar .mast{min-height:52px;padding-block:4px;gap:.5rem;flex-wrap:nowrap}
@@ -278,7 +288,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
   padding:.22rem .52rem;border-radius:.4rem;font-size:.78rem;font-weight:650;
 }
 .memory-card-footer{padding:0 .85rem}
-.memory-album-title{margin:.75rem 0 .35rem;font:700 1.05rem/1.25 system-ui,sans-serif;letter-spacing:-.02em;overflow-wrap:anywhere}
+.memory-album-title{margin:.75rem 0 .35rem;font:700 1.05rem/1.25 var(--sans);letter-spacing:-.02em;overflow-wrap:anywhere}
 .memory-album-title a:hover,.memory-author a:hover{text-decoration:underline}
 .collage-card .memory-caption{margin:.65rem 0;padding:0;font-size:.91rem;line-height:1.55;overflow-wrap:anywhere}
 .collage-card .memory-tags{padding:.2rem 0 .55rem;gap:.35rem}
@@ -294,7 +304,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .memory-like [data-count]:empty{display:none}
 .collage-card.text-memory .collage-visual{background:#f7f0e7}
 .collage-card.text-memory .memory-quote{
-  padding:.9rem .85rem;font:1.14rem/1.5 Georgia,serif;color:#36241e;
+  padding:.9rem .85rem;font:1.14rem/1.5 var(--serif);color:#36241e;
 }
 .memory-read-more{display:block;margin:0 .85rem .9rem;color:#804b3e;font-size:.83rem;font-weight:650}
 .memory-enlarge:has(.memory-read-more) .memory-quote{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden;padding-bottom:0;margin-bottom:.65rem}
@@ -421,4 +431,199 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
   .notification-byline,.notification-preview{padding:.65rem}
   .admin-table-wrap{max-width:100%}
 }
+
+/* ===== Kahn system: brick, arch, circle. Final layer; overrides the legacy rules above. ===== */
+body{font-family:var(--sans);color:var(--ink);background:var(--lime);-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--serif);font-weight:650;letter-spacing:-.012em;color:inherit}
+a{color:var(--brick)}a:hover{color:var(--brick-deep)}
+:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}
+button{border-radius:var(--r-sm);background:var(--brick);font-weight:600;letter-spacing:.01em}
+button:hover{background:var(--brick-deep)}
+input:not([type=checkbox]),textarea,select{border:1px solid var(--concrete);border-radius:var(--r-sm);background:var(--paper)}
+input:not([type=checkbox]):focus,textarea:focus,select:focus{border-color:var(--brick);outline:2px solid var(--brick-wash);outline-offset:0}
+label{font-size:.78rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+label input,label select,label textarea{text-transform:none;letter-spacing:0;font-size:1rem;color:var(--ink);font-weight:400;margin-top:.3rem}
+article,fieldset,.panel{border-radius:var(--r);box-shadow:none;border-color:var(--line)}
+time,small{color:var(--muted)}
+
+/* Masthead */
+.member-site{--mast-height:58px}
+.member-site .bar{background:var(--paper);border-bottom:3px solid var(--brick);box-shadow:0 1px 0 var(--concrete)}
+.member-site .bar .wordmark{display:flex;align-items:center;gap:.6rem;color:var(--ink)}
+.member-site .bar .wordmark img{width:34px;height:34px}
+.wm-iima{font:700 1.15rem/1 var(--serif);letter-spacing:.02em}
+.wm-class{font:600 .7rem/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-left:.6rem;border-left:1px solid var(--concrete)}
+.member-site .desktop-menu{gap:.25rem}
+.member-site .desktop-menu>a{font:600 .88rem var(--sans);color:var(--ink);border-radius:0;padding:.45rem .7rem;border-bottom:2px solid transparent}
+.member-site .desktop-menu>a:hover{background:none;color:var(--brick);border-bottom-color:var(--brick-wash)}
+.member-site .desktop-menu>a[aria-current=page]{color:var(--brick);border-bottom-color:var(--brick)}
+.notification-bell{color:var(--ink)}.notification-bell span{background:var(--brick);font-family:var(--mono)}
+.account summary img,.account summary .initials{box-shadow:0 0 0 2px var(--paper),0 0 0 3px var(--brick)}
+.bar .account-menu{border-radius:var(--r);box-shadow:0 10px 30px #21181226}
+.bar .account-menu a{color:var(--ink)}
+
+/* Page titles: display serif with an arch-and-tie-beam rule */
+.member-site main>h1{font:650 clamp(2.2rem,5vw,3.5rem)/1.05 var(--serif);letter-spacing:-.02em;margin:clamp(1.2rem,4vw,2.6rem) 0 1.4rem}
+.member-site main>h1::after,.arch-rule::after{content:'';display:block;width:76px;height:15px;margin-top:.7rem;border:1.5px solid var(--brick-fired);border-bottom:2px solid var(--concrete);border-radius:50% 50% 0 0/100% 100% 0 0}
+.page-band main>h1{margin-top:clamp(.9rem,2.5vw,1.6rem);display:flex;flex-direction:column;justify-content:end;min-height:clamp(160px,22vw,240px);padding:clamp(1.1rem,3vw,2rem);border-radius:var(--r);color:var(--paper);background:var(--night) center/cover no-repeat}
+.member-site.page-band main{background:transparent;border:0;margin-block:0}
+.member-site.page-band main>h1{color:var(--paper)}
+.member-site{display:flex;flex-direction:column}.member-site>main{flex:1 0 auto;width:100%}
+.page-band main>h1::after{border-color:var(--paper);border-bottom-color:#fffcf699}
+.page-people main>h1{background-image:linear-gradient(0deg,#1c1816e6,#1c181633 70%),url('/campus/steps.webp')}
+.page-memories main>h1{background-image:linear-gradient(0deg,#1c1816e6,#1c181640 70%),url('/campus/light.webp');background-position:center 78%}
+.page-gallery main>h1{background-image:linear-gradient(0deg,#1c1816e6,#1c181640 70%),url('/campus/arches.webp')}
+
+/* Shared bits */
+.nickname{font:italic 500 .95em/1.3 var(--serif);color:var(--brick)}
+.registry{font:500 .72rem/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.attend-yes{display:inline-block;margin-top:.35rem;padding:.1rem .45rem;border:1px solid var(--brick);border-radius:999px;font:500 .66rem/1.5 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--brick)}
+.seal{display:inline-grid;place-items:center;align-content:center;width:104px;height:104px;border-radius:50%;text-align:center;color:var(--paper);background:var(--brick);box-shadow:inset 0 0 0 4px var(--brick),inset 0 0 0 5px #fffcf6aa;font-family:var(--mono)}
+.seal b{font:600 2rem/1 var(--serif)}.seal small{display:block;max-width:76px;margin-top:.2rem;color:inherit;font-size:.6rem;line-height:1.25;letter-spacing:.1em;text-transform:uppercase}
+.initials{font-family:var(--serif);color:var(--brick)!important;background:var(--brick-wash)!important}
+
+/* Home */
+.alumni-home{background:var(--lime);color:var(--ink)}
+.alumni-home .campus-hero{position:relative;background-image:linear-gradient(90deg,#1c1816f0 0%,#1c1816a8 42%,#1c181620 80%),url('/campus/arches.webp');background-size:cover;background-position:center 50%}
+.alumni-home .campus-hero .class-label{font:500 .74rem var(--mono);letter-spacing:.16em;color:#f3e4dc}
+.alumni-home .campus-hero .seal{position:absolute;right:clamp(16px,5vw,72px);bottom:clamp(20px,5vw,60px);background:#8e3e30e6}
+.cta{border-radius:var(--r-sm);font:600 .9rem var(--sans);min-height:44px;padding:.6rem 1.05rem}
+.cta.cta-primary{background:var(--brick);color:#fff;border:1px solid var(--brick)}.cta.cta-primary:hover{background:var(--brick-deep);color:#fff}
+.cta.cta-quiet{background:transparent;color:var(--paper);border:1px solid #fffcf6b3}.cta.cta-quiet:hover{background:#fffcf61a;color:#fff}
+.home-classmates{background-image:linear-gradient(120deg,#1c1816f2,#1c1816c2),url('/campus/steps.webp');color:var(--paper)}
+.home-classmates .section-head h2{color:var(--paper)}
+.alumni-home .home-classmates .section-head a{color:#f3e4dc}
+.home-classmates .person-tile{border-radius:var(--r);border-color:#fffcf62e;background:#2a221e}
+.home-classmates .person-tile strong{font:600 .98rem/1.2 var(--serif)}
+.home-classmates .person-tile .nickname{color:#f3c9b8;font-size:.85rem}
+.home-classmates .person-tile .registry{color:#e6ded2;font-size:.66rem}
+.home-memories{background:var(--lime);color:var(--ink);padding-top:clamp(28px,5vw,64px)}
+.home-memories .section-head h2{color:var(--ink)}
+.alumni-home .home-memories .section-head a,.alumni-home .home-memories .memory-nav a{color:var(--brick)}
+.home-memories .feed-more{color:var(--brick)}
+.feed-more{border-radius:var(--r-sm);font-weight:600}
+
+/* Classmates */
+.classmates-directory .directory-controls{background:var(--paper);border:1px solid var(--line);border-top:2px solid var(--concrete);border-radius:var(--r);color:var(--ink)}
+.member-site .directory-card{border-radius:var(--r);border-color:var(--line);background:var(--paper);transition:box-shadow .16s,transform .16s}
+.member-site .directory-card:hover{box-shadow:0 6px 18px #21181214;transform:translateY(-2px)}
+.member-site .directory-card :is(img,.initials){aspect-ratio:4/5;font-size:2.2rem;object-fit:cover;object-position:center 30%}
+.directory-card strong{display:block;font:600 1.02rem/1.25 var(--serif);color:var(--ink)}
+.directory-card .nickname{display:block;margin-top:.1rem}
+.directory-card .registry{display:block;margin-top:.3rem}
+.member-site .directory-card .attend-yes{display:inline-block}
+
+/* Profile */
+.profile-header,.profile-section{border-radius:var(--r);border-color:var(--line);box-shadow:none;background:var(--paper)}
+.profile-section{border-top:2px solid var(--concrete)}
+.profile-cover{background-image:linear-gradient(110deg,#1c1816b3,#6b2b2122),url('/campus/steps.webp')}
+.profile-portrait{border-radius:50%;padding:6px;background:var(--paper);box-shadow:0 0 0 1px var(--brick),0 10px 26px #21181226}
+.profile-portrait img,.profile-portrait .initials{border-radius:50%}
+.profile-portrait>form{position:absolute;right:4px;bottom:4px;margin:0}.profile-portrait [data-upload]{margin:0;background:var(--paper);box-shadow:0 0 0 1px var(--line),0 2px 8px #2118122e}
+.alumni-profile .profile-name h1{font:650 clamp(2rem,4.6vw,3.4rem)/1.05 var(--serif);letter-spacing:-.02em;margin:.9rem 0 .2rem}
+.profile-name .nickname{margin:0;font-size:1.15rem}
+.profile-registry{margin:.35rem 0 .2rem!important;color:var(--muted)}
+.profile-status{background:var(--brick-wash);color:var(--brick-deep);border:1px solid var(--brick);border-radius:999px;font:500 .7rem/1.6 var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:.15rem .6rem}
+.profile-secondary{background:transparent;border:0!important;color:var(--brick);padding-inline:0!important}
+.profile-secondary:hover{text-decoration:underline}
+.profile-primary,.profile-actions a.profile-primary{border-radius:var(--r-sm)}
+.profile-section h2{font:650 clamp(1.25rem,2.4vw,1.55rem)/1.2 var(--serif);letter-spacing:-.01em}
+.profile-facts dt,.profile-entry dt{font:600 .7rem/1.4 var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--brick)}
+.profile-facts dd{font-size:1rem}
+.profile-entry dd{font:400 1.12rem/1.65 var(--serif);color:var(--ink);max-width:64ch}
+.profile-entry>div+div{border-top:0;padding-top:1.4rem;position:relative}
+.profile-entry>div+div::before{content:'';position:absolute;top:0;left:0;width:44px;height:9px;border:1.5px solid var(--brick-fired);border-bottom:1.5px solid var(--concrete);border-radius:50% 50% 0 0/100% 100% 0 0;opacity:.8}
+.entry-moment dd{position:relative;padding-left:2.4rem;font-size:clamp(1.25rem,2.2vw,1.5rem);font-style:italic;line-height:1.5;color:var(--brick-deep)}
+.entry-moment dd::before{content:'\\201C';position:absolute;left:0;top:-.35rem;font:700 3.4rem/1 var(--serif);color:var(--brick-fired)}
+.field-empty{color:var(--muted);font:italic .95rem var(--sans)}
+.then-now-slot{background:transparent;border-radius:0;padding:0}
+.then-now-slot h3{display:flex;align-items:baseline;gap:.5rem;font:650 1.05rem var(--serif)}
+.then-now-slot h3 span{font:600 1.6rem/1 var(--serif);color:var(--brick)}
+.then-now-slot img{aspect-ratio:4/5;object-fit:cover;background:var(--brick-wash);border-radius:var(--r)}
+.then-now-slot p{display:grid;place-items:center;aspect-ratio:4/5;margin:0;border:1px dashed var(--concrete);border-radius:var(--r);color:var(--muted);font-size:.9rem}
+.inline-edit summary,.profile-portrait [data-upload],.then-now-slot [data-upload]{opacity:.55;transition:opacity .16s}
+.inline-edit summary:hover,.inline-edit[open] summary,.inline-edit summary:focus-visible,[data-upload]:hover,[data-upload]:focus-visible{opacity:1}
+.profile-photos img{border-radius:var(--r)}
+.alumni-profile .profile-memories article{background:var(--paper)}
+
+/* Memories */
+.collage-card:is(.memory-collage *,.memory-columns *,.memory-dialog *){background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 1px 2px #21181210}
+.collage-card .memory-author a{font:600 .86rem var(--sans);color:var(--ink)}
+.collage-card .memory-author :is(img,.initials){box-shadow:0 0 0 1px var(--line)}
+.collage-card.text-memory .collage-visual{background:var(--paper)}
+.collage-card.text-memory .memory-quote{position:relative;padding:1.2rem 1rem .9rem 2.6rem;font:400 1.14rem/1.55 var(--serif);color:var(--ink)}
+.collage-card.text-memory .memory-quote::before{content:'\\201C';position:absolute;left:.85rem;top:.6rem;font:700 2.6rem/1 var(--serif);color:var(--brick-fired)}
+.collage-card .memory-caption{font:400 1rem/1.5 var(--serif)}
+.memory-album-title{font:650 1.15rem/1.25 var(--serif)}
+.album-photo-count{border-radius:var(--r-sm);font:500 .7rem var(--mono);letter-spacing:.1em;text-transform:uppercase;background:#1c1816e0}
+.collage-card .memory-tags a,.collage-card .memory-tags summary{display:inline-block;background:var(--brick-wash);color:var(--brick-deep);border-radius:999px;padding:.08rem .55rem;font:500 .76rem var(--sans)}
+.collage-card .memory-tags a:hover{text-decoration:none;background:#ecd4c8}
+.collage-card .collage-actions{border-top-color:var(--line)}
+.collage-card .collage-actions .icon-action{color:var(--muted)}
+.collage-card .collage-actions .icon-action:hover,.collage-card .collage-actions [aria-pressed=true]{color:var(--brick)}
+.icon-action[data-like][aria-pressed=true]{color:var(--brick)}
+.memory-read-more{color:var(--brick)}
+.memory-file-picker{background:var(--brick-wash);border-color:var(--brick-fired);border-radius:var(--r)}
+.topic-chip,.memory-targets [data-target-results] button{background:var(--brick-wash);color:var(--brick-deep)}
+.memory-dialog{border-radius:var(--r);background:var(--paper)}
+.share-memory{border-radius:var(--r-sm);background:var(--brick);color:#fff}
+
+/* Reunion */
+.reunion-cover{position:relative;border-radius:var(--r);background:linear-gradient(100deg,#1c1816f0,#1c18168c),url('/campus/arches.webp') center 53%/cover,var(--night)}
+.reunion-cover .class-label,.reunion-cover>p:not(.class-label){font:500 .8rem/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#f3e4dc}
+.reunion-cover .seal{position:absolute;right:clamp(14px,4vw,48px);top:50%;transform:translateY(-50%)}
+.reunion-confirmation,.reunion-section{border-radius:var(--r);border-color:var(--line);background:var(--paper)}
+.reunion-section{border-top:2px solid var(--concrete)}
+.reunion-confirmation strong{font:650 1.35rem/1.3 var(--serif)}
+.reunion-section h2{font-size:clamp(1.4rem,3vw,1.9rem)}
+.reunion-days details{background:var(--lime);border-color:var(--line);border-radius:var(--r);border-inline-start:3px solid var(--brick)}
+.reunion-days summary{color:var(--brick-deep)}
+.reunion-days summary span{font:500 .72rem/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.reunion-timeline li{border-top-color:var(--line)}.reunion-timeline li span{font:500 .8rem var(--mono);color:var(--muted)}
+.reunion-group{border-radius:var(--r);background:var(--paper)}
+.reunion-group h3{font-size:1.15rem}
+.reunion-saved{background:var(--paper);border-inline-start:4px solid var(--brick);padding:.6rem .85rem}
+
+/* Notifications, gallery, admin */
+.notification-card{border-radius:var(--r)}
+.notification-card.new{border-inline-start-color:var(--brick);background:var(--paper)}
+.notification-open{color:var(--brick)}
+.notification-byline small{font:500 .7rem var(--mono);letter-spacing:.04em}
+.photos img{border-radius:var(--r)}
+.admin-stats>div,.admin-table{border-radius:var(--r)}
+
+/* Footer: LKP at night, brick coursing */
+.site-footer{max-width:none!important;margin:3rem 0 0!important;padding:clamp(2rem,5vw,3.5rem) clamp(16px,4vw,52px)!important;color:#e6ded2;background-color:var(--night);
+  background-image:linear-gradient(#fffcf60d 1px,transparent 0),conic-gradient(from 270deg at 1px 14px,#fffcf60d 0 90deg,transparent 0),conic-gradient(from 270deg at 1px 14px,#fffcf60d 0 90deg,transparent 0);
+  background-size:100% 14px,48px 28px,48px 28px;background-position:0 0,0 0,24px 14px;border-top:3px solid var(--brick)}
+.site-footer>div{max-width:1280px;margin:auto;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:1.2rem 2rem}
+.site-footer .reunion-title{font:700 clamp(1.8rem,4vw,2.8rem)/1.05 'IIMA Title',var(--serif);letter-spacing:-.04em;color:var(--paper);margin:0}
+.site-footer p:not(.reunion-title){margin:.4rem 0 0;font:500 .72rem var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#b8b2a7}
+.site-footer nav{display:flex;gap:.4rem 1.2rem;margin:0}.site-footer nav a{color:#e6ded2;font-size:.88rem}
+.site-footer nav a:hover{color:#fff}
+
+/* Mobile: bottom tab bar replaces the hamburger */
+@media(max-width:650px){
+  .member-site{--mast-height:52px;padding-bottom:calc(60px + env(safe-area-inset-bottom))}
+  .wm-class{display:none}
+  .member-site .mobile-menu{display:none}
+  .member-site .desktop-menu{display:flex;position:fixed;inset:auto 0 0 0;z-index:20;justify-content:space-around;gap:0;height:calc(58px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:var(--paper);border-top:1px solid var(--concrete);box-shadow:0 -6px 20px #2118120f}
+  .member-site .desktop-menu>a{flex:1;display:grid;place-items:center;font-size:.78rem;padding:0;border-bottom:0;border-top:3px solid transparent;min-height:56px}
+  .member-site .desktop-menu>a[aria-current=page]{border-top-color:var(--brick)}
+  .member-site main>h1{font-size:clamp(1.9rem,8vw,2.4rem)}
+  .page-band main>h1{min-height:130px}
+  .alumni-home .campus-hero{flex-direction:column;align-items:stretch}
+  .alumni-home .campus-hero .seal{position:static;align-self:flex-start;width:74px;height:74px;margin-top:.9rem}
+  .alumni-home .campus-hero .seal b{font-size:1.4rem}.alumni-home .campus-hero .seal small{font-size:.5rem;max-width:56px}
+  .alumni-home .hero-actions .cta{font-size:.85rem}
+  .reunion-cover .seal{position:static;transform:none;width:84px;height:84px;margin-top:.8rem}
+  .reunion-cover .seal b{font-size:1.5rem}
+  .profile-portrait{width:96px;margin-top:-2.2rem;border-radius:50%}
+  .alumni-profile .profile-name h1{font-size:1.75rem}
+  .profile-identity{grid-template-columns:1fr}
+  .profile-facts{grid-template-columns:1fr}
+  .entry-moment dd{padding-left:1.8rem}
+  .site-footer{margin-top:2rem!important}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}.directory-card:hover{transform:none}}
 `;
