@@ -25,7 +25,7 @@ export const socialScript = String.raw`
     toggle.hidden=false;
     const set=on=>{profile.classList.toggle('is-editing',on);toggle.setAttribute('aria-pressed',String(on));toggle.textContent=on?'Done editing':'Edit page';};
     toggle.addEventListener('click',()=>set(!profile.classList.contains('is-editing')));
-    if(sessionStorage.getItem('profile-editing')==='1') set(true);
+    try{if(sessionStorage.getItem('profile-editing')==='1') set(true);}catch{}
     addEventListener('pagehide',()=>{try{sessionStorage.setItem('profile-editing',profile.classList.contains('is-editing')?'1':'0');}catch{}});
   }
   const strip=document.querySelector('[data-classmate-strip]');
