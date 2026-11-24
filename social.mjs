@@ -1,5 +1,15 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  // Owners: one "Edit page" switch instead of a pencil on every field. Without this script the pencils stay visible.
+  const profile=document.querySelector('.alumni-profile'), toggle=document.querySelector('[data-edit-toggle]');
+  if(profile && toggle){
+    profile.dataset.editable='';
+    toggle.hidden=false;
+    const set=on=>{profile.classList.toggle('is-editing',on);toggle.setAttribute('aria-pressed',String(on));toggle.textContent=on?'Done editing':'Edit page';};
+    toggle.addEventListener('click',()=>set(!profile.classList.contains('is-editing')));
+    if(sessionStorage.getItem('profile-editing')==='1') set(true);
+    addEventListener('pagehide',()=>{try{sessionStorage.setItem('profile-editing',profile.classList.contains('is-editing')?'1':'0');}catch{}});
+  }
   const strip=document.querySelector('[data-classmate-strip]');
   const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
   if(strip && !reducedMotion.matches){

@@ -286,6 +286,7 @@ export const page={
             </div>
           </div>
           <div class="profile-actions">
+            ${own?'<button type="button" class="edit-toggle" data-edit-toggle aria-pressed="false" hidden>Edit page</button>':''}
             ${linkedin}
           </div>
         </div>

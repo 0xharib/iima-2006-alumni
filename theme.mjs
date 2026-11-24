@@ -708,4 +708,29 @@ p,dd,.memory-quote{text-wrap:pretty}
   .memory-toolbar :is(input,button,.share-memory){height:44px;min-height:44px;margin:0}
   .memory-toolbar .share-memory{display:inline-flex;align-items:center}
 }
+
+/* Owner edit mode */
+.edit-toggle{margin:0;min-height:42px;padding:.55rem 1rem;border-radius:var(--r-sm);background:var(--brick);color:#fff;font:600 .88rem var(--sans)}
+.edit-toggle[aria-pressed=true]{background:var(--paper);color:var(--brick);box-shadow:inset 0 0 0 1px var(--brick)}
+.alumni-profile[data-editable]:not(.is-editing) :is(.profile-identity,.profile-section:not(.profile-todo)) .inline-edit,
+.alumni-profile[data-editable]:not(.is-editing) [data-upload]{display:none}
+.alumni-profile.is-editing .profile-section:not(.profile-todo) .editable-field{background:var(--brick-wash);outline:1px dashed #b4583f80;outline-offset:4px;border-radius:var(--r-sm)}
+.alumni-profile.is-editing .inline-edit summary,.alumni-profile.is-editing [data-upload]{opacity:1}
+
+/* Gallery: a real grid */
+.page-gallery .photos{grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr));gap:1rem}
+.page-gallery .photos img{aspect-ratio:4/5;transition:transform .2s}
+.page-gallery .photos a:hover img{transform:scale(1.02)}
+.page-gallery .photos figcaption{margin-top:.4rem;font:500 .85rem var(--sans);color:var(--muted)}
+
+/* Print a profile like a yearbook page */
+@media print{
+  .bar,.site-footer,.profile-report,.profile-todo,.edit-toggle,.inline-edit,[data-upload],.profile-memories form,.collage-actions,dialog{display:none!important}
+  .member-site{padding:0!important;background:#fff}
+  .profile-header,.profile-section{border:0!important;box-shadow:none!important;break-inside:avoid}
+  .profile-cover{height:120px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .profile-layout{grid-template-columns:1fr 1.8fr!important}
+  a{color:inherit!important}
+  .alumni-profile .editable-field{background:none!important;outline:0!important}
+}
 `;
