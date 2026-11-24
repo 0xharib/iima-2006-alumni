@@ -13,7 +13,7 @@ export const form=(action,body,label,extra='')=>`<form method="post" action="${e
 const action=(url,name,label,values={})=>form(url,field('action',name)+Object.entries(values).map(([key,val])=>field(key,val)).join(''),label,'class="inline"');
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
-const labelFor=key=>({life:'Life, lately',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
+const labelFor=key=>({life:'Life, lately',professionalFocus:'Professional focus',researchHighlight:'Research highlight',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
 const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="/media/${e(row.media)}" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a>${row.caption?`<figcaption>${e(row.caption)}</figcaption>`:''}</figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
 const portrait=(person,lazy=true)=>person.portrait
   ? `<img src="/media/${e(person.portrait)}" alt="" ${lazy?'loading="lazy"':''}>`
@@ -127,6 +127,15 @@ export const page={
     const entryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||own));
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
       ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
+    const profileLinks = (Array.isArray(row.profileLinks) ? row.profileLinks : []).flatMap(item => {
+      if (typeof item?.label !== 'string' || !item.label.trim() || typeof item.url !== 'string') return [];
+      try {
+        const url = new URL(item.url);
+        return url.protocol === 'https:' && !url.username && !url.password
+          ? [`<li><a href="${e(url.href)}" rel="noreferrer">${e(item.label)} ↗</a></li>`]
+          : [];
+      } catch { return []; }
+    });
     const edit = (key,label,value,control=area('value',label,value,'maxlength="4000"')) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">✎</summary>
       ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
     const entry = key => {
@@ -164,6 +173,7 @@ export const page={
         </aside>`:''}
         <div class="profile-main">
           ${entryKeys.length?`<section class="profile-section"><h2>Yearbook</h2><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
+          ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
           <section class="profile-section profile-memories"><h2>Memories from classmates</h2>
             ${received.length?memoryBatch(received):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
           </section>

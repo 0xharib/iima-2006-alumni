@@ -296,8 +296,8 @@ async function route(req, env) {
     const imported = parse(seed?.source_data);
     const published = await one('SELECT fields FROM yearbook_public WHERE member=?',key);
     const overrides = Object.fromEntries((await all('SELECT field,value FROM profile_fields WHERE member=? AND field!=?',key,'portraitObject')).map(r=>[r.field,r.value]));
-    const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,...parse(published?.fields),...overrides};
-    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL']},attendanceNames[key===me?row.own_attendance:row.status],details,await gallery(key),
+    const details = {dorm:row.dorm,nickname:row.nickname,life:imported['Life, Lately draft'],city:imported['Tracker city'],company:imported['Tracker company'],country:imported['Tracker country'],section:imported.Section,education:imported.Education,professionalFocus:imported['Professional focus'],researchHighlight:imported['Research highlight'],...parse(published?.fields),...overrides};
+    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,await gallery(key),
       await posts(`p.author=? OR EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted')`,[key,key,key]),me,pilot),member,{home:true});
   }
   if (path==='/profile') {
@@ -327,7 +327,7 @@ async function route(req, env) {
       return redirect('/people/'+me);
     }
     if (inline) {
-      if (![...profileKeys,'country','section','displayName'].includes(inline)) return invalid('Field unavailable.');
+      if (![...profileKeys,'country','section','displayName','professionalFocus','researchHighlight'].includes(inline)) return invalid('Field unavailable.');
       await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,str(f,'value',inline==='displayName'?120:4000));
       return redirect('/people/'+me);
     }
