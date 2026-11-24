@@ -320,6 +320,33 @@ async function route(req, env, record, setViewer) {
     }
     return {rows:mixed,next};
   }
+  // "Looking forward to meeting": tolerant of a database where migration 0014 has not run yet.
+  const meetLimit = 60;
+  async function meetSummary(target=null) {
+    try {
+      const [count,picked,wanted] = await Promise.all([
+        one('SELECT count(*) AS n FROM meet_wishes WHERE target=?',me),
+        all(`SELECT r.id,r.name,r.nickname,r.dorm,${portrait} AS portrait FROM meet_wishes w JOIN roster r ON r.id=w.target ${seedJoin}
+          WHERE w.member=? ORDER BY w.created DESC,r.name`,+pilot,me),
+        target==null ? null : one('SELECT 1 AS yes FROM meet_wishes WHERE member=? AND target=?',me,target)
+      ]);
+      return {available:true,count:count.n,picked,wanted:!!wanted};
+    } catch { return {available:false,count:0,picked:[],wanted:false}; }
+  }
+  if (path==='/meet' && post) {
+    const f = await data();
+    const target = Number(str(f,'target',12));
+    const action = str(f,'action',10);
+    const back = destination(str(f,'next',300)||'/people/'+me);
+    if (!['add','remove'].includes(action) || !Number.isInteger(target) || target===me || !(await one('SELECT id FROM roster WHERE id=?',target)))
+      return invalid('Choose a classmate.');
+    if (action==='add') {
+      const {n} = await one('SELECT count(*) AS n FROM meet_wishes WHERE member=?',me);
+      if (n>=meetLimit) return invalid('You can pick up to '+meetLimit+' classmates.');
+      await run('INSERT OR IGNORE INTO meet_wishes(member,target,created) VALUES(?,?,?)',me,target,now());
+    } else await run('DELETE FROM meet_wishes WHERE member=? AND target=?',me,target);
+    return redirect(back);
+  }
   if (path==='/memories') {
     const q=(u.searchParams.get('q')||'').trim().slice(0,100);
     const {rows,next} = await feed(12,u.searchParams.get('featured')==='1',q);
@@ -342,10 +369,10 @@ async function route(req, env, record, setViewer) {
     return json([...people,...topics,...suggestions.filter(x=>!topics.some(t=>t.label.toLowerCase()===x.label.toLowerCase()))]);
   }
   if (path==='/') {
-    const [{rows,next},people] = await Promise.all([feed(9,true),all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
+    const [{rows,next},people,meet] = await Promise.all([feed(9,true),all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
       WHERE EXISTS(SELECT 1 FROM submissions y WHERE y.subject=r.id AND y.contributor=r.id AND y.kind='self')
-      ORDER BY random() LIMIT 12`,+pilot)]);
-    return render('Kal • Aaj • Aur Kal',page.home(rows,people,next,id(),me),member,{home:true});
+      ORDER BY random() LIMIT 12`,+pilot),meetSummary()]);
+    return render('Kal • Aaj • Aur Kal',page.home(rows,people,next,id(),me,meet),member,{home:true});
   }
   if (path==='/people' || path==='/reunion') {
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
@@ -399,7 +426,7 @@ async function route(req, env, record, setViewer) {
     const row = await one(`SELECT r.*,a.status AS own_attendance,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
-    const [seed,selected,section,photos,stories,profilePhotos] = await Promise.all([
+    const [seed,selected,section,photos,stories,profilePhotos,meet] = await Promise.all([
       one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot),
       all(`SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=?
         AND field NOT IN ('thenPhotoObject','nowPhotoObject') ORDER BY priority`,key,+pilot),
@@ -411,7 +438,8 @@ async function route(req, env, record, setViewer) {
         JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
         WHERE y.member=? AND ph.slot IN ('then','now')
         UNION ALL SELECT substr(field,1,length(field)-11), 'profile-photo/'||member||'/'||substr(field,1,length(field)-11), ''
-        FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,key,key)
+        FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,key,key),
+      meetSummary(key)
     ]);
     const imported = parse(seed?.source_data);
     const details = {dorm:row.dorm,nickname:row.nickname,life:'',city:'',company:'',country:'',section:section?.section,education:'',professionalFocus:'',researchHighlight:''};
@@ -419,7 +447,7 @@ async function route(req, env, record, setViewer) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo]))),member,{home:true});
+    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true});
   }
 
   if (path==='/profile') {

@@ -38,6 +38,13 @@ const classmate = (row,extra=[]) => {
   const registry = [row.dorm&&dormLabel(row.dorm),...extra].filter(Boolean).join(' · ');
   return `<strong>${e(row.name)}</strong>${row.nickname?`<small class="nickname">“${e(row.nickname)}”</small>`:''}${registry?`<small class="registry">${e(registry)}</small>`:''}`;
 };
+// "Looking forward to meeting": a count for the target, a private list for the picker.
+const plural = (n,one,many) => n===1 ? one : many;
+const meetCountLine = count => count>0
+  ? `<strong class="meet-number">${count}</strong> <span>${plural(count,'classmate is','classmates are')} looking forward to meeting you in Jaipur</span>`
+  : '<span>Who are you looking forward to meeting in Jaipur?</span>';
+const meetForm = (action,target,next,label,cls='') => `<form method="post" action="/meet" class="meet-form ${cls}">${field('action',action)}${field('target',target)}${field('next',next)}<button type="submit">${label}</button></form>`;
+const meetFaces = people => people.slice(0,6).map(person=>`<a class="meet-face" href="/people/${person.id}" title="${e(person.name)}">${portrait(person,true,96)}</a>`).join('');
 // Days until the reunion opens in Jaipur (IST); a seal counts down on Home and Reunion.
 const reunionStart = Date.parse('2026-12-26T00:00:00+05:30');
 const countdown = () => {
@@ -148,12 +155,17 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people,next,key,me){
+  home(rows,people,next,key,me,meet={available:false}){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
       </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
+      ${meet.available?`<section class="meet-banner" aria-label="Looking forward to meeting">
+        <p class="meet-count">${meetCountLine(meet.count)}</p>
+        <div class="meet-mine">${meet.picked.length?`<span class="meet-faces">${meetFaces(meet.picked)}</span><span class="registry">You’ve picked ${meet.picked.length}</span>`:'<span class="meet-hint">Pick the classmates you most want to catch up with. Only you see your list.</span>'}
+          <a class="cta cta-primary" href="/people/${me}#meet">${meet.picked.length?'Add more':'Choose who to meet'}</a></div>
+      </section>`:''}
       <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
         <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
@@ -237,7 +249,7 @@ export const page={
   },
   directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
     ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={}){
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
@@ -287,6 +299,9 @@ export const page={
           </div>
           <div class="profile-actions">
             ${own?'<button type="button" class="edit-toggle" data-edit-toggle aria-pressed="false" hidden>Edit page</button>':''}
+            ${!own&&meet.available?(meet.wanted
+              ? meetForm('remove',row.id,'/people/'+row.id,'✓ On your meet list','is-on')
+              : meetForm('add',row.id,'/people/'+row.id,'I’d like to meet '+e((details.displayName||row.name).split(/\s+/)[0])+' in Jaipur')):''}
             ${linkedin}
           </div>
         </div>
@@ -301,6 +316,16 @@ export const page={
             <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
         </aside>`:''}
         <div class="profile-main">
+          ${own&&meet.available?`<section class="profile-section profile-meet" id="meet"><h2>Looking forward to meeting</h2>
+            <p class="meet-count">${meetCountLine(meet.count)}</p>
+            <p class="meet-hint">Pick the classmates you most want to catch up with in Jaipur. Only you can see this list; each of them sees how many classmates want to meet them, never who.</p>
+            ${meet.picked.length?`<ul class="meet-list">${meet.picked.map(person=>`<li><a href="/people/${person.id}">${portrait(person,true,96)}<span><strong>${e(person.name)}</strong>${person.nickname?`<small class="nickname">“${e(person.nickname)}”</small>`:''}</span></a>${meetForm('remove',person.id,'/people/'+me+'#meet','Remove','meet-remove')}</li>`).join('')}</ul>`:''}
+            <div class="meet-search" data-meet-picker data-picked="${meet.picked.map(person=>person.id).join(',')}">
+              <label>Add a classmate<input type="search" data-meet-search placeholder="Type a name or nickname" autocomplete="off"></label>
+              <div data-meet-results role="listbox" aria-label="Matching classmates"></div>
+              <form method="post" action="/meet" data-meet-add hidden>${field('action','add')}<input type="hidden" name="target" value="">${field('next','/people/'+me+'#meet')}</form>
+              <noscript><p class="meet-hint">Or open any classmate’s profile and press “I’d like to meet”.</p></noscript>
+            </div></section>`:''}
           ${own||Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
             <div class="then-now-grid">${['then','now'].map(slot=>{
               const photo=profilePhotos[slot], label=slot==='then'?'Then':'Now';

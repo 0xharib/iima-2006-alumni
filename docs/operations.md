@@ -14,6 +14,8 @@ New local databases can apply the checked-in migrations in order. Existing envir
 
 `0002_publish_imports.sql` is a historical data migration. It creates published profiles and memories from legacy rows and approves pending seeds. Review changes against an isolated copy first if a target contains any unpublished data. Treat legacy submissions and enrichment sources as distinct from owner edits. Profile pages resolve owner edits ahead of published yearbook data and selected enrichment. An explicitly blank owner value hides a fallback.
 
+`0014_meet_wishes.sql` adds the "Looking forward to meeting" table. It only creates a table and an index, so it is safe to run on its own against production: `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0014_meet_wishes.sql`. Until it runs, the Worker hides the feature rather than failing.
+
 ## Pilot checks
 
 - Request a link to a test address, check Inbox and Junk, open the link once, and confirm that signing out invalidates the session.

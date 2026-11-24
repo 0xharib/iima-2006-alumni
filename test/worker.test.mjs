@@ -380,3 +380,44 @@ test('logout invalidates the session and confirms sign-out even after a retry',a
  assert.equal((await call('/people/1',ck)).status,303);
  assert.match(await body(await call('/signin?signed-out=1')),/You’re signed out/);
 });
+
+test('classmates say who they look forward to meeting; targets see only a count',async()=>{
+ const {call,session,sqlite}=fixture();
+ const admin=await session(1,'aaaa'), classmate=await session(2,'bbbb');
+ const banner=html=>html.match(/<section class="meet-banner"[\s\S]*?<\/section>/)?.[0]||'';
+ const meetSection=html=>html.match(/<section class="profile-section profile-meet"[\s\S]*?<\/section>/)?.[0]||'';
+ assert.match(banner(await body(await call('/',admin))),/Who are you looking forward to meeting in Jaipur\?/);
+ const added=await call('/meet',classmate,{action:'add',target:'1',next:'/people/1'});
+ assert.equal(added.status,303);
+ assert.equal(added.headers.get('location'),'/people/1');
+ assert.equal((await call('/meet',classmate,{action:'add',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,1);
+ const adminHome=banner(await body(await call('/',admin)));
+ assert.match(adminHome,/<strong class="meet-number">1<\/strong> <span>classmate is looking forward to meeting you in Jaipur/);
+ assert.doesNotMatch(adminHome,/Test Classmate/);
+ const adminOwn=meetSection(await body(await call('/people/1',admin)));
+ assert.match(adminOwn,/classmate is looking forward to meeting you/);
+ assert.doesNotMatch(adminOwn,/Test Classmate/);
+ assert.match(await body(await call('/people/1',classmate)),/✓ On your meet list/);
+ assert.match(meetSection(await body(await call('/people/2',classmate))),/href="\/people\/1"[\s\S]*Test Admin/);
+ assert.match(banner(await body(await call('/',classmate))),/You’ve picked 1/);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'2'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'999'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'wave',target:'1'})).status,400);
+ assert.equal((await call('/meet',classmate,{action:'add',target:'1',next:'//elsewhere.example'})).headers.get('location'),'/');
+ assert.equal((await call('/meet',classmate,{action:'remove',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,0);
+ assert.equal((await call('/meet',null,{action:'add',target:'1'})).status,303);
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM meet_wishes').get().n,0);
+});
+
+test('home and profiles still render before the meet migration is applied',async()=>{
+ const {call,session,sqlite}=fixture();
+ sqlite.exec('DROP TABLE meet_wishes');
+ const ck=await session(2,'bbbb');
+ const home=await body(await call('/',ck));
+ assert.doesNotMatch(home,/class="meet-banner"/);
+ const own=await body(await call('/people/2',ck));
+ assert.doesNotMatch(own,/id="meet"/);
+ assert.doesNotMatch(await body(await call("/people/1",ck)),/class="meet-form/);
+});

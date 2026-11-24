@@ -733,4 +733,43 @@ p,dd,.memory-quote{text-wrap:pretty}
   a{color:inherit!important}
   .alumni-profile .editable-field{background:none!important;outline:0!important}
 }
+
+/* ===== Looking forward to meeting ===== */
+.meet-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem 2rem;margin:0;padding:clamp(18px,3vw,28px) clamp(16px,6vw,92px);background:var(--paper);border-bottom:1px solid var(--line);color:var(--ink)}
+.meet-count{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:.9rem;margin:0;font:400 clamp(1.1rem,2vw,1.4rem)/1.3 var(--serif);text-wrap:balance}
+.meet-count>span:only-child{grid-column:1/-1}
+.meet-number{display:inline-grid;place-items:center;min-width:2.3em;height:2.3em;padding:0 .35em;border-radius:999px;background:var(--brick);color:#fff;font:600 clamp(1.25rem,2.4vw,1.6rem)/1 var(--serif);font-variant-numeric:tabular-nums;box-shadow:inset 0 0 0 3px var(--brick),inset 0 0 0 4px #fffcf699}
+.meet-mine{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem 1rem}
+.meet-hint{margin:.2rem 0;color:var(--muted);font-size:.92rem}
+.meet-faces{display:inline-flex}
+.meet-face{display:block;width:34px;height:34px;margin-left:-8px;border-radius:50%;box-shadow:0 0 0 2px var(--paper);overflow:hidden}
+.meet-face:first-child{margin-left:0}
+.meet-face :is(img,.initials){width:100%;height:100%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:.7rem}
+.meet-banner .cta{white-space:nowrap}
+
+.profile-meet{border-top-color:var(--brick)!important}
+.profile-meet .meet-count{margin:.2rem 0 .6rem;font-size:clamp(1.05rem,1.8vw,1.25rem)}
+.meet-list{list-style:none;margin:1rem 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(230px,100%),1fr));gap:.6rem}
+.meet-list li{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.45rem .5rem .45rem .45rem;border:1px solid var(--line);border-radius:999px;background:var(--lime)}
+.meet-list a{display:flex;align-items:center;gap:.6rem;min-width:0;color:var(--ink)}
+.meet-list a :is(img,.initials){flex:none;width:40px;height:40px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:.8rem}
+.meet-list a span{display:grid;min-width:0}.meet-list strong{font:600 .95rem/1.2 var(--serif);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meet-list .nickname{font-size:.8rem}
+.meet-form{margin:0;display:inline-block}
+.meet-remove button{margin:0;padding:.3rem .7rem;background:transparent;color:var(--muted);font-size:.78rem;border-radius:999px}
+.meet-remove button:hover{background:var(--brick-wash);color:var(--brick-deep)}
+.meet-search{margin-top:.6rem}
+.meet-search [data-meet-results]{display:grid;gap:.2rem;margin-top:.35rem;max-height:16rem;overflow:auto}
+.meet-search [data-meet-results] button{margin:0;text-align:left;background:var(--paper);color:var(--ink);border:1px solid var(--line);font-weight:500;padding:.55rem .75rem;min-height:44px}
+.meet-search [data-meet-results] button:hover,.meet-search [data-meet-results] button:focus-visible{background:var(--brick-wash);color:var(--brick-deep)}
+.profile-actions .meet-form button{margin:0;min-height:42px;padding:.55rem 1rem;border-radius:var(--r-sm);font:600 .88rem var(--sans)}
+.profile-actions .meet-form.is-on button{background:var(--brick-wash);color:var(--brick-deep);box-shadow:inset 0 0 0 1px var(--brick)}
+.profile-actions .meet-form.is-on button:hover{background:#ecd4c8}
+@media(max-width:650px){
+  .meet-banner{padding:16px 12px}
+  .meet-mine{width:100%;justify-content:space-between}
+  .profile-actions{flex-wrap:wrap}
+}
+@media(max-width:730px){.profile-layout .profile-meet{order:0}}
+@media print{.profile-meet,.meet-form{display:none!important}}
 `;

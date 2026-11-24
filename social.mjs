@@ -1,5 +1,23 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  // "Looking forward to meeting": search classmates and add one with a normal form post.
+  const meet=document.querySelector('[data-meet-picker]');
+  if(meet){
+    const box=meet.querySelector('[data-meet-search]'), list=meet.querySelector('[data-meet-results]'), add=meet.querySelector('[data-meet-add]');
+    const picked=new Set((meet.dataset.picked||'').split(',').filter(Boolean));
+    let revision=0, timer=0;
+    box.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{
+      const request=++revision, q=box.value.trim(); list.replaceChildren(); if(q.length<2) return;
+      try{
+        const rows=await (await fetch('/tag-search?q='+encodeURIComponent(q))).json(); if(request!==revision) return;
+        const fresh=rows.filter(row=>!picked.has(String(row.id)));
+        if(!fresh.length){const p=document.createElement('p');p.className='meet-hint';p.textContent=rows.length?'Already on your list.':'No matching classmates.';list.append(p);return;}
+        for(const row of fresh){const b=document.createElement('button');b.type='button';b.setAttribute('role','option');
+          b.textContent=row.name+(row.nickname?' · '+row.nickname:'');
+          b.addEventListener('click',()=>{add.elements.target.value=row.id;b.disabled=true;add.submit();});list.append(b);}
+      }catch{const p=document.createElement('p');p.className='meet-hint';p.textContent='Search unavailable. Try again.';list.append(p);}
+    },180);});
+  }
   // Owners: one "Edit page" switch instead of a pencil on every field. Without this script the pencils stay visible.
   const profile=document.querySelector('.alumni-profile'), toggle=document.querySelector('[data-edit-toggle]');
   if(profile && toggle){
