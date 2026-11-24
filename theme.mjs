@@ -380,7 +380,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
   width:100%;margin:0;padding:.4rem .55rem;min-height:38px;text-align:left;
   border-radius:.35rem;background:transparent;color:var(--ink);font-size:.88rem;font-weight:500
 }
-.member-site :is([data-tag-results],[data-target-results]) button:is(:hover,:focus-visible){background:#f2e8df}
+.member-site :is([data-tag-results],[data-target-results]) button:is(:hover,:focus-visible){background:var(--tint)}
 .member-site :is([data-tag-results],[data-target-results]) button:focus-visible{outline-offset:-2px}
 .menu-glyph{display:block;width:19px;height:2px;background:currentColor;box-shadow:0 -6px currentColor,0 6px currentColor}
 @media(max-width:650px){
