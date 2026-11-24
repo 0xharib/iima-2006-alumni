@@ -169,8 +169,8 @@ test('reunion gate, tracker prefill, saved details and private attendance',async
  sqlite.exec("UPDATE reunion_tracker SET status='declined' WHERE member=2");
  assert.equal((await call('/reunion',attendee,{shirt:'S'})).status,403);
  const home=await body(await call('/',attendee));
- assert.match(home,/href="\/people\/2">Complete your profile/);
- assert.match(home,/Share your memories/);
+ assert.match(home,/href="\/people\/2">Edit profile/);
+ assert.match(home,/Share a memory/);
  assert.doesNotMatch(home,/to be featured/);
 });
 

@@ -83,7 +83,7 @@ ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load m
 ${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
   const menu=link('/','Home')+link('/memories','Memories')+link('/people','Classmates')+link('/reunion','Reunion');
-  const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary>Menu</summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
+  const nav=member?`<nav aria-label="Main navigation"><details class="mobile-menu"><summary aria-label="Menu"><span class="menu-glyph" aria-hidden="true"></span></summary><div>${menu}</div></details><div class="desktop-menu">${menu}</div>
     <a class="notification-bell" href="/notifications" aria-label="Notifications${member.unread?' ('+member.unread+' unread)':''}">
       <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
       ${member.unread?`<span aria-hidden="true">${member.unread>99?'99+':member.unread}</span>`:''}</a>
@@ -129,18 +129,18 @@ export const page={
   home(rows,people,next,key,me){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
-      <div class="hero-actions"><a class="cta" href="/people/${me}">Complete your profile</a><a class="cta secondary" href="/compose" data-compose-open>Share your memories</a></div>
+      <div class="hero-actions"><a class="cta" href="/people/${me}">Edit profile</a><a class="cta secondary" href="/compose" data-compose-open>Share a memory</a></div>
       </div></section>
-      <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','Browse all classmates →')}</div>
+      <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
         <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
       </section>
-      <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add your memory</a>${link('/memories','See all →')}</div></div>${collage(rows,next)}</section>
+      <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add memory</a>${link('/memories','See all')}</div></div>${collage(rows,next)}</section>
       ${page.composeDialog(key)}
     </div>`;
   },
   memories(rows,next,q,key){return `<div class="memory-toolbar">
-    <form method="get" action="/memories"><label>Search memories<input type="search" name="q" value="${e(q)}" placeholder="People, topics, photos or comments"></label><button>Search</button></form>
-    <a href="/compose" class="profile-primary share-memory" data-compose-open>Share a memory</a></div>
+    <form method="get" action="/memories"><label><span class="memory-search-label">Search memories</span><input aria-label="Search memories" type="search" name="q" value="${e(q)}" placeholder="Search memories"></label><button>Search</button></form>
+    <a href="/compose" class="profile-primary share-memory" data-compose-open>Add memory</a></div>
     ${collage(rows,next,true)}
     ${page.composeDialog(key)}`;},
   gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
@@ -447,9 +447,9 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     .help { margin:20px 0 0 }
     @media(max-width:750px) {
       .masthead { min-height:44px }
-      .sign-in-campus { min-height:calc(100svh - 44px); align-items:start }
-      .layout { grid-template-columns:1fr; margin:0 auto }
-      .reunion-title { font-size:clamp(2.55rem,10vw,4rem) }
+      .sign-in-campus { min-height:calc(100svh - 44px); align-items:start; padding:1rem .85rem }
+      .layout { grid-template-columns:1fr; margin:0 auto; gap:.85rem }
+      .reunion-title { font-size:clamp(1.9rem,8vw,3.4rem) }
     }
   </style>
 </head>

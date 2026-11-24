@@ -347,4 +347,78 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .admin-table{width:100%;border-collapse:collapse;background:#fffefa;font-size:.9rem}
 .admin-table :is(th,td){text-align:left;padding:.55rem .65rem;border-bottom:1px solid var(--line);vertical-align:top}
 .admin-table thead{background:#f2e8dc}
+
+/* Shared autocomplete in the composer and on memory cards. */
+.member-site :is([data-tag-results],[data-target-results]):not(:empty){
+  display:grid;gap:.25rem;max-height:15rem;overflow:auto;background:#fffefa;
+  border:1px solid #e6d9ce;border-radius:.65rem;padding:.35rem;margin-top:.35rem
+}
+.member-site :is([data-tag-results],[data-target-results])>div{display:grid;gap:0}
+.member-site :is([data-tag-results],[data-target-results]) strong{
+  padding:.35rem .55rem .15rem;font-size:.72rem;color:#6a564c;font-weight:650
+}
+.member-site :is([data-tag-results],[data-target-results]) button{
+  width:100%;margin:0;padding:.4rem .55rem;min-height:38px;text-align:left;
+  border-radius:.35rem;background:transparent;color:#352820;font-size:.88rem;font-weight:500
+}
+.member-site :is([data-tag-results],[data-target-results]) button:is(:hover,:focus-visible){background:#f2e8df}
+.member-site :is([data-tag-results],[data-target-results]) button:focus-visible{outline-offset:-2px}
+.menu-glyph{display:block;width:19px;height:2px;background:currentColor;box-shadow:0 -6px currentColor,0 6px currentColor}
+@media(max-width:650px){
+  .member-site{--mast-height:48px}
+  .member-site .bar .mast{padding-inline:12px}
+  .member-site .bar .mast nav{gap:.15rem}
+  .member-site .wordmark{gap:.35rem;white-space:nowrap}
+  .mobile-menu{margin:0}
+  .mobile-menu summary{width:42px;height:44px;display:grid;place-items:center;list-style:none}
+  .mobile-menu summary::-webkit-details-marker{display:none}
+  .bar .mobile-menu div{min-width:10rem;box-shadow:0 8px 24px #21181226}
+  .bar .mobile-menu a,.bar .account-menu a{min-height:44px;display:flex;align-items:center}
+  .member-site .bar .notification-bell{margin-inline-end:.15rem;width:39px;height:44px}
+  .member-site .bar .account summary{min-width:40px;min-height:44px;display:grid;place-items:center}
+  .member-site main{padding: .65rem .8rem 1.2rem}
+  .member-site main:not(:has(>.alumni-home,.alumni-profile,.memory-toolbar,.classmates-directory)){margin:.55rem .5rem}
+  .member-site main>h1{font-size:clamp(1.85rem,7.5vw,2.6rem);margin:.2rem 0 .75rem}
+  .alumni-home .campus-hero{min-height:0;padding:1.15rem .8rem 1rem;align-items:center}
+  .alumni-home{background:transparent}
+  .alumni-home .campus-hero h1{font-size:clamp(2.1rem,8vw,3.25rem)}
+  .alumni-home .campus-hero p{margin:0 0 .45rem}
+  .alumni-home .hero-actions{margin-top:.75rem;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem}
+  .alumni-home .hero-actions .cta{justify-content:center;text-align:center;white-space:nowrap;padding:.55rem .45rem;font-size:.85rem;min-height:42px}
+  .home-classmates,.home-memories{padding:.75rem .8rem}
+  .alumni-home .section-head{align-items:center;gap:.35rem;margin-bottom:.35rem}
+  .alumni-home .section-head h2{font-size:clamp(1.15rem,4.7vw,1.65rem);margin:0}
+  .alumni-home .section-head a{white-space:nowrap;font-size:.78rem}
+  .home-memories .memory-nav{flex-wrap:nowrap;gap:.25rem}
+  .home-memories .memory-nav a{display:inline-flex;align-items:center;min-height:40px;padding-inline:.25rem}
+  .home-classmates .people-grid{grid-auto-columns:clamp(110px,33vw,155px)}
+  .memory-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.4rem;margin-bottom:.8rem}
+  .memory-search-label{display:none}
+  .memory-toolbar form{min-width:0;width:100%;gap:.3rem}
+  .memory-toolbar input,.memory-toolbar button{min-height:42px}
+  .memory-toolbar button{padding-inline:.5rem;font-size:.8rem}
+  .memory-toolbar label{min-width:0}
+  .memory-toolbar .share-memory{display:inline-flex;align-items:center;min-height:42px;padding-inline:.55rem;font-size:.8rem;white-space:nowrap}
+  .directory-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem}
+  .directory-card{min-width:0;overflow-wrap:anywhere}
+  .classmates-directory .directory-controls{gap:.45rem;padding:.65rem;margin-bottom:.7rem}
+  .classmates-directory .directory-controls label{min-width:0;font-size:.85rem}
+  .profile-cover{height:94px}
+  .profile-identity{padding:0 .75rem .65rem;gap:.35rem .65rem}
+  .profile-portrait{width:78px;margin-top:-1.25rem;border-radius:.85rem}
+  .alumni-profile .profile-name h1{font-size:1.45rem}
+  .profile-actions{padding-top:0}
+  .profile-layout,.profile-sidebar,.profile-main{gap:.65rem}
+  .profile-section{padding:.8rem}
+  .profile-section-head{gap:.35rem}
+  .profile-memories .profile-section-head .profile-primary{min-height:40px}
+  .reunion-cover,.reunion-section,.reunion-confirmation{padding:.8rem}
+  .reunion-cover .reunion-title{font-size:clamp(2rem,8vw,3rem)}
+  .reunion-days details,.reunion-group{padding:.6rem}
+  .reunion-group .inline-edit summary{min-width:30px;min-height:32px;display:grid;place-items:center}
+  .compose-dialog{max-width:100%;max-height:100dvh;padding:1rem .8rem;overflow:auto;overscroll-behavior:contain}
+  .notification-feed{gap:.65rem}
+  .notification-byline,.notification-preview{padding:.65rem}
+  .admin-table-wrap{max-width:100%}
+}
 `;
