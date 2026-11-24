@@ -49,6 +49,8 @@ done
 | `views.mjs`, `theme.mjs`, `social.mjs` | Server-rendered pages, CSS and browser interactions |
 | `theme.mjs` tokens | The Kahn design system: brick, lime, concrete and night colours, radii and type tokens, plus the final style layer |
 | `fonts.mjs` | Self-hosted fonts (SIL Open Font License), served from `/fonts/`: Source Serif 4 with optical sizes, Source Sans 3, IBM Plex Mono, and Tiro Devanagari Sanskrit subset to the motto. Rebuild with `tools/build-fonts.py` |
+| `whatsapp.mjs` | The batch WhatsApp story at `/wa/` (your page) and `/wa/batch` (the batch story), reskinned to the site; data comes from R2, never from git |
+| `tools/import-whatsapp.sh` | Loads a WhatsApp microsite kit into R2 |
 | `reunion.mjs` | Agenda, attendee detail validation and completeness rules |
 | `migrations/` | D1 schema and historical import migrations |
 | `test/worker.test.mjs` | Worker integration tests using synthetic data |

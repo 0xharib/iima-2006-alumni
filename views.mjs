@@ -103,11 +103,11 @@ const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,pri
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 ${memoryDialog()}`;
 export function render(title,body,member,{home=false}={}) {
-  const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications'};
+  const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications',WhatsApp:'/wa/'};
   const current = title===reunionTitle ? '/' : sectionOf[title];
   const tab = (href,label) => `<a href="${href}"${href===current?' aria-current="page"':''}>${label}</a>`;
-  const menu=tab('/','Home')+tab('/memories','Memories')+tab('/people','Classmates')+tab('/reunion','Reunion');
-  const slug = current==='/' ? 'home' : current ? current.slice(1) : 'other';
+  const menu=tab('/','Home')+tab('/memories','Memories')+tab('/people','Classmates')+tab('/reunion','Reunion')+tab('/wa/','WhatsApp');
+  const slug = current==='/' ? 'home' : current ? current.slice(1).replace(/\/$/,'')||'other' : 'other';
   const banded = ['memories','people','gallery'].includes(slug);
   const footer = member ? `<footer class="site-footer"><div><div><p class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</p>
     <p>IIM Ahmedabad · PGP 2004–06 · Twenty years on</p>

@@ -1,5 +1,6 @@
 import { render, signIn, page, form, field, escape } from './views.mjs';
 import { fonts } from './fonts.mjs';
+import { whatsappRoute } from './whatsapp.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -49,7 +50,7 @@ export default {
         const html = (await response.text()).replace('<html lang="en" data-theme="dark"','<html lang="en" data-theme="light"');
         response = new Response(html,{status:response.status,headers:response.headers});
       }
-      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$)/;
+      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$|wa\/(?:batch)?$)/;
       const automated=/bot|crawler|spider|preview|whatsapp|facebookexternalhit/i.test(request.headers.get('User-Agent')||'');
       const intent=(request.headers.get('Sec-Purpose')||'')+' '+(request.headers.get('Purpose')||'');
       if(request.method==='GET' && response.ok && acceptedPage.test(path) &&
@@ -61,7 +62,7 @@ export default {
       if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
       if (!response.headers.has('Referrer-Policy')) response.headers.set('Referrer-Policy','strict-origin');
-      response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+      if (!response.headers.has('Content-Security-Policy')) response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
       return new Response('The site could not complete that request. Please try again.', {status:500});
@@ -220,6 +221,10 @@ async function route(req, env, record, setViewer) {
       instr(lower(name||' '||nickname),lower(?))>0 ORDER BY name LIMIT 12`,me,q));
   }
   const admin = member.role === 'admin';
+  if (!post && (path==='/wa' || path.startsWith('/wa/'))) {
+    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render});
+    if (response) return response;
+  }
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
   const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT)))`;
   const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
