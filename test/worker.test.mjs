@@ -398,7 +398,7 @@ test('WIMWIans pick who they want to catch up with; targets see only a count',as
  const adminOwn=meetSection(await body(await call('/people/1',admin)));
  assert.match(adminOwn,/WIMWIan is looking to catch up with you/);
  assert.doesNotMatch(adminOwn,/Test Classmate/);
- assert.match(await body(await call('/people/1',classmate)),/✓ On your catch-up list/);
+ assert.match(await body(await call('/people/1',classmate)),/On your catch-up list/);
  assert.match(meetSection(await body(await call('/people/2',classmate))),/href="\/people\/1"[\s\S]*Test Admin/);
  assert.match(banner(await body(await call('/',classmate))),/You’ve picked 1/);
  assert.equal((await call('/meet',classmate,{action:'add',target:'2'})).status,400);

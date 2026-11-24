@@ -1,18 +1,23 @@
-export const titleFont = `@font-face{font-family:'IIMA Title';src:url(data:font/woff;base64,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) format('woff');font-weight:700;font-display:swap}`;
+// The old 'IIMA Title' (a DejaVu Serif Bold subset) is retired: Kal · Aaj · Aur Kal is now Source Serif 4 at display optical size.
 
-// Self-hosted text faces (see fonts.mjs). "IIMA Title" above only covers the "Kal · Aaj · Aur Kal" glyphs.
-export const fontFaces = `@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4.woff2) format('woff2');font-weight:200 900;font-style:normal;font-display:swap}
-@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4-italic.woff2) format('woff2');font-weight:200 900;font-style:italic;font-display:swap}
-@font-face{font-family:'IBM Plex Sans';src:url(/fonts/plex-sans-400.woff2) format('woff2');font-weight:400;font-display:swap}
-@font-face{font-family:'IBM Plex Sans';src:url(/fonts/plex-sans-600.woff2) format('woff2');font-weight:500 700;font-display:swap}
-@font-face{font-family:'IBM Plex Mono';src:url(/fonts/plex-mono-500.woff2) format('woff2');font-weight:400 600;font-display:swap}`;
+// Self-hosted faces (see fonts.mjs). Source Serif 4 and Source Sans 3 share a skeleton and x-height (0.475 / 0.478), so
+// serif and sans sit together on one line; Plex Mono stamps registry data; Tiro Devanagari carries only the motto.
+// The two "Fallback" faces resize local Times New Roman / Arial to the web fonts' measured widths and line metrics,
+// so text does not reflow when the real fonts arrive.
+export const fontFaces = `@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4.woff2) format('woff2');font-weight:400 750;font-style:normal;font-display:swap}
+@font-face{font-family:'Source Serif 4';src:url(/fonts/source-serif-4-italic.woff2) format('woff2');font-weight:400 700;font-style:italic;font-display:swap}
+@font-face{font-family:'Source Sans 3';src:url(/fonts/source-sans-3.woff2) format('woff2');font-weight:400 700;font-style:normal;font-display:swap}
+@font-face{font-family:'IBM Plex Mono';src:url(/fonts/plex-mono-500.woff2) format('woff2');font-weight:400 600;font-display:swap}
+@font-face{font-family:'Tiro Devanagari Sanskrit';src:url(/fonts/tiro-devanagari-motto.woff2) format('woff2');unicode-range:U+0900-097F,U+200C-200D;font-display:swap}
+@font-face{font-family:'Source Serif 4 Fallback';src:local('Times New Roman'),local('TimesNewRomanPSMT'),local('Liberation Serif'),local('Tinos');size-adjust:109.96%;ascent-override:94.22%;descent-override:30.47%;line-gap-override:0.00%}
+@font-face{font-family:'Source Sans 3 Fallback';src:local('Arial'),local('ArialMT'),local('Liberation Sans'),local('Arimo');size-adjust:93.01%;ascent-override:110.09%;descent-override:43.01%;line-gap-override:0.00%}`;
 
 // Design tokens: the "Kahn system". Brick carries structure; lime, paper and concrete carry the rest.
 export const tokens = `:root{color-scheme:light;
 --brick:#8e3e30;--brick-deep:#6b2b21;--brick-fired:#b4583f;--brick-wash:#f3e4dc;
 --lime:#f4efe6;--paper:#fffcf6;--tile:#fffcf6;--concrete:#b8b2a7;--line:#e6ded2;
 --ink:#211e1b;--muted:#5f5a52;--night:#1c1816;--ochre:#c08a3e;
---serif:'Source Serif 4',Georgia,serif;--sans:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
+--serif:'Source Serif 4','Source Serif 4 Fallback',Georgia,serif;--sans:'Source Sans 3','Source Sans 3 Fallback',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;--deva:'Tiro Devanagari Sanskrit','Source Serif 4',serif;
 --r:4px;--r-sm:2px}`;
 
 export const theme = `
@@ -161,7 +166,7 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .profile-memories .memory-collage .collage-card{margin:0 0 .8rem}
 @media(max-width:580px){.profile-memories .memory-collage{columns:1}}
 
-.reunion-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .24em;font-family:'IIMA Title',var(--serif);font-weight:700;line-height:1.06}
+.reunion-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 .24em;font-family:var(--serif);font-weight:700;line-height:1.06}
 .reunion-title [aria-hidden]{color:var(--brick-fired);font-size:.55em}
 .featured-note{color:#f4dfd1;margin:0 0 1rem}.featured-note a{color:inherit;text-decoration:underline}
 .memory-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(.65rem,2vw,1.25rem);align-items:start}
@@ -452,7 +457,7 @@ time,small{color:var(--muted)}
 .member-site .bar .wordmark{display:flex;align-items:center;gap:.6rem;color:var(--ink)}
 .member-site .bar .wordmark img{width:34px;height:34px}
 .wm-iima{font:700 1.15rem/1 var(--serif);letter-spacing:.02em}
-.wm-class{font:600 .7rem/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding-left:.6rem;border-left:1px solid var(--concrete)}
+.wm-class{font:600 .72rem/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding-left:.6rem;border-left:1px solid var(--concrete)}
 .member-site .desktop-menu{gap:.25rem}
 .member-site .desktop-menu>a{font:600 .88rem var(--sans);color:var(--ink);border-radius:0;padding:.45rem .7rem;border-bottom:2px solid transparent}
 .member-site .desktop-menu>a:hover{background:none;color:var(--brick);border-bottom-color:var(--brick-wash)}
@@ -485,7 +490,7 @@ time,small{color:var(--muted)}
 /* Home */
 .alumni-home{background:var(--lime);color:var(--ink)}
 .alumni-home .campus-hero{position:relative;background-image:linear-gradient(90deg,#1c1816f0 0%,#1c1816a8 42%,#1c181620 80%),url('/campus/arches.webp');background-size:cover;background-position:center 50%}
-.alumni-home .campus-hero .class-label{font:500 .74rem var(--mono);letter-spacing:.16em;color:#f3e4dc}
+.alumni-home .campus-hero .class-label{font:500 .74rem var(--mono);letter-spacing:.08em;color:#f3e4dc}
 .alumni-home .campus-hero .seal{position:absolute;right:clamp(16px,5vw,72px);bottom:clamp(20px,5vw,60px);background:#8e3e30e6}
 .cta{border-radius:var(--r-sm);font:600 .9rem var(--sans);min-height:44px;padding:.6rem 1.05rem}
 .cta.cta-primary{background:var(--brick);color:#fff;border:1px solid var(--brick)}.cta.cta-primary:hover{background:var(--brick-deep);color:#fff}
@@ -570,7 +575,7 @@ time,small{color:var(--muted)}
 
 /* Reunion */
 .reunion-cover{position:relative;border-radius:var(--r);background:linear-gradient(100deg,#1c1816f0,#1c18168c),url('/campus/arches.webp') center 53%/cover,var(--night)}
-.reunion-cover .class-label,.reunion-cover>p:not(.class-label){font:500 .8rem/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#f3e4dc}
+.reunion-cover .class-label,.reunion-cover>p:not(.class-label){font:500 .8rem/1.6 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:#f3e4dc}
 .reunion-cover .seal{position:absolute;right:clamp(14px,4vw,48px);top:50%;transform:translateY(-50%)}
 .reunion-confirmation,.reunion-section{border-radius:var(--r);border-color:var(--line);background:var(--paper)}
 .reunion-section{border-top:2px solid var(--concrete)}
@@ -578,7 +583,7 @@ time,small{color:var(--muted)}
 .reunion-section h2{font-size:clamp(1.4rem,3vw,1.9rem)}
 .reunion-days details{background:var(--lime);border-color:var(--line);border-radius:var(--r);border-inline-start:3px solid var(--brick)}
 .reunion-days summary{color:var(--brick-deep)}
-.reunion-days summary span{font:500 .72rem/1.6 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.reunion-days summary span{font:500 .72rem/1.6 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
 .reunion-timeline li{border-top-color:var(--line)}.reunion-timeline li span{font:500 .8rem var(--mono);color:var(--muted)}
 .reunion-group{border-radius:var(--r);background:var(--paper)}
 .reunion-group h3{font-size:1.15rem}
@@ -597,8 +602,8 @@ time,small{color:var(--muted)}
   background-image:linear-gradient(#fffcf60d 1px,transparent 0),conic-gradient(from 270deg at 1px 14px,#fffcf60d 0 90deg,transparent 0),conic-gradient(from 270deg at 1px 14px,#fffcf60d 0 90deg,transparent 0);
   background-size:100% 14px,48px 28px,48px 28px;background-position:0 0,0 0,24px 14px;border-top:3px solid var(--brick)}
 .site-footer>div{max-width:1280px;margin:auto;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:end;gap:1.2rem 2rem}
-.site-footer .reunion-title{font:700 clamp(1.8rem,4vw,2.8rem)/1.05 'IIMA Title',var(--serif);letter-spacing:-.04em;color:var(--paper);margin:0}
-.site-footer p:not(.reunion-title){margin:.4rem 0 0;font:500 .72rem var(--mono);letter-spacing:.14em;text-transform:uppercase;color:#b8b2a7}
+.site-footer .reunion-title{font:700 clamp(1.8rem,4vw,2.8rem)/1.05 var(--serif);letter-spacing:-.015em;color:var(--paper);margin:0}
+.site-footer p:not(.reunion-title){margin:.4rem 0 0;font:500 .72rem var(--mono);letter-spacing:.08em;text-transform:uppercase;color:#b8b2a7}
 .site-footer nav{display:flex;gap:.4rem 1.2rem;margin:0}.site-footer nav a{color:#e6ded2;font-size:.88rem}
 .site-footer nav a:hover{color:#fff}
 
@@ -680,7 +685,7 @@ p,dd,.memory-quote{text-wrap:pretty}
 .collage-card:is(.memory-collage *,.memory-columns *):hover{box-shadow:0 8px 22px #21181216;transform:translateY(-2px)}
 
 /* Footer motto */
-.site-footer .motto{font:400 1rem/1.4 var(--serif)!important;letter-spacing:.02em!important;text-transform:none!important;color:#f3e4dc!important;margin-top:.6rem!important}
+.site-footer .motto{font:400 1.15rem/1.5 var(--deva)!important;letter-spacing:.02em!important;text-transform:none!important;color:#f3e4dc!important;margin-top:.6rem!important}
 
 @media(max-width:650px){
   .page-band main>h1,.reunion-cover,.profile-cover,.profile-header{border-radius:50% 50% var(--r) var(--r)/20px 20px var(--r) var(--r)}
@@ -772,4 +777,22 @@ p,dd,.memory-quote{text-wrap:pretty}
 }
 @media(max-width:730px){.profile-layout .profile-meet{order:0}}
 @media print{.profile-meet,.meet-form{display:none!important}}
+
+/* ===== Type system: one superfamily, real styles only ===== */
+html{font-synthesis:none;font-kerning:normal;font-optical-sizing:auto;-webkit-text-size-adjust:100%}
+body{font-family:var(--sans);font-size:1.0625rem;line-height:1.6;font-variant-ligatures:common-ligatures}
+h1,h2,h3,.reunion-title,.nickname,.meet-count{font-family:var(--serif)}
+strong,b{font-weight:600}
+/* Kal · Aaj · Aur Kal: display optical size, tight but not crushed */
+h1.reunion-title,.reunion-title{font-weight:700;letter-spacing:-.018em;line-height:1}
+.reunion-title [aria-hidden]{font-weight:400;margin:0 .02em}
+.member-site main>h1,.alumni-profile .profile-name h1{letter-spacing:-.02em;font-weight:650}
+h2{letter-spacing:-.01em}
+/* Small caps-style labels in the sans, lighter than before */
+label,.profile-facts dt,.profile-entry dt{font-weight:600}
+.field-empty{font:italic 400 1rem var(--serif)}
+.motto{font-family:var(--deva)!important;font-size:1.15rem!important;letter-spacing:0!important}
+/* Inline icons for glyphs no web font carries (✓, ↗) */
+.icon-inline{display:inline-block;width:.9em;height:.9em;vertical-align:-.08em;margin-inline:.1em .25em}
+.icon-ext{margin-inline:.2em 0;width:.75em;height:.75em}
 `;

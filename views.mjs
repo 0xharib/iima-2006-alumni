@@ -1,6 +1,6 @@
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
-import { fontFaces, theme, titleFont, tokens } from './theme.mjs';
+import { fontFaces, theme, tokens } from './theme.mjs';
 export const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 const e=escape;
 const link=(href,label)=>`<a href="${e(href)}">${e(label)}</a>`;
@@ -39,6 +39,7 @@ const classmate = (row,extra=[]) => {
   return `<strong>${e(row.name)}</strong>${row.nickname?`<small class="nickname">“${e(row.nickname)}”</small>`:''}${registry?`<small class="registry">${e(registry)}</small>`:''}`;
 };
 // "Looking to catch up": a count for the target, a private list for the picker.
+const checkIcon = '<svg class="icon-inline" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>', extIcon = '<svg class="icon-inline icon-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>';
 const plural = (n,one,many) => n===1 ? one : many;
 const meetCountLine = count => count>0
   ? `<strong class="meet-number">${count}</strong> <span>${plural(count,'WIMWIan is','WIMWIans are')} looking to catch up with you</span>`
@@ -118,9 +119,8 @@ export function render(title,body,member,{home=false}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
   ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:#74291d;text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:white;padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid #ac8b7b;border-radius:.5rem;background:#fff;color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:#ead7c5}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
-  ${titleFont}
   ${fontFaces}
   ${theme}
   .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
@@ -263,13 +263,13 @@ export const page={
     const entryKeys = allEntryKeys.filter(key=>hasValue(key)&&key!=='life');
     const todoKeys = own ? [...facts,...allEntryKeys].filter(key=>!hasValue(key)) : [];
     const linkedin = /^https:\/\/(?:www\.)?linkedin\.com\/in\//i.test(row.linkedin||'')
-      ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn ↗</a>` : '';
+      ? `<a class="profile-secondary" href="${e(row.linkedin)}" rel="noreferrer">LinkedIn${extIcon}</a>` : '';
     const profileLinks = (Array.isArray(row.profileLinks) ? row.profileLinks : []).flatMap(item => {
       if (typeof item?.label !== 'string' || !item.label.trim() || typeof item.url !== 'string') return [];
       try {
         const url = new URL(item.url);
         return url.protocol === 'https:' && !url.username && !url.password
-          ? [`<li><a href="${e(url.href)}" rel="noreferrer">${e(item.label)} ↗</a></li>`]
+          ? [`<li><a href="${e(url.href)}" rel="noreferrer">${e(item.label)}${extIcon}</a></li>`]
           : [];
       } catch { return []; }
     });
@@ -300,7 +300,7 @@ export const page={
           <div class="profile-actions">
             ${own?'<button type="button" class="edit-toggle" data-edit-toggle aria-pressed="false" hidden>Edit page</button>':''}
             ${!own&&meet.available?(meet.wanted
-              ? meetForm('remove',row.id,'/people/'+row.id,'✓ On your catch-up list','is-on')
+              ? meetForm('remove',row.id,'/people/'+row.id,checkIcon+'On your catch-up list','is-on')
               : meetForm('add',row.id,'/people/'+row.id,'I’d like to catch up with '+e((details.displayName||row.name).split(/\s+/)[0]))):''}
             ${linkedin}
           </div>
@@ -472,10 +472,9 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${e(shareTitle)}</title>
   <link rel="icon" href="/campus/logo.png">
-  <link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>
   ${shareMeta}
   <style>
-    ${titleFont}
     ${fontFaces}
     ${tokens}
     :root { --accent:var(--brick); font:16px/1.55 var(--sans) }
@@ -487,15 +486,16 @@ export function signIn({ selected, maskedEmail, next, mailHelp, feedback }) {
     .shell { background:linear-gradient(90deg,#1c1816e6,#1c181670),url('/campus/arches.webp') center/cover; background-color:var(--night) }
     .masthead { min-height:47px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:5px clamp(16px,5vw,64px); position:sticky; top:0; z-index:3; background:var(--paper); border-bottom:3px solid var(--brick) }
     .brand { display:flex; align-items:center; gap:10px; color:var(--ink); font:700 1.05rem var(--serif) }
-    .brand small { font:600 .68rem var(--sans); letter-spacing:.14em; text-transform:uppercase; color:var(--muted); padding-left:.6rem; border-left:1px solid var(--concrete) }
+    .brand small { font:600 .72rem var(--sans); letter-spacing:.12em; text-transform:uppercase; color:var(--muted); padding-left:.6rem; border-left:1px solid var(--concrete) }
     .mark { width:29px; height:29px; object-fit:contain; mix-blend-mode:multiply }
     .sign-in-campus { min-height:calc(100svh - 47px); display:grid; align-items:center; padding:clamp(24px,7vw,100px) clamp(16px,7vw,100px) }
     .layout { width:min(1120px,100%); margin:auto; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(300px,1fr); align-items:center; gap:clamp(20px,5vw,74px) }
     .intro { color:#fff3e3 }
     h1,h2 { margin:0; line-height:1.08 }
-    .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1.06 "IIMA Title",Georgia,serif; letter-spacing:-.06em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
+    html { font-synthesis:none; font-optical-sizing:auto }
+    .reunion-title { font:700 clamp(2.8rem,6.7vw,6rem)/1 var(--serif); letter-spacing:-.018em; display:flex; flex-wrap:wrap; align-items:baseline; gap:0 .24em }
     .reunion-title [aria-hidden] { color:var(--brick-fired); font-size:.55em }
-    .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.16em; text-transform:uppercase; color:#f3e4dc }
+    .eyebrow { margin:0 0 .6rem; font:500 .75rem var(--mono); letter-spacing:.08em; text-transform:uppercase; color:#f3e4dc }
     .card { background:var(--paper); border:1px solid var(--line); border-top:3px solid var(--brick); border-radius:50% 50% var(--r) var(--r)/28px 28px var(--r) var(--r); padding-top:clamp(28px,4vw,44px)!important; padding:clamp(18px,3vw,35px); box-shadow:0 18px 50px #1c181650 }
     h2 { font:650 clamp(1.6rem,3vw,2.1rem)/1.1 var(--serif); letter-spacing:-.015em }
     p { margin:.65rem 0 }
