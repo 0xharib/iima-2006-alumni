@@ -192,7 +192,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
   ${mobileNavCSS}
-  </style><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=20" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  </style><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=21" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -503,7 +503,7 @@ export const page={
       <h3>Profile picture</h3><label>Choose photo<input type="file" name="portraitPhoto" accept="image/jpeg,image/png"></label>
       ${select('attendance','Reunion attendance',[['unknown','Choose an option'],['attending','Attending'],['declined','Not attending']],fields.attendance||'unknown')}
       ${rows(more)}${checkbox('attendance_private','Hide my attendance status',!!member.attendance_private)}</details>
-      <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data"');
+      <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data" data-profile-form');
   },
   images,
   topics(rows,q){return `<form method="get">${input('q','Find a memory topic',q)}<button>Search</button></form><p>${link('/compose','Create a topic and add a memory')}</p>`+list(rows.map(r=>link('/topics/'+r.id,r.title)+' '+badge(r.kind)),'No topics yet.');},

@@ -281,6 +281,32 @@ async function route(req, env, record, setViewer) {
     return whatsappRequirements(details,Object.fromEntries(photos.map(photo=>[photo.slot,true])));
     })();
   }
+  // Compact state the profile editor needs after a save: the seven requirements, Then/Now photo
+  // previews (versioned so a replacement is never served from cache) and whether Life, Lately is
+  // still the imported draft. Read after the write, in the same request.
+  async function profileState() {
+    const [checks,photos,life,name] = await Promise.all([
+      whatsappCompletion(),
+      all(`SELECT ph.slot,'yearbook/'||y.member||'/'||j.key AS media,'' AS version
+        FROM yearbook_public y,json_each(y.images) j
+        JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
+        WHERE y.member=? AND ph.slot IN ('then','now')
+        UNION ALL SELECT substr(field,1,length(field)-11),'profile-photo/'||member||'/'||substr(field,1,length(field)-11),value
+        FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,me,me),
+      one(`SELECT value,source FROM selected_profile_fields WHERE member=? AND field='life' AND pilot_only<=?
+        ORDER BY priority DESC LIMIT 1`,me,+pilot),
+      one("SELECT value FROM profile_fields WHERE member=? AND field='displayName'",me)
+    ]);
+    const version=value=>String(value||'').replace(/[^\w-]/g,'').slice(-12);
+    const preview={};
+    // Owner uploads come last in the query and replace imported yearbook photos, as on the profile.
+    for (const photo of photos) preview[photo.slot]={href:'/media/'+photo.media,
+      src:'/media/'+photo.media+'?w=480'+(photo.version?'&v='+version(photo.version):'')};
+    const missing=checks.filter(check=>!check.complete);
+    return {saved:true,profile:'/people/'+me,checks,complete:!missing.length,missing:missing.map(check=>check.key),
+      photos:preview,lifeGenerated:!!String(life?.value||'').trim()&&life.source==='selected_enrichment',
+      name:String(name?.value||'').trim()||member.name};
+  }
   if (!post && (path==='/wa' || path.startsWith('/wa/'))) {
     if (path==='/wa/' && u.searchParams.get('preview')==='locked') {
       if (!admin) return new Response('Admin access required.',{status:403});
@@ -597,11 +623,14 @@ async function route(req, env, record, setViewer) {
     }
     const f = await data();
     const inline = f.get('field');
+    // JavaScript clients ask for JSON and update the editor in place; plain form posts keep the redirect.
+    const wantsJson = req.headers.get('Accept')==='application/json';
+    const saved = async (extra={}) => wantsJson ? json({...await profileState(),...extra}) : redirect('/people/'+me);
     if (inline === 'attendance') {
       const status=str(f,'value',20);
       if (!Object.hasOwn(attendanceNames,status)) return invalid('Choose an attendance status.');
       await run('INSERT INTO attendance VALUES(?,?) ON CONFLICT(member) DO UPDATE SET status=excluded.status',me,status);
-      return redirect('/people/'+me);
+      return saved({attendance:attendanceNames[status]});
     }
     if (['portraitObject','thenPhotoObject','nowPhotoObject'].includes(inline)) {
       const file = f.get('photo');
@@ -614,14 +643,13 @@ async function route(req, env, record, setViewer) {
       try { await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,key); }
       catch (error) { await env.MEDIA.delete(key); throw error; }
       if (original?.value) await Promise.allSettled([env.MEDIA.delete(original.value)]);
-      return redirect('/people/'+me);
+      return saved();
     }
     if (inline) {
       if (![...profileKeys,'country','section','displayName','professionalFocus','researchHighlight'].includes(inline)) return invalid('Field unavailable.');
       const value=str(f,'value',inline==='displayName'?120:4000);
       await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,value);
-      if (req.headers.get('Accept')==='application/json' && inline!=='displayName') return json({value});
-      return redirect('/people/'+me);
+      return saved({value});
     }
     const keys=['life','city','company','education','dorm','family','nickname'];
     if(f.get('profile_form')==='all')keys.push(...profileKeys,'country','section','displayName','professionalFocus','researchHighlight');
@@ -663,7 +691,7 @@ async function route(req, env, record, setViewer) {
       throw error;
     }
     await Promise.allSettled(originals.filter(row=>uploads.some(upload=>upload.field===row.field)&&row.value).map(row=>env.MEDIA.delete(row.value)));
-    return redirect('/people/'+me);
+    return saved();
   }
   if (path==='/gallery') {
     const personId = u.searchParams.has('person') ? Number(u.searchParams.get('person')) : null;

@@ -444,7 +444,6 @@ export const socialScript = String.raw`
       redrawPhotos(picker.form);
     }
     if(event.target.matches('[data-directory-filters] select'))event.target.form.requestSubmit();
-    if(event.target.matches('[data-profile-edit] input[type=file]')&&event.target.files.length)event.target.form.requestSubmit();
   });
   document.addEventListener('submit',async event=>{
     const form=event.target;
@@ -517,7 +516,63 @@ export const socialScript = String.raw`
       finally{delete form.dataset.saving;button.disabled=false;form.elements.images.disabled=false;redrawPhotos(form);}
       return;
     }
-    if(!form.matches('[data-social],[data-profile-edit]'))return;
+    if(form.matches('[data-profile-form]')){
+      // Save the profile editor in place: one request, no page reload, typed text and focus kept.
+      event.preventDefault();
+      if(form.dataset.saving)return;
+      form.dataset.saving='true';
+      const button=form.querySelector('button[type=submit]');
+      let status=form.querySelector('[data-profile-status]');
+      if(!status){status=document.createElement('p');status.dataset.profileStatus='';status.setAttribute('role','status');status.setAttribute('aria-live','polite');button.after(status);}
+      const uploading=Array.from(form.querySelectorAll('input[type=file]')).some(input=>input.files.length);
+      status.setAttribute('role','status');status.className='profile-save-status is-saving';
+      status.textContent=uploading?'Saving… uploading your photos':'Saving…';
+      button.disabled=true;
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),uploading?120000:20000);
+      try{
+        let response;
+        try{response=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{Accept:'application/json'},credentials:'same-origin',signal:controller.signal});}
+        catch{throw new Error('We couldn’t confirm the save. Your changes are still here; press Save profile again. Saving twice is safe.');}
+        if(!response.ok)throw new Error((await response.text())||'Your profile could not be saved. Your changes are still here; try again.');
+        if(!response.headers.get('Content-Type')?.includes('application/json'))
+          throw new Error('Please sign in again in another tab, then press Save profile. Your changes are still here.');
+        const state=await response.json();
+        for(const check of state.checks){
+          const row=form.querySelector('#profile-field-'+check.key);if(!row)continue;
+          row.classList.toggle('profile-required-missing',!check.complete||(check.key==='life'&&state.lifeGenerated));
+          if(check.key==='then'||check.key==='now'){
+            const hint=row.querySelector('small');if(hint)hint.textContent=check.complete?'Photo added · choose a file to replace it':'Required to unlock';
+            const photo=state.photos[check.key];
+            if(photo){
+              let figure=row.querySelector('figure');
+              if(!figure){
+                figure=document.createElement('figure');figure.style.margin='.65rem 0';
+                figure.innerHTML='<a target="_blank" rel="noopener"><img alt="" style="width:auto;max-width:100%;height:auto;max-height:18rem;object-fit:contain"></a><figcaption>Current photo · tap to view full size</figcaption>';
+                row.querySelector('label')?.before(figure);
+              }
+              const link=figure.querySelector('a'),image=figure.querySelector('img');
+              link.href=photo.href;link.setAttribute('aria-label','View current '+check.key+' photo');
+              image.alt='Your current '+(check.key==='then'?'Then (2006)':'Now (2026)')+' photo';
+              if(image.getAttribute('src')!==photo.src)image.src=photo.src;
+              const label=row.querySelector('label');if(label?.firstChild?.nodeType===3)label.firstChild.textContent='Replace photo';
+            }
+          }
+        }
+        if(!state.lifeGenerated)form.querySelector('#profile-field-life .profile-generated-review')?.remove();
+        // Uploaded files are saved; clear them so a second save does not upload them again.
+        form.querySelectorAll('input[type=file]').forEach(input=>{input.value='';});
+        const left=state.missing.length;
+        status.className='profile-save-status is-saved';
+        status.replaceChildren(document.createTextNode(state.complete?'Saved. All seven essentials are complete: memories, WhatsApp Insights and catch-up names are unlocked. ':'Saved. '+left+' of '+state.checks.length+' essentials still needed. '));
+        const view=document.createElement('a');view.href=state.profile;view.textContent='View your profile';status.append(view);
+      }catch(error){
+        status.className='profile-save-status is-error';
+        status.setAttribute('role','alert');
+        status.textContent=error.message;
+      }finally{clearTimeout(timeout);delete form.dataset.saving;button.disabled=false;}
+      return;
+    }
+    if(!form.matches('[data-social]'))return;
     event.preventDefault();
     if(form.dataset.saving)return;
     form.dataset.saving='true';
@@ -541,14 +596,12 @@ export const socialScript = String.raw`
         const response=await fetch(form.action,{method:'POST',body:data,headers:{Accept:'application/json'}});
         if(!response.ok)throw new Error(await response.text());
         if(response.headers.get('Content-Type')?.includes('application/json')){
-          if(form.matches('[data-profile-edit]')){location.reload();return;}
           const {value}=await response.json();
           const editor=form.closest('details');
           editor.parentElement.querySelector('.field-display').textContent=value||'—';
           editor.open=false;
           return;
         }
-        if(form.matches('[data-profile-edit]')){location.reload();return;}
         const next=new DOMParser().parseFromString(await response.text(),'text/html');
         const updated=next.querySelector('.alumni-profile');
         if(!updated)throw new Error('Could not update the profile. Try again.');

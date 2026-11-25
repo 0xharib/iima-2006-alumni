@@ -1171,3 +1171,41 @@ test('JSON endpoints skip page chrome while pages still show the unread count',a
  assert.equal(queries.seen.filter(chromeQuery).length,1,'chrome loads once per page');
  assert.match(await body(await call('/people/2',ck)),/Notifications \(1 unread\)/);
 });
+
+// ---- Performance work: profile editor saves in place ----
+test('profile editor saves return compact state for JavaScript and keep redirects without it',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');const json={Accept:'application/json'};
+ sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
+ const editor=await body(await call('/profile',ck));
+ assert.match(editor,/<form method="post" action="\/profile" enctype="multipart\/form-data" data-profile-form>/);
+ // Without JavaScript the form still redirects to the profile.
+ assert.equal((await call('/profile',ck,{profile_form:'all',city:'Pune'})).status,303);
+ let response=await call('/profile',ck,{profile_form:'all',city:'Pune',family:'Family',life:'Mine'},{...json});
+ assert.equal(response.status,200);
+ let state=await response.json();
+ assert.equal(state.saved,true);assert.equal(state.profile,'/people/2');
+ assert.deepEqual(state.missing,['now']);assert.equal(state.complete,false);
+ assert.equal(state.photos.then.href,'/media/yearbook/2/0');assert.equal(state.lifeGenerated,false);
+ // An explicitly hidden owner value stays blank instead of falling back to imported content.
+ sqlite.prepare("UPDATE profile_seeds SET source_data=?,review_status='approved' WHERE roster_id=2").run(JSON.stringify({'Tracker city':'Seed city','Life, Lately draft':'Seed life'}));
+ state=await (await call('/profile',ck,{profile_form:'all',hide_city:'on',city:'ignored'},{...json})).json();
+ assert.ok(state.missing.includes('city'));
+ assert.equal(sqlite.prepare("SELECT value FROM profile_fields WHERE member=2 AND field='city'").get().value,'');
+ // Photo uploads return a versioned preview URL and unlock the profile in the same response.
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xdb,0,4,0,0,0xff,0xda,0,2,1,0xff,0xd9]);
+ const upload=new FormData();upload.set('profile_form','all');upload.set('city','Pune');
+ upload.set('nowPhoto',new File([jpeg],'now.jpg',{type:'image/jpeg'}));
+ state=await (await call('/profile',ck,upload,{...json})).json();
+ assert.equal(state.complete,true);assert.match(state.photos.now.src,/^\/media\/profile-photo\/2\/now\?w=480&v=[\w-]{12}$/);
+ const replacement=new FormData();replacement.set('field','nowPhotoObject');replacement.set('photo',new File([jpeg],'again.jpg',{type:'image/jpeg'}));
+ const next=await (await call('/profile',ck,replacement,{...json})).json();
+ assert.notEqual(next.photos.now.src,state.photos.now.src);
+ // Attendance and single-field saves answer with JSON too, without redirecting.
+ response=await call('/profile',ck,{field:'attendance',value:'attending'},{...json});
+ assert.equal(response.status,200);assert.equal((await response.json()).attendance,'Attending');
+ assert.equal((await (await call('/profile',ck,{field:'displayName',value:'Tee Cee'},{...json})).json()).name,'Tee Cee');
+ // Invalid photos fail without a false success.
+ const bad=new FormData();bad.set('profile_form','all');bad.set('nowPhoto',new File([new Uint8Array([1,2,3])],'x.jpg',{type:'image/jpeg'}));
+ response=await call('/profile',ck,bad,{...json});
+ assert.equal(response.status,400);assert.match(await response.text(),/have not been saved/);
+});
