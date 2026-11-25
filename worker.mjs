@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
+import { enqueuePhotos, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
 import { completedProfilesCTE } from './completion.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
@@ -533,7 +533,7 @@ async function route(req, env, record, setViewer, ctx) {
   }
   if (path==='/') {
     const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),freshProfiles()]);
-    return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh,await consentState(env,me)),member,{home:true,active:'/'});
+    return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh,await faceNudge(env,me)),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {
     const reunion=path==='/reunion';
@@ -646,7 +646,7 @@ async function route(req, env, record, setViewer, ctx) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me?await consentState(env,me):'hidden'),member,{home:true,active:'/people'});
+    return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me&&await faceSchema(db)),member,{home:true,active:'/people'});
   }
 
   if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me))):missing();
@@ -693,7 +693,7 @@ async function route(req, env, record, setViewer, ctx) {
       catch (error) { await env.MEDIA.delete(key); throw error; }
       warmVariants(env,ctx,key,photo.type,profileWidths);
       if (original?.value) await Promise.allSettled([env.MEDIA.delete(original.value)]);
-      await enqueueRefs(env,me);
+      await markRefs(env,me);
       return saved();
     }
     if (inline) {
@@ -742,6 +742,7 @@ async function route(req, env, record, setViewer, ctx) {
       throw error;
     }
     for (const upload of uploads) warmVariants(env,ctx,upload.key,upload.photo.type,profileWidths);
+    if (uploads.length) await markRefs(env,me);
     await Promise.allSettled(originals.filter(row=>uploads.some(upload=>upload.field===row.field)&&row.value).map(row=>env.MEDIA.delete(row.value)));
     return saved();
   }

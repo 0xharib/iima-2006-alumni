@@ -1,5 +1,5 @@
-// Automatic face tagging: matching, the face-service client, queue jobs, consent and admin.
-// Design: docs/superpowers/specs/2026-11-25-face-tagging-design.md
+// Automatic face tagging: matching, the face-service client, queue jobs, eligibility and admin.
+// Design: docs/superpowers/specs/2026-11-25-face-tagging-design.md, changed by 2026-11-26-face-tagging-batch-design.md
 
 export const FACE_BAR = 0.35;
 export const FACE_MODEL = 'buffalo_l/w600k_r50';
@@ -130,6 +130,9 @@ const anchorFor = media => 'photo-' + media.replace(/\//g, '-');
 const changes = result => result?.meta?.changes ?? result?.changes ?? 0;
 const CHUNK = 30;   // matches per db.batch: three statements each, well inside D1's limits
 
+// Who can be matched: members who uploaded their own profile picture. Nobody is asked; Not me is the only control.
+export const ELIGIBLE = member => `EXISTS(SELECT 1 FROM profile_fields pf WHERE pf.member=${member} AND pf.field='portraitObject' AND trim(pf.value)<>'')`;
+
 // Migration 0019 may not have run yet (it must follow the deploy). Until it has, face tagging stays hidden and
 // nothing touches its tables or columns. Only a positive answer is cached, per database binding.
 const schemaReady = new WeakSet();
@@ -181,9 +184,9 @@ async function readObject(env, key) {
   return object.body instanceof Uint8Array ? object.body : new Uint8Array(await new Response(object.body).arrayBuffer());
 }
 
-async function consentingRefs(db, except = new Set()) {
+async function eligibleRefs(db, except = new Set()) {
   const refs = new Map();
-  for (const ref of await rows(db, `SELECT r.member,r.embedding FROM face_refs r JOIN face_prefs f ON f.member=r.member AND f.recognise=1`)) {
+  for (const ref of await rows(db, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member')}`)) {
     if (except.has(ref.member)) continue;
     if (!refs.has(ref.member)) refs.set(ref.member, []);
     refs.get(ref.member).push(toVector(ref.embedding));
@@ -191,11 +194,11 @@ async function consentingRefs(db, except = new Set()) {
   return refs;
 }
 
-// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still says
-// yes, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
+// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still has a
+// profile picture, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
 const ALLOWED = `NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
   AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND member=?4 AND state='removed')
-  AND EXISTS(SELECT 1 FROM face_prefs WHERE member=?4 AND recognise=1)
+  AND ${ELIGIBLE('?4')}
   AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND face=?5 AND member<>?4 AND state IN ('shadow','auto'))`;
 
 // Write matches the same way for every path. notify 'post': one notification per member per memory now (new
@@ -278,7 +281,7 @@ export async function scanPhoto(env, post, media, notify = 'later') {
   // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
   const skip = new Set((await rows(db, `SELECT member FROM face_matches WHERE media=? AND state='removed'
     UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
-  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await consentingRefs(db, skip));
+  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(db, skip));
   const kept = pairs.map(p => p.member);
   const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
   const stale = (await rows(db, `SELECT member FROM face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
@@ -337,35 +340,25 @@ export async function forgetTopicFaces(db, topic) {
   ];
 }
 
-// ---------- consent and reference faces ----------
+// ---------- reference faces ----------
 
-export const FACE_COPY = 'We use your profile photos and your 2006 yearbook photo to find you in batch photos. You can turn this off any time.';
 const safeNext = value => /^\/(?![\/\\])[^\r\n\\]*$/.test(String(value || '')) ? String(value) : '/';
 const see = url => new Response(null, {status: 303, headers: {Location: url}});
 const missingPage = () => new Response('Page unavailable', {status: 404});
+const eligible = async (db, member) => !!await first(db, `SELECT 1 AS ok WHERE ${ELIGIBLE('?')}`, member);
 
-// 'hidden' before the migration, or while off unless the member said yes (they must always be able to withdraw);
-// 'ask' until the member has answered; then 'on' or 'off'.
-export async function consentState(env, me) {
-  if (!await faceSchema(env.DB)) return 'hidden';
-  const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', me);
-  if (faceMode(env) === 'off') return row?.recognise ? 'on' : 'hidden';
-  return !row ? 'ask' : row.recognise ? 'on' : 'off';
+// Home nudges members without a profile picture, while face tagging runs.
+export async function faceNudge(env, me) {
+  if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return false;
+  return !await eligible(env.DB, me);
 }
 
-async function sendJob(env, body) {
-  try { if (env.FACE_JOBS) await env.FACE_JOBS.send(body); } catch (error) { console.error('face queue', error?.message); }
-}
-
-// After a profile photo changes: rebuild that member's references, if they have said yes. Never throws.
-export async function enqueueRefs(env, member) {
+// After a profile photo changes: mark the member's references for a rebuild by the next batch. Never throws.
+export async function markRefs(env, member) {
   try {
-    if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return;
-    const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', member);
-    if (row?.recognise) {
-      await q(env.DB, 'UPDATE face_prefs SET ref_tries=0,ref_tried=NULL WHERE member=?', member).run();   // a new photo is a fresh chance
-      await sendJob(env, {type: 'ref', member});
-    }
+    if (!await faceSchema(env.DB)) return;
+    await q(env.DB, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?,1,?,0,NULL)
+      ON CONFLICT(member) DO UPDATE SET ref_tries=0,ref_tried=NULL`, member, Date.now()).run();
   } catch (error) { console.error('face refs', error?.message); }
 }
 
@@ -401,7 +394,7 @@ function pickFace(source, faces, chosen) {
 
 export async function refreshRefs(env, member) {
   const db = env.DB;
-  if (!(await first(db, 'SELECT recognise FROM face_prefs WHERE member=?', member))?.recognise) return 0;
+  if (!await eligible(db, member)) return 0;
   const kept = [], unreadable = [], chosen = [];
   for (const [source, key] of await refSources(db, member)) {
     try {
@@ -409,7 +402,7 @@ export async function refreshRefs(env, member) {
       if (!bytes) continue;
       const face = pickFace(source, (await analyseImage(env, bytes, 'photo', 'ref-' + member)).faces, chosen);
       if (!face) continue;
-      const saved = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM face_prefs WHERE member=? AND recognise=1)`,
+      const saved = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?,?,?,?,? WHERE ${ELIGIBLE('?')}`,
         member, source, key, face.bytes, FACE_MODEL, member).run();
       if (changes(saved) > 0) { kept.push(source); chosen.push(face.vector); }
     } catch (error) {
@@ -419,16 +412,17 @@ export async function refreshRefs(env, member) {
   }
   const keep = [...kept, ...unreadable];
   await q(db, `DELETE FROM face_refs WHERE member=? AND source NOT IN (${keep.map(() => '?').join(',') || "''"})`, member, ...keep).run();
-  // No usable photo counts as a try: the sweep retries once a day, three times at most, until something changes.
-  await q(db, kept.length ? 'UPDATE face_prefs SET ref_tries=0,ref_tried=? WHERE member=?' : 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?',
-    Date.now(), member).run();
+  // No usable photo counts as a try: the batch retries once a day, three times at most, until a profile photo changes.
+  await q(db, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?1,1,?2,?3,?2)
+    ON CONFLICT(member) DO UPDATE SET ref_tries=${kept.length ? '0' : 'face_prefs.ref_tries+1'},ref_tried=?2`,
+    member, Date.now(), kept.length ? 0 : 1).run();
   return kept.length;
 }
 
-// Match one member against every face already stored (photos shared before they joined or said yes).
+// Match one member against every face already stored (photos shared before their references were built).
 export async function rematchMember(env, member) {
   const db = env.DB;
-  if (!(await first(db, 'SELECT recognise FROM face_prefs WHERE member=?', member))?.recognise) return 0;
+  if (!await eligible(db, member)) return 0;
   const refs = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
   if (!refs.length) return 0;
   const best = new Map();
@@ -469,28 +463,9 @@ async function notMe(req, env, me) {
 }
 
 export async function faceRoute({req, env, me, path, post}) {
-  if (!post || !['/faces/not-me', '/faces/consent'].includes(path)) return null;
+  if (!post || path !== '/faces/not-me') return null;
   if (!await faceSchema(env.DB)) return missingPage();
-  if (path === '/faces/not-me') return notMe(req, env, me);
-  const form = await req.formData();
-  const choice = String(form.get('choice') || '');
-  if (!['yes', 'no'].includes(choice)) return new Response('Choose yes or no.', {status: 400});
-  if (choice === 'yes' && faceMode(env) === 'off') return missingPage();   // withdrawing always works
-  const db = env.DB;
-  const pref = q(db, `INSERT INTO face_prefs(member,recognise,decided) VALUES(?,?,?)
-    ON CONFLICT(member) DO UPDATE SET recognise=excluded.recognise,decided=excluded.decided,ref_tries=0,ref_tried=NULL`,
-    me, +(choice === 'yes'), Date.now());
-  if (choice === 'yes') {
-    await pref.run();
-    await sendJob(env, {type: 'ref', member: me});
-  } else {
-    await db.batch([pref,
-      q(db, 'DELETE FROM face_refs WHERE member=?', me),
-      q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(me)),
-      q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", me),
-      q(db, "DELETE FROM notifications WHERE recipient=? AND (event_key LIKE 'found:%' OR event_key LIKE 'found-all:%')", me)]);
-  }
-  return see(safeNext(form.get('next')));
+  return notMe(req, env, me);
 }
 
 // ---------- hourly sweep and the admin page ----------
@@ -512,7 +487,7 @@ export async function sweep(env, limit = 200) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE recognise=1 AND ref_tries<3
+  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE ${ELIGIBLE('f.member')} AND ref_tries<3
     AND (ref_tried IS NULL OR ref_tried<?) AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY decided LIMIT 50`, dayAgo);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
     ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
@@ -536,7 +511,7 @@ export async function faceAdminData(env) {
       scanned: await count(`SELECT count(*) n FROM face_scans WHERE status='done'`),
       failed: await count(`SELECT count(*) n FROM face_scans WHERE status='failed'`),
       faces: await count('SELECT count(*) n FROM faces'),
-      consenting: await count('SELECT count(*) n FROM face_prefs WHERE recognise=1'),
+      eligible: await count(`SELECT count(*) n FROM members m WHERE ${ELIGIBLE('m.id')}`),
       shadow: await count(`SELECT count(*) n FROM face_matches WHERE state='shadow'`),
       auto: await count(`SELECT count(*) n FROM face_matches WHERE state='auto'`),
       removed: await count(`SELECT count(*) n FROM face_matches WHERE state='removed'`),

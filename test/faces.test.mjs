@@ -117,9 +117,11 @@ function faceWorld(mode='on'){
     return Response.json({model:'buffalo_l/w600k_r50',width:100,height:100,faces:dims.map((d,i)=>({box:[i*50,0,i*50+40,40],score:0.9,size:40,
       embedding:Buffer.from(vectorBytes(unitVec(d))).toString('base64')}))});
   }})};
-  fx.consent=(member,dim,recognise=1)=>{
-    sqlite.prepare('INSERT OR REPLACE INTO face_prefs(member,recognise,decided) VALUES(?,?,1)').run(member,recognise);
+  // A member with reference faces; picture=0 means no profile picture of their own, so they are not eligible.
+  fx.consent=(member,dim,picture=1)=>{
+    sqlite.prepare('INSERT OR REPLACE INTO face_prefs(member,recognise,decided,ref_tried) VALUES(?,1,1,1)').run(member);
     sqlite.prepare("INSERT OR REPLACE INTO face_refs VALUES(?,'portrait','k',?,'buffalo_l/w600k_r50')").run(member,vectorBytes(unitVec(dim)));
+    if(picture) sqlite.prepare("INSERT OR REPLACE INTO profile_fields VALUES(?,'portraitObject',?)").run(member,'profile/own'+member);
   };
   fx.photo=(post,id,byte,author=1)=>{
     if(!sqlite.prepare('SELECT 1 FROM posts WHERE id=?').get(post)) sqlite.prepare('INSERT INTO posts(id,author,body,created) VALUES(?,?,?,?)').run(post,author,'x',1);
@@ -225,36 +227,18 @@ import { refreshRefs, rematchMember } from '../faces.mjs';
 const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
 const storedFace=(w,media,post,dim)=>w.sqlite.prepare("INSERT INTO faces(media,post,box,score,size,embedding,model) VALUES(?,?,'[0,0,40,40]',0.9,40,?,'buffalo_l/w600k_r50')").run(media,post,vectorBytes(unitVec(dim))).lastInsertRowid;
 
-test('consent card shows once and Not now hides it', async()=>{
-  const w=faceWorld(); const ck=await w.session(2,'bbbb');
-  const home=await (await w.call('/',ck)).text();
-  assert.match(home,/Find me in batch photos\?/);
-  assert.match(home,/We use your profile photos and your 2006 yearbook photo to find you in batch photos\. You can turn this off any time\./);
-  const res=await w.call('/faces/consent',ck,{choice:'no',next:'/'});
-  assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/');
-  assert.doesNotMatch(await (await w.call('/',ck)).text(),/Find me in batch photos\?/);
-  assert.equal(w.sqlite.prepare('SELECT recognise FROM face_prefs WHERE member=2').get().recognise,0);
-});
-test('consent card is hidden while face tagging is off', async()=>{
-  const w=faceWorld('off'); const ck=await w.session(2,'bbbb');
-  assert.doesNotMatch(await (await w.call('/',ck)).text(),/Find me in batch photos/);
-  assert.equal((await w.call('/faces/consent',ck,{choice:'yes'})).status,404);
-});
-test('yes builds refs from own photos and the yearbook portrait', async()=>{
-  const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
-  w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
+test('a reference job builds refs from own photos and the yearbook portrait', async()=>{
+  const w=faceWorld();
   w.objects.set('profile/p2',new Uint8Array([5])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
   w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
   w.photoFaces[5]=[0]; w.photoFaces[1]=[0];   // portrait.jpg (the fixture's yearbook portrait) starts with byte 1
-  assert.equal((await w.call('/faces/consent',ck,{choice:'yes',next:'/people/2'})).status,303);
-  assert.deepEqual(sent,[{type:'ref',member:2}]);
-  await handleQueue({messages:[message(sent[0])]},w.env);
+  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
   assert.deepEqual(w.sqlite.prepare('SELECT source,object_key FROM face_refs WHERE member=2 ORDER BY source').all().map(r=>[r.source,r.object_key]),
     [['portrait','profile/p2'],['yearbook','portrait.jpg']]);
 });
 test('a profile photo with no face leaves no reference', async()=>{
   const w=faceWorld(); w.consent(2,0);
-  w.objects.set('profile/p2',new Uint8Array([7])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
+  w.objects.set('profile/p2',new Uint8Array([7])); w.sqlite.exec("INSERT OR REPLACE INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
   w.sqlite.exec("UPDATE face_refs SET object_key='profile/p2'");   // the old portrait ref
   assert.equal(await refreshRefs(w.env,2),0);
   assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=2').get().n,0);
@@ -276,46 +260,6 @@ test('rematch leaves a face that already belongs to someone else', async()=>{
   w.sqlite.prepare("INSERT INTO face_matches VALUES(?,3,'p1',?,0.95,'auto',1,1)").run(a,face);
   assert.equal(await rematchMember(w.env,2),0);
 });
-test('withdrawing removes auto tags but keeps manual tags', async()=>{
-  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
-  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0];
-  await scanPhoto(w.env,'p1',a);
-  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target) VALUES('p1',?,'person','2')").run(b);
-  await w.call('/faces/consent',ck,{choice:'no'});
-  assert.deepEqual(w.sqlite.prepare("SELECT media,origin FROM photo_tags WHERE target='2'").all().map(r=>[r.media,r.origin]),[[b,'manual']]);
-  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=2').get().n,0);
-  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_matches WHERE member=2').get().n,0);
-});
-test('re-consent restores tags but keeps Not me', async()=>{
-  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
-  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
-  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p2',b);
-  w.sqlite.prepare("UPDATE face_matches SET state='removed' WHERE media=?").run(b);
-  w.sqlite.prepare("DELETE FROM photo_tags WHERE media=?").run(b);
-  await w.call('/faces/consent',ck,{choice:'no'});
-  w.consent(2,0);
-  await rematchMember(w.env,2);
-  assert.deepEqual(w.sqlite.prepare("SELECT media FROM photo_tags WHERE target='2'").all().map(r=>r.media),[a]);
-  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=? AND member=2").get(b).state,'removed');
-});
-test('saving a new Then photo queues a ref job only for consenting members', async()=>{
-  for (const recognise of [1,0]) {
-    const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
-    w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
-    w.sqlite.prepare('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,?,1)').run(recognise);
-    const f=new FormData(); f.set('field','thenPhotoObject'); f.set('photo',new File([pngBytes],'t.png',{type:'image/png'}));
-    assert.equal((await w.call('/profile',ck,f)).status,303);
-    assert.deepEqual(sent,recognise?[{type:'ref',member:2}]:[]);
-  }
-});
-test('own profile shows the switch and the note beside photo uploads', async()=>{
-  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
-  const page=await (await w.call('/people/2',ck)).text();
-  assert.match(page,/Find me in batch photos: On/);
-  assert.match(page,/We use your profile photos and your 2006 yearbook photo/);
-  assert.doesNotMatch(await (await w.call('/people/2',await w.session(1,'aaaa'))).text(),/Find me in batch photos/);
-});
-
 const apostrophe="(?:'|&#39;|&#x27;|’)";
 test('found notification reads You are in 2 photos and opens the photo', async()=>{
   const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
@@ -427,7 +371,7 @@ test('scan-all queues everything unscanned', async()=>{
 });
 
 // ---------- final review fixes ----------
-import { consentState, publishShadow, writeMatches } from '../faces.mjs';
+import { publishShadow, writeMatches } from '../faces.mjs';
 
 test('C1: before migration 0017 the site works and hides face tagging', async()=>{
   const w=fixture({skip:['0019_face_tagging.sql']}); w.env.FACE_TAGGING='shadow';
@@ -445,13 +389,12 @@ test('C1: before migration 0017 the site works and hides face tagging', async()=
   assert.equal((await w.call('/admin/faces',admin)).status,200);
 });
 
-test('I2: the sweep re-queues reference jobs for members who said yes but have no references', async()=>{
+test('I2: the sweep re-queues reference jobs for members with a profile picture but no references', async()=>{
   const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}};
-  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1),(3,0,1)'); w.consent(4,0);
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1),(3,0,1)'); picture(w,2); w.consent(4,0);
   await sweep(w.env);
   assert.deepEqual(sent.filter(m=>m.body.type==='ref').map(m=>m.body.member),[2]);
   const msg=message({type:'ref',member:2}); msg.attempts=5; w.serviceDown=true;
-  w.objects.set('profile/p2',new Uint8Array([5])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
   await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);   // given up on; the sweep retries it
 });
 
@@ -499,7 +442,7 @@ test('I10: a photo job from a new memory still notifies per memory', async()=>{
 });
 
 test('I5: a family Then photo uses the face that matches the yearbook, or none', async()=>{
-  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); picture(w,2);
   w.objects.set('profile/t2',new Uint8Array([6])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'thenPhotoObject','profile/t2')");
   w.photoFaces[1]=[0]; w.photoFaces[6]=[3,0];          // partner (dim 3) first, the batchmate (dim 0) second
   assert.equal(await refreshRefs(w.env,2),2);
@@ -509,39 +452,18 @@ test('I5: a family Then photo uses the face that matches the yearbook, or none',
   assert.equal(await refreshRefs(w.env,2),0);
 });
 test('I6: only an approved seed portrait is used', async()=>{
-  const w=faceWorld(); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)'); w.photoFaces[1]=[0];
+  const w=faceWorld(); picture(w,2); w.photoFaces[1]=[0];
   assert.equal(await refreshRefs(w.env,2),0);           // the fixture's seed is pending review
   w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
   assert.equal(await refreshRefs(w.env,2),1);
 });
 test('M10: one unreadable reference photo does not stop the others', async()=>{
-  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); picture(w,2);
   w.photoFaces[1]=[0];
   w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'nowPhotoObject','profile/missing')");
   const real=w.env.FACES; w.env.FACES={idFromName:n=>n,get:id=>({fetch:async(u,init)=>new Uint8Array(init.body)[0]===9?new Response('bad',{status:400}):real.get(id).fetch(u,init)})};
   w.objects.set('profile/missing',new Uint8Array([9]));
   assert.equal(await refreshRefs(w.env,2),1);
-});
-
-test('I7: withdrawal works while face tagging is off', async()=>{
-  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
-  w.env.FACE_TAGGING='off';
-  assert.equal(await consentState(w.env,2),'on');
-  assert.match(await (await w.call('/people/2',ck)).text(),/Turn off/);
-  assert.equal((await w.call('/faces/consent',ck,{choice:'no'})).status,303);
-  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n,0);
-  assert.equal((await w.call('/faces/consent',ck,{choice:'yes'})).status,404);
-  assert.equal(await consentState(w.env,2),'hidden');
-});
-
-test('I8: a reference job that runs after withdrawal writes nothing', async()=>{
-  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[1]=[0];
-  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,0,1)');
-  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
-  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n,0);
-  const a=w.photo('p1','u1',1);
-  assert.deepEqual(await writeMatches(w.env,[{media:a,post:'p1',member:2,face:null,score:0.9}],'post'),[]);
-  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM photo_tags').get().n,0);
 });
 
 test('M1: a face someone rejected can go to the next-best person', async()=>{
@@ -621,15 +543,6 @@ test('S4: Not me clears that memory\'s face notification when nothing is left to
   await w.call('/faces/not-me',ck,{media:b});
   assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,0);
 });
-test('S4: turning recognition off clears face notifications only', async()=>{
-  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
-  const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
-  await scanPhoto(w.env,'p1',a,'post');
-  w.sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key) VALUES(2,1,'like','p1','','like:p1:1'),(2,NULL,'mention','p1','x','found-all:3:1')");
-  await w.call('/faces/consent',ck,{choice:'no'});
-  assert.deepEqual(w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all().map(r=>r.event_key),['like:p1:1']);
-});
-
 test('S5: two requests at once start the container only once', async()=>{
   const log={started:0}; let up=false;
   const state={container:{get running(){return up;},start(){log.started++;},getTcpPort:()=>({fetch:async()=>{if(!up)throw new Error('refused');return new Response('ok');}}),
@@ -684,8 +597,8 @@ test('C: each failure of a photo job counts one try', async()=>{
   for (let i=0;i<2;i++){ const msg=message({type:'media',post:'p1',media:a}); msg.attempts=5; await handleQueue({messages:[msg]},w.env); }
   assert.equal(w.sqlite.prepare("SELECT tries FROM face_scans WHERE media=?").get(a).tries,2);
 });
-test('C: a member without usable photos is retried once a day, three times at most; saying yes again resets it', async()=>{
-  const w=faceWorld(); const ck=await w.session(2,'bbbb');
+test('C: a member without usable photos is retried once a day, three times at most; a new profile photo resets it', async()=>{
+  const w=faceWorld(); const ck=await w.session(2,'bbbb'); picture(w,2);
   const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}};
   const refs=()=>sent.filter(m=>m.body.type==='ref').length;
   w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
@@ -696,12 +609,13 @@ test('C: a member without usable photos is retried once a day, three times at mo
   await sweep(w.env); assert.equal(refs(),1);
   w.sqlite.prepare('UPDATE face_prefs SET ref_tries=3,ref_tried=? WHERE member=2').run(Date.now()-DAY-1000);
   await sweep(w.env); assert.equal(refs(),1);                                      // given up
-  await w.call('/faces/consent',ck,{choice:'yes'});                                // a fresh yes starts again
+  const f=new FormData(); f.set('field','nowPhotoObject'); f.set('photo',new File([pngBytes],'n.png',{type:'image/png'}));
+  await w.call('/profile',ck,f);                                                   // a new photo starts again
   assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,0);
 });
 test('C: finding a usable photo resets the member\'s tries', async()=>{
   const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[1]=[0];
-  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(2,1,1,2,1)');
+  picture(w,2); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(2,1,1,2,1)');
   await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
   assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,0);
 });
@@ -713,4 +627,66 @@ test('face pages show their title once and no publish notice unless asked', asyn
   assert.equal(h1(admin),1);
   assert.doesNotMatch(admin,/Published \d+ tags/);
   assert.match(await (await w.call('/admin/faces?published=3',ck)).text(),/Published 3 tags/);
+});
+
+// ---------- 26 Nov: no consent step; a profile picture makes you eligible ----------
+const picture=(w,member,byte=50)=>{ w.objects.set('profile/pic'+member,new Uint8Array([byte])); w.sqlite.prepare("INSERT OR REPLACE INTO profile_fields VALUES(?,'portraitObject',?)").run(member,'profile/pic'+member); };
+const ref=(w,member,dim,source='portrait')=>w.sqlite.prepare("INSERT OR REPLACE INTO face_refs VALUES(?,?,'k',?,'buffalo_l/w600k_r50')").run(member,source,vectorBytes(unitVec(dim)));
+const autoTags=(w,member)=>w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target=? AND origin='auto'").get(String(member)).n;
+
+test('E1: a member with a profile picture is matched without being asked', async()=>{
+  const w=faceWorld(); picture(w,2); ref(w,2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(autoTags(w,2),1);
+});
+test('E2: a yearbook reference or an old yes without a profile picture is never matched', async()=>{
+  const w=faceWorld(); ref(w,2,0,'yearbook');
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
+  const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(autoTags(w,2),0);
+  storedFace(w,a,'p1',0); assert.equal(await rematchMember(w.env,2),0);
+});
+test('E3: an earlier Not now does not stop matching once there is a profile picture', async()=>{
+  const w=faceWorld(); picture(w,2); ref(w,2,0);
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,0,1)');
+  const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(autoTags(w,2),1);
+});
+test('E4: references are built for an eligible member with no earlier answer, and not without a picture', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
+  w.photoFaces[50]=[0]; w.photoFaces[1]=[0];   // the profile picture, and the fixture's yearbook portrait (first byte 1)
+  assert.equal(await refreshRefs(w.env,2),0);   // yearbook only: not eligible
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=2').get().n,0);
+  picture(w,2);
+  assert.equal(await refreshRefs(w.env,2),2);
+  assert.deepEqual(w.sqlite.prepare('SELECT source FROM face_refs WHERE member=2 ORDER BY source').all().map(r=>r.source),['portrait','yearbook']);
+  assert.ok(w.sqlite.prepare('SELECT ref_tried FROM face_prefs WHERE member=2').get().ref_tried>0);
+});
+test('E5: no consent card, no switch, and the consent route is gone', async()=>{
+  const w=faceWorld(); picture(w,2); const ck=await w.session(2,'bbbb');
+  assert.doesNotMatch(await (await w.call('/',ck)).text(),/Find me in batch photos/);
+  assert.doesNotMatch(await (await w.call('/people/2',ck)).text(),/Find me in batch photos/);
+  assert.equal((await w.call('/faces/consent',ck,{choice:'no'})).status,404);
+});
+test('E6: Home nudges only members without a profile picture, and only while face tagging runs', async()=>{
+  const nudge=/Add a profile picture to be found in batch photos/;
+  const w=faceWorld(); const ck=await w.session(2,'bbbb');
+  assert.match(await (await w.call('/',ck)).text(),nudge);
+  picture(w,2); assert.doesNotMatch(await (await w.call('/',ck)).text(),nudge);
+  const off=faceWorld('off'); assert.doesNotMatch(await (await off.call('/',await off.session(2,'bbbb'))).text(),nudge);
+});
+test('E7: saving a profile photo, inline or with the full form, marks a rebuild and queues nothing', async()=>{
+  for (const how of ['inline','form']) {
+    const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
+    w.env.FACE_JOBS={send:async b=>{sent.push(b);},sendBatch:async m=>{sent.push(...m);}};
+    w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(2,1,1,3,99)');
+    const f=new FormData();
+    if(how==='inline'){ f.set('field','portraitObject'); f.set('photo',new File([pngBytes],'p.png',{type:'image/png'})); }
+    else { f.set('profile_form','all'); f.set('portraitPhoto',new File([pngBytes],'p.png',{type:'image/png'})); }
+    const res=await w.call('/profile',ck,f); assert.equal(res.status,303,how+' '+await res.text());
+    assert.deepEqual({...w.sqlite.prepare('SELECT ref_tries,ref_tried FROM face_prefs WHERE member=2').get()},{ref_tries:0,ref_tried:null},how);
+    assert.deepEqual(sent,[],how);
+  }
 });
