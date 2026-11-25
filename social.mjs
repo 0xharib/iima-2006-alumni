@@ -1,5 +1,27 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  // One request helper for the site's JavaScript: a deadline, a JSON check (an expired session returns
+  // the sign-in page instead) and a readable message. Nothing is retried automatically: an aborted
+  // request does not prove a write failed, so mutations leave the retry to the person.
+  class RequestError extends Error{constructor(message,kind){super(message);this.kind=kind;}}
+  async function request(url,{method='GET',body,timeout=15000,signal}={}){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
+    signal?.addEventListener('abort',()=>controller.abort(),{once:true});
+    let response;
+    try{response=await fetch(url,{method,body,credentials:'same-origin',headers:{Accept:'application/json'},signal:controller.signal});}
+    catch(error){
+      if(signal?.aborted)throw error;
+      throw new RequestError(method==='GET'?'Could not load. Check your connection and try again.':'We couldn’t confirm this was saved. Check, then try again if needed.','network');
+    }finally{clearTimeout(timer);}
+    if(response.status===429)throw new RequestError('Please wait a moment and try again.','rate');
+    if(!response.ok){
+      const text=(await response.text().catch(()=>'')).trim();
+      throw new RequestError(text&&text.length<200&&!text.startsWith('<')?text:method==='GET'?'Could not load. Try again.':'Could not save. Try again.','server');
+    }
+    if(!response.headers.get('Content-Type')?.includes('application/json'))
+      throw new RequestError('Your session may have ended. Sign in again, then try again.','session');
+    return response.json();
+  }
   // "Looking to catch up": search WIMWIans and add one with a normal form post.
   const meet=document.querySelector('[data-meet-picker]');
   if(meet){
@@ -160,9 +182,7 @@ export const socialScript = String.raw`
       try {
         const url=new URL(next.href);
         url.searchParams.set('fragment','1');
-        const response=await fetch(url);
-        if(!response.ok)throw new Error();
-        const items=await response.json();
+        const items=await request(url);
         addBatch(items.html);
         if(items.next){next.href=items.next;next.classList.add('auto-feed');observer.observe(next);}
         else next.remove();
@@ -269,17 +289,11 @@ export const socialScript = String.raw`
     }
   };
   const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
-  async function send(url,data){
-    const response=await fetch(url,{method:'POST',body:data,headers:{Accept:'application/json'}});
-    if(!response.ok) throw new Error(response.status===429?'Please wait and try again.':'Could not save. Try again.');
-    return response;
-  }
+  const send=(url,data)=>request(url,{method:'POST',body:data});
   function message(card,text){card.querySelector('.memory-result').textContent=text;}
   async function comments(card){
-    const response=await fetch(path(card)+'?panel=comments');
-    if(!response.ok) throw new Error('Could not load comments.');
+    const rows=await request(path(card)+'?panel=comments');
     const list=card.querySelector('[data-comments]');
-    const rows=await response.json();
     list.replaceChildren(...rows.map(commentElement));
   }
   function commentElement(row){
@@ -345,7 +359,7 @@ export const socialScript = String.raw`
         try {
           const data=new FormData();
           data.set('action','like');data.set('liked',previous?'0':'1');
-          const {liked,likes}=await (await send(path(card),data)).json();
+          const {liked,likes}=await send(path(card),data);
           updateLike(id,liked,likes);
         } catch(error) {
           updateLike(id,previous,count);
@@ -386,7 +400,7 @@ export const socialScript = String.raw`
           const data=new FormData();
           data.set('action','tag-add');data.set('tag',button.dataset.tagId);
           if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
-          const {tags}=await (await send(path(card),data)).json();
+          const {tags}=await send(path(card),data);
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
             if(rendered.dataset.photoScope===card.dataset.photoScope) rendered.querySelector('[data-memory-tags]').innerHTML=tags;
           }
@@ -414,9 +428,7 @@ export const socialScript = String.raw`
       input.searchTimer=setTimeout(async()=>{
       const controller=new AbortController();input.searchRequest=controller;
       try{
-        const response=await fetch('/memory-targets?q='+encodeURIComponent(q),{signal:controller.signal});
-        if(!response.ok)throw new Error();
-        const rows=await response.json();
+        const rows=await request('/memory-targets?q='+encodeURIComponent(q),{signal:controller.signal,timeout:8000});
         if(input.value.trim()!==q)return;
         const suggestion=({value,label,dorm})=>{
           const option=document.createElement('button');
@@ -507,8 +519,8 @@ export const socialScript = String.raw`
           status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';
           const batch=await Promise.allSettled(pending.slice(start,start+3).map(async photo=>{
             const upload=new FormData();upload.set('photo',photo.file);
-            const response=await fetch('/compose/photo?id='+encodeURIComponent(photo.id),{method:'POST',body:upload});
-            if(!response.ok)throw new Error(await response.text()||'Could not upload a photo.');
+            // Each photo has a stable id, so pressing Publish again re-sends only photos not yet confirmed.
+            await request('/compose/photo?id='+encodeURIComponent(photo.id),{method:'POST',body:upload,timeout:120000});
             photo.uploaded=true;done++;
             status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';
           }));
@@ -518,9 +530,8 @@ export const socialScript = String.raw`
         for(const photo of draft.photos)data.append('photoId',photo.id);
         if(draft.cover)data.set('cover',draft.cover);
         status.textContent='Publishing memory…';
-        const response=await fetch(form.action,{method:'POST',body:data,headers:{Accept:'application/json'}});
-        if(!response.ok)throw new Error(await response.text());
-        const result=await response.json();
+        // The memory id is fixed per draft, so a retry after an unconfirmed publish never duplicates it.
+        const result=await request(form.action,{method:'POST',body:data,timeout:30000});
         if(!feed){location.assign(result.url);return;}
         if(!feed.querySelector('[data-post]'))feed.replaceChildren();
         addBatch(result.html,true);
@@ -607,7 +618,7 @@ export const socialScript = String.raw`
         list.append(optimistic);
         form.hidden=true;
         try{
-          const {comment}=await (await send(path(card),data)).json();
+          const {comment}=await send(path(card),data);
           optimistic.replaceWith(commentElement(comment));
           form.reset();
           form.parentElement.querySelector('[data-comment-again]').hidden=false;

@@ -1387,3 +1387,35 @@ test('uploads generate their display sizes after the response',async()=>{
  await Promise.all(background);await Promise.all(background);
  assert.deepEqual(widths.sort((a,b)=>a-b),[96,256,480]);
 });
+
+// ---- Performance work (P2): shared browser request helper ----
+test('browser request helper applies deadlines, session checks and readable errors without retrying',async()=>{
+ const {socialScript}=await import('../social.mjs');const {runInNewContext}=await import('node:vm');
+ const start=socialScript.indexOf('  class RequestError'),end=socialScript.indexOf('  // "Looking to catch up"');
+ assert.ok(start>0&&end>start);
+ let timers=[],calls=0,reply;
+ const context={AbortController,setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},
+  fetch:(url,options)=>{calls++;return reply(url,options);}};
+ const request=runInNewContext(socialScript.slice(start,end)+';request',context);
+ const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+ reply=async()=>json({ok:true});
+ assert.deepEqual(await request('/x'),{ok:true});
+ reply=async()=>new Response('<!doctype html><p>Sign in</p>',{headers:{'Content-Type':'text/html'}});
+ await assert.rejects(request('/x',{method:'POST'}),/session may have ended/);
+ reply=async()=>new Response('Please wait before commenting again.',{status:429});
+ await assert.rejects(request('/x',{method:'POST'}),/wait a moment/);
+ reply=async()=>new Response('Choose a classmate or topic.',{status:400});
+ await assert.rejects(request('/x',{method:'POST'}),/Choose a classmate or topic\./);
+ reply=async()=>new Response('<html>error</html>',{status:500});
+ await assert.rejects(request('/x',{method:'POST'}),/Could not save/);
+ // A stalled request ends at its deadline with a recoverable message; it is not retried.
+ calls=0;timers=[];
+ reply=(_,options)=>new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
+ const stalled=request('/x',{method:'POST',timeout:20000});
+ assert.equal(timers.at(-1).ms,20000);timers.at(-1).fn();
+ await assert.rejects(stalled,/couldn’t confirm this was saved/);
+ assert.equal(calls,1);
+ // A caller's own cancellation (newer search input) passes through as an AbortError.
+ const controller=new AbortController();const cancelled=request('/x',{signal:controller.signal});controller.abort();
+ await assert.rejects(cancelled,error=>error.name==='AbortError');
+});
