@@ -82,3 +82,39 @@ The server removes the session and expires the cookie. It returns a small confir
 ## Reunion browsing
 
 Reunion attendees use two compact square-thumbnail cards per mobile row with responsive 256/480/768px image candidates. Personal reunion details are collapsed when the existing completeness rules are satisfied, and stay open when required details are missing or after a save. The review link and child/detail fragment links reopen the accordion. The agenda is a compact expandable section near the top, before personal details and the attendee list.
+
+
+## Performance: completion summary, lightweight actions and in-place profile saves
+
+**Migration 0018 (`0018_completion_summary.sql`).** Adds `profile_completion_state`, one row per roster member with current public and pilot completeness plus the city and Life, Lately shown on Home. Triggers on `profile_fields` (only dorm, nickname, city, life, family and the Then/Now photo fields), `yearbook_public`, `profile_seeds`, `roster` and legacy `photos` recompute just the changed member, in the same transaction as the write, through `profile_completion_refresh`. They replace the 0017 triggers, which evaluated the whole-roster view on every profile write. `profile_completion` keeps its meaning: the first public completion is recorded once and later edits, blank overrides or incomplete/recomplete cycles never move it. All writes inside triggers use explicit UPSERT clauses, so an outer `INSERT OR REPLACE` cannot replace history.
+
+The migration is additive and safe to rerun. It backfills every roster member once without recording history; a currently complete profile with no history row gets `basis='baseline'` (unknown date), never a new completion date. The current production Worker works unchanged against the migrated schema, and the new Worker falls back to the old query if the table is missing.
+
+Apply it before deploying the new code, after noting a restore point:
+
+```sh
+npx wrangler d1 time-travel info iima-2006-alumni          # note the bookmark
+npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0018_completion_summary.sql
+npx wrangler d1 execute iima-2006-alumni --remote --command "SELECT count(*) AS members, sum(complete_public) AS complete FROM profile_completion_state"
+```
+
+The member count should equal the roster size, and the complete count should equal the number of profiles the current Home logic treats as complete.
+
+To return to the 0017 triggers without restoring the database, drop the new triggers and rerun 0017 (it only recreates missing triggers and inserts baseline rows that do not exist):
+
+```sh
+npx wrangler d1 execute iima-2006-alumni --remote --command "DROP TRIGGER IF EXISTS profile_completion_refresh_apply; DROP TRIGGER IF EXISTS completion_summary_profile_fields_insert; DROP TRIGGER IF EXISTS completion_summary_profile_fields_update; DROP TRIGGER IF EXISTS completion_summary_profile_fields_delete; DROP TRIGGER IF EXISTS completion_summary_yearbook_insert; DROP TRIGGER IF EXISTS completion_summary_yearbook_update; DROP TRIGGER IF EXISTS completion_summary_yearbook_delete; DROP TRIGGER IF EXISTS completion_summary_roster_insert; DROP TRIGGER IF EXISTS completion_summary_roster_update; DROP TRIGGER IF EXISTS completion_summary_seeds_insert; DROP TRIGGER IF EXISTS completion_summary_seeds_update; DROP TRIGGER IF EXISTS completion_summary_seeds_delete; DROP TRIGGER IF EXISTS completion_summary_photos_insert; DROP TRIGGER IF EXISTS completion_summary_photos_update; DROP TRIGGER IF EXISTS completion_summary_photos_delete"
+npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_profile_completion.sql
+```
+
+Do this only after rolling the Worker back too; the new Worker reads `profile_completion_state`, which would stop updating.
+
+**Page chrome.** The header avatar and unread count load only when an HTML page is rendered for a signed-in GET (started early when the browser asks for HTML). JSON panels, fragments and actions skip them.
+
+**Memory actions.** Likes, comments, comment edits/deletes, tag accept/remove, unassociate, edit and delete check one authorized, visible post rather than loading the full memory card. A like answers `{liked,likes}` from a single count query. The comments panel reads only comments. Tag-add still loads the full card because it validates photo scope and returns rendered tags.
+
+**Profile editor.** With JavaScript, `/profile` saves with `Accept: application/json` and receives `{saved, profile, checks, complete, missing, photos, lifeGenerated, name}`; the editor updates in place and the member stays on the editor with a link to their profile. Without JavaScript the form still redirects to the profile. Then/Now preview URLs carry `&v=` derived from the stored object key, so a replacement is shown at once; existing media cache headers are unchanged.
+
+**Cache invalidation.** `social.js` is versioned in the page (`?v=21`) and cached for five minutes, so browsers pick up the new editor script on their next page load after deploy. No HTML is cached publicly.
+
+**Measuring.** `node tools/perf-bench.mjs [roster] [posts] [runs]` builds an in-memory synthetic roster and reports top-level SQL statements, time and payload per route. It never contacts Cloudflare or production data.
