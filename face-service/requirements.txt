@@ -1,0 +1,6 @@
+# Versions used by the test bench (IIMA_Year_Book/face-test/bench) on 25 Nov 2026.
+insightface==2.1
+onnxruntime==1.29.0
+opencv-python==5.1.0.95   # the variant insightface depends on; needs libgl1 (see Dockerfile)
+numpy==2.5.3
+pillow==13.0.0
