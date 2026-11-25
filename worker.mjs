@@ -389,6 +389,33 @@ async function route(req, env, record, setViewer) {
     const next = more ? '/memories?before='+last.created+'&cursor='+encode(last.id)+(q?'&q='+encode(q):'') : '';
     return {rows,next};
   }
+  // Newest completed profiles. Reads the per-member summary maintained by migration 0018's triggers;
+  // ranks only completed members, then resolves portraits for the twelve shown.
+  async function freshProfiles() {
+    const mode = pilot ? 'pilot' : 'public';
+    try {
+      return await all(`SELECT r.id,r.name,r.dorm,r.nickname,f.city,f.life,${portrait} AS portrait,
+          f.completed_at,f.completion_basis
+        FROM (SELECT st.member,st.city_${mode} AS city,st.life_${mode} AS life,pc.completed_at,pc.basis AS completion_basis,
+            coalesce(pc.completed_at,pc.observed_at,0) AS rank_at,coalesce(pc.observed_order,0) AS rank_order,rr.name AS rank_name
+          FROM profile_completion_state st JOIN roster rr ON rr.id=st.member
+          LEFT JOIN profile_completion pc ON pc.member=st.member
+          WHERE st.complete_${mode}=1 AND NOT EXISTS(SELECT 1 FROM members m WHERE m.id=st.member AND m.suspended=1)
+          ORDER BY rank_at DESC,rank_order DESC,rank_name LIMIT 12) f
+        JOIN roster r ON r.id=f.member ${seedJoin}
+        ORDER BY f.rank_at DESC,f.rank_order DESC,f.rank_name`,+pilot);
+    } catch (error) {
+      // Before migration 0018 is applied, fall back to resolving completion across the roster.
+      if (!/no such table: profile_completion_state/.test(error?.message||'')) throw error;
+      return all(`${completedProfilesCTE}
+        SELECT r.id,r.name,r.dorm,r.nickname,c.city,c.life,${portrait} AS portrait,
+          pc.completed_at,pc.basis AS completion_basis
+        FROM completed_profiles c JOIN roster r ON r.id=c.id ${seedJoin}
+        LEFT JOIN profile_completion pc ON pc.member=r.id
+        WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.id=r.id AND m.suspended=1)
+        ORDER BY coalesce(pc.completed_at,pc.observed_at,0) DESC,pc.observed_order DESC,r.name LIMIT 12`,+pilot,+pilot);
+    }
+  }
   // "Looking forward to meeting": tolerant of a database where migration 0014 has not run yet.
   const meetLimit = 60;
   async function meetSummary(target=null) {
@@ -452,14 +479,7 @@ async function route(req, env, record, setViewer) {
     return json([...people,...topics,...suggestions.filter(x=>!topics.some(t=>t.label.toLowerCase()===x.label.toLowerCase()))]);
   }
   if (path==='/') {
-    const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),
-      all(`${completedProfilesCTE}
-        SELECT r.id,r.name,r.dorm,r.nickname,c.city,c.life,${portrait} AS portrait,
-          pc.completed_at,pc.basis AS completion_basis
-        FROM completed_profiles c JOIN roster r ON r.id=c.id ${seedJoin}
-        LEFT JOIN profile_completion pc ON pc.member=r.id
-        WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.id=r.id AND m.suspended=1)
-        ORDER BY coalesce(pc.completed_at,pc.observed_at,0) DESC,pc.observed_order DESC,r.name LIMIT 12`,+pilot,+pilot)]);
+    const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),freshProfiles()]);
     return render('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {

@@ -998,3 +998,117 @@ test('reunion details collapse when complete and stay open when incomplete or ju
  html=await body(await call('/reunion?saved=1',ck));assert.match(html,/<details class="reunion-details-panel" open>/);
  assert.match(html,/srcset="[^"]*w=480/);
 });
+
+// ---- Performance work: per-member completion summary (migration 0018) ----
+import { completedProfilesCTE } from '../completion.mjs';
+function completionOracle(sqlite){
+ const out={};
+ for(const pilot of [0,1])for(const row of sqlite.prepare(`${completedProfilesCTE} SELECT id,city,life FROM completed_profiles`).all(pilot))
+  (out[row.id] ||= {})[pilot?'pilot':'public']={city:row.city,life:row.life};
+ return out;
+}
+function summaryState(sqlite){
+ const out={};
+ for(const row of sqlite.prepare('SELECT * FROM profile_completion_state').all()){
+  if(row.complete_public)(out[row.member] ||= {}).public={city:row.city_public,life:row.life_public};
+  if(row.complete_pilot)(out[row.member] ||= {}).pilot={city:row.city_pilot,life:row.life_pilot};
+ }
+ return out;
+}
+
+test('completion summary matches the full-roster rule through overrides, deletes, enrichment and photos',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO roster VALUES(3,'Third','D3','Three'),(4,'Fourth','D4','Four'),(5,'Fifth','','Five');
+  INSERT INTO profile_seeds VALUES(3,'{"Life, Lately draft":"Seed life 3","Tracker city":"Seed city 3"}','approved',NULL);
+  INSERT INTO profile_seeds VALUES(4,'{"Life, Lately draft":"Seed life 4","Tracker city":"Seed city 4"}','pending',NULL);
+  INSERT INTO submissions VALUES('self-3',3,3,'self','{}','2026-01-01'),('self-4',4,4,'self','{}','2026-01-01');`);
+ let seed=7;const rand=n=>Math.floor((seed=(seed*48271)%2147483647)/2147483647*n);
+ const fields=['dorm','nickname','city','life','family','thenPhotoObject','nowPhotoObject','company','portraitObject'];
+ const values=['','  ','Value','Another value'];
+ const fill=m=>{for(const key of ['city','life','family','thenPhotoObject','nowPhotoObject'])
+  if(rand(4))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,key,'Filled '+key);
+  else sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,key);};
+ // Relies on enrichment for city and Life, Lately, so approved and pending seeds differ.
+ const fillFromSeed=m=>{fill(m);sqlite.prepare("DELETE FROM profile_fields WHERE member=? AND field IN ('city','life')").run(m);
+  sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m);};
+ const operations=[fill,fill,fillFromSeed,fillFromSeed,
+  m=>sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('INSERT INTO profile_fields VALUES(?,?,?) ON CONFLICT(member,field) DO UPDATE SET value=excluded.value').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,fields[rand(fields.length)]),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(m,JSON.stringify({city:'Yearbook city',life:'Yearbook life',family:rand(2)?'Yearbook family':''}),
+    JSON.stringify(rand(2)?[{submission:'self-'+m,key:'legacy-'+m+'.jpg'}]:[])),
+  m=>sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m),
+  m=>sqlite.prepare('UPDATE profile_seeds SET review_status=? WHERE roster_id=?').run(['approved','pending','rejected'][rand(3)],m),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO photos VALUES(?,?,?,?)').run('self-'+m,'legacy-'+m+'.jpg',['then','now','other'][rand(3)],''),
+  m=>sqlite.prepare('DELETE FROM photos WHERE submission=?').run('self-'+m),
+  m=>sqlite.prepare('UPDATE roster SET dorm=? WHERE id=?').run(values[rand(values.length)],m),
+ ];
+ let completeSteps=0,pilotOnlySteps=0;
+ for(let step=0;step<600;step++){
+  operations[rand(operations.length)](1+rand(5));
+  const state=summaryState(sqlite);
+  assert.deepEqual(state,completionOracle(sqlite),'mismatch after step '+step);
+  if(Object.values(state).some(item=>item.public))completeSteps++;
+  if(Object.values(state).some(item=>item.pilot&&!item.public))pilotOnlySteps++;
+ }
+ // The random walk must actually reach complete and pilot-only states for the comparison to mean anything.
+ assert.ok(completeSteps>50,'complete states reached: '+completeSteps);
+ assert.ok(pilotOnlySteps>10,'pilot-only states reached: '+pilotOnlySteps);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_refresh').get().n,0);
+});
+
+test('completion summary keeps first completion through replacement writes and incomplete cycles',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'city','Pune'),(2,'life','Life'),(2,'family','Family'),(2,'thenPhotoObject','t.jpg')`);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion WHERE member=2').get().n,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'nowPhotoObject','n.jpg')`);
+ const first=sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get();
+ assert.ok(first.completed_at>0);assert.equal(first.basis,'recorded');
+ sqlite.exec(`UPDATE profile_completion SET completed_at=1000 WHERE member=2`);
+ // Owner edits, blank overrides and recompletion never move or replace the first record.
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Bangalore')`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','')`);
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=2').get().complete_public,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','Family again')`);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get()},{completed_at:1000,basis:'recorded'});
+ assert.equal(sqlite.prepare("SELECT city_public FROM profile_completion_state WHERE member=2").get().city_public,'Bangalore');
+});
+
+test('edits unrelated to completion do no completion work',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`UPDATE profile_completion_state SET refreshed_at=1 WHERE member=2`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'company','Acme'),(2,'portraitObject','p.jpg'),(2,'education','School')`);
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'company','Other') ON CONFLICT(member,field) DO UPDATE SET value=excluded.value`);
+ sqlite.exec(`DELETE FROM profile_fields WHERE member=2 AND field='company'`);
+ sqlite.exec(`UPDATE roster SET name='Renamed' WHERE id=2`);
+ assert.equal(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at,1);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Chennai')`);
+ assert.ok(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at>1);
+});
+
+test('summary backfill is rerunnable and never labels older profiles as newly completed',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"Older life","family":"Family"}','[]');
+  INSERT INTO profile_fields VALUES(1,'thenPhotoObject','t.jpg'),(1,'nowPhotoObject','n.jpg');
+  UPDATE profile_completion SET completed_at=NULL,basis='baseline' WHERE member=1;
+  DELETE FROM profile_completion_state;`);
+ // Simulate a profile that is complete but has no history row (for example, completed before 0017).
+ sqlite.exec(`DELETE FROM profile_completion WHERE member=1`);
+ const migration=readFileSync(new URL('../migrations/0018_completion_summary.sql',import.meta.url),'utf8');
+ sqlite.exec(migration);sqlite.exec(migration);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=1').get()},{completed_at:null,basis:'baseline'});
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=1').get().complete_public,1);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_state').get().n,2);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'completion_%' AND name NOT LIKE 'completion_summary_%'").get().n,0);
+});
+
+test('Home fresh-profile query reads the summary, not the roster’s profile sources',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ await body(await call('/',ck));
+ const fresh=seen.find(query=>query.includes('profile_completion_state'));
+ assert.ok(fresh,'Home uses the completion summary');
+ assert.ok(!seen.some(query=>query.includes('ranked_profile')),'Home does not rank every member’s fields');
+ const plan=sqlite.prepare('EXPLAIN QUERY PLAN '+fresh).all(0).map(row=>row.detail).join('\n');
+ assert.doesNotMatch(plan,/SCAN (profile_fields|yearbook_public|profile_seeds)\b/);
+});
