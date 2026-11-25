@@ -87,21 +87,40 @@ const tagPanel=()=>`<div class="memory-inline" data-panel-content="tags" hidden>
 const tagControls=(scope)=>`${icon('tag','Tag '+scope,'data-panel="tags" aria-expanded="false"')}${tagPanel()}
   <div class="memory-result" role="status"></div>`;
 const memoryAuthor=post=>`<div class="memory-author"><a href="/people/${post.author}">${portrait({name:post.author_name,portrait:post.author_portrait})}${e(post.author_name)}</a></div>`;
+
+export function profileMemoryRows(rows,person){
+  return rows.flatMap(post=>{
+    if(post.author===person||post.profile_album_tag)return [post];
+    const photos=JSON.parse(post.collage_photos||'[]');
+    const links=JSON.parse(post.profile_photo_links||'[]');
+    const tagged=[...new Set(links.filter(tag=>tag.kind==='person'&&tag.href==='/people/'+person&&photos.includes(tag.media)).map(tag=>tag.media))];
+    return tagged.map(media=>({...post,photo_scope:media,album_photo_total:photos.length,
+      collage_photos:JSON.stringify([media]),album_cover:null,
+      linked_tags:JSON.stringify(links.filter(tag=>tag.media===media))}));
+  });
+}
+
 const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
   const photos=JSON.parse(post.collage_photos||'[]');
-  const album=photos.length>1, photo=post.album_cover?'post/'+post.album_cover:photos[0];
+  const scoped=!!post.photo_scope;
+  const album=!scoped&&photos.length>1, photo=post.album_cover?'post/'+post.album_cover:photos[0];
   const title=post.album_title||'Photo album';
+  const previews=album?[photo,...photos.filter(media=>media!==photo)].slice(0,3):[];
+  const albumImages=previews.map((media,slot)=>`<span class="album-preview-tile"><img src="${mediaSrc(media,slot===0?480:256)}" srcset="${mediaSet(media,slot===0?[256,480,768]:[96,256,480])}" sizes="${slot===0?'(max-width: 490px) 63vw, (max-width: 850px) 30vw, 270px':'(max-width: 490px) 32vw, (max-width: 850px) 15vw, 135px'}" alt="" decoding="async" ${priority&&index<3&&slot===0?'fetchpriority="high"':'loading="lazy"'}>${slot===2&&photos.length>3?`<span class="album-more"><strong>+${photos.length-3}</strong><span>more photos</span></span>`:''}</span>`).join('');
   const image=photo?`<img src="${mediaSrc(photo,480)}" srcset="${mediaSet(photo,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" data-full-src="/media/${e(photo)}" alt="${e(album?title:'Memory shared by '+post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:'';
-  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}">
+  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}"${scoped?` data-photo-scope="${e(post.photo_scope)}"`:''}>
     ${memoryAuthor(post)}
     <div class="collage-visual">
-      ${album?`<a class="album-cover" href="/posts/${e(post.id)}">${image}<span class="album-photo-count">${photos.length} photos</span></a>`:
+      ${album?`<a class="album-cover album-collage album-collage-${previews.length}" href="/posts/${e(post.id)}" aria-label="Open ${e(title)}, ${photos.length} photos">${albumImages}</a>`:
         `<button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
         ${photo?image:`<span class="memory-quote">${e(post.body)}</span>${post.body.length>240?'<span class="memory-read-more">Read full memory</span>':''}`}</button>`}
     </div>
     <div class="memory-card-footer">
+    ${scoped?`<p class="registry">Photo from ${e(title)}</p>`:''}
     ${album?`<h3 class="memory-album-title">${link('/posts/'+post.id,title)}</h3>`:''}
     ${photo&&post.body&&!['Shared a yearbook photo.','Shared a photo.'].includes(post.body)?`<p class="memory-caption">${e(post.body)}</p>`:''}
+    ${album?`<a class="album-open-link" href="/posts/${e(post.id)}">Tap to open album · ${photos.length} photos <span aria-hidden="true">→</span></a>`:''}
+    ${scoped?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(post.photo_scope.replaceAll('/','-'))}">Tap to open album · ${post.album_photo_total} photos <span aria-hidden="true">→</span></a><small style="display:block">Likes and comments are shared with the original memory.</small>`:''}
     <div data-memory-tags>${memoryTags(post)}</div>
     <div class="collage-actions">
       <div class="memory-like">${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span></div>
@@ -278,7 +297,7 @@ export const page={
     <a href="/compose" class="profile-primary share-memory" data-compose-open>Add memory</a></div>
     ${memoriesCompletionPrompt(collage(rows,next,true),checks,me)}
     ${page.composeDialog(key)}`;},
-  gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
+  gallery(photos,memories=[],person=null){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${memoryBatch(person===null?memories:profileMemoryRows(memories,person))}${memoryDialog()}${photos.length?`<section class="panel"><h2>Profile and yearbook photos</h2><p>These are profile photos rather than posted memories.</p>${images(photos)}</section>`:''}`;},
   memoryCards, memoryTags,
   reunion(member,tracker,saved,directory,showSaved){
     const values = reunionValues(tracker,saved);
@@ -364,6 +383,7 @@ export const page={
   },
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
     const own = me === row.id;
+    stories=profileMemoryRows(stories,row.id);
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
@@ -427,8 +447,7 @@ export const page={
           ${todoKeys.length?`<section class="profile-section profile-todo${requiredTodo.length?' has-required':''}"><details${requiredTodo.length?' open':''}><summary><h2>${requiredTodo.length?'The essentials':'More about you'}</h2><span class="registry">${requiredTodo.length?requiredTodo.length+' to add':'Only if you’d like to share more'}</span></summary>
             ${requiredTodo.length?`<dl class="profile-facts">${requiredTodo.map(entry).join('')}</dl>`:''}
             ${optionalTodo.length?`<details class="optional-profile-fields"><summary>More details to share</summary><dl class="profile-facts">${optionalTodo.filter(key=>!['outsideWork','moment','firstDayAdvice','anythingElse'].includes(key)).map(entry).join('')}</dl></details>`:''}</details></section>`:''}
-          ${photos.length?`<section class="profile-section profile-photos"><div class="profile-section-head"><h2>Photos</h2>
-            <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
+
         </aside>`:''}
         <div class="profile-main">
           ${own&&meet.available?`<section class="profile-section profile-meet" id="meet"><h2>Looking to catch up</h2>
@@ -455,7 +474,7 @@ export const page={
 
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
-          <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories from classmates</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
+          <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories featuring ${own?'you':e((details.displayName||row.name).split(/\s+/)[0])}</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
             ${received.length?memoryBatch(received):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
           </section>
           ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${memoryBatch(shared)}</section>`:''}
@@ -466,11 +485,11 @@ export const page={
       ${own?'':`<div class="profile-report">${report('profile',row.id)}</div>`}
     </div>`;
   },
-  editProfile(fields,member,checks=[]){
+  editProfile(fields,member,checks=[],profilePhotos={}){
     const required=['dorm','nickname','city','life','family'],optional=['company','education'];
     const missing=key=>!checks.find(item=>item.key===key)?.complete;
     const rows=keys=>keys.map(key=>`<div id="profile-field-${key}" class="${required.includes(key)&&missing(key)?'profile-required-missing':''}">${required.includes(key)?'<small>Required to unlock</small>':''}${profileControl(key,key,fields[key])}${required.includes(key)||optional.includes(key)?checkbox('hide_'+key,'Hide '+labelFor(key),fields[key]===''):''}</div>`).join('');
-    const photos=['then','now'].map(key=>`<div id="profile-field-${key}" class="${missing(key)?'profile-required-missing':''}"><h3>${key==='then'?'Then photo (2006)':'Now photo (2026)'}</h3><small>${missing(key)?'Required to unlock':'Photo added · choose a file to replace it'}</small><label>Choose photo<input type="file" name="${key}Photo" accept="image/jpeg,image/png"></label></div>`).join('');
+    const photos=['then','now'].map(key=>`<div id="profile-field-${key}" class="${missing(key)?'profile-required-missing':''}"><h3>${key==='then'?'Then photo (2006)':'Now photo (2026)'}</h3><small>${missing(key)?'Required to unlock':'Photo added · choose a file to replace it'}</small>${profilePhotos[key]?`<figure style="margin:.65rem 0"><a href="/media/${e(profilePhotos[key].media)}" target="_blank" rel="noopener" aria-label="View current ${key} photo"><img src="${mediaSrc(profilePhotos[key].media,480)}" alt="Your current ${key==='then'?'Then (2006)':'Now (2026)'} photo" loading="lazy" style="width:auto;max-width:100%;height:auto;max-height:18rem;aspect-ratio:auto;object-fit:contain"></a><figcaption>Current photo · tap to view full size</figcaption></figure>`:''}<label>${profilePhotos[key]?'Replace photo':'Choose photo'}<input type="file" name="${key}Photo" accept="image/jpeg,image/png"></label></div>`).join('');
     const more=Array.from(new Set(['country','section','professionalFocus',...Object.keys(fields)])).filter(key=>['country','section','professionalFocus','researchHighlight','interests','reunionStory','extra','prompt','printName'].includes(key));
     return `<p><a href="/people/${member.id}">Back to my profile</a></p><p>Complete the essentials to unlock memories, WhatsApp Insights and incoming catch-up names. Write a few sentences for the story questions so your batchmates can catch up with you. Highlighted items are still needed; you can save your progress at any time.</p>`+
       form('/profile',field('profile_form','all')+
