@@ -519,10 +519,6 @@ async function route(req, env, record, setViewer) {
     return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {
-  const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
-    + 2 * EXISTS(SELECT 1 FROM posts p WHERE ${aboutPerson('r.id')} AND p.author<>r.id AND ${postVisible}
-      AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id))
-    + (${portrait} IS NOT NULL))`;
     const reunion=path==='/reunion';
     const q = (u.searchParams.get('q')||'').trim().slice(0,100);
     const requestedStatus = u.searchParams.get('status');
@@ -549,16 +545,46 @@ async function route(req, env, record, setViewer) {
     }
     const section = (u.searchParams.get('section')||'').trim().slice(0,20);
     const catchup = reunion && ['confirmed','requested','incoming','outgoing','none'].includes(u.searchParams.get('catchup')) ? u.searchParams.get('catchup') : '';
-    const dorms = await all("SELECT DISTINCT dorm FROM roster WHERE trim(dorm)<>'' ORDER BY CAST(dorm AS INTEGER),dorm");
-    const sections = await all('SELECT DISTINCT section FROM roster_sections ORDER BY section');
-    const rows = await all(`SELECT r.id,r.name,r.dorm,r.nickname,rs.section,${portrait} AS portrait,
-      CASE WHEN coalesce(m.attendance_private,0)=0 THEN coalesce(rt.status,a.status) END AS status
-      FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
-      LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id ${seedJoin}
-      WHERE (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' Dorm '||coalesce(r.dorm,'')),lower(?))>0)
-      AND (?='' OR r.dorm=?) AND (?='' OR rs.section=?)
-      AND (?='' OR (coalesce(m.attendance_private,0)=0 AND CASE WHEN ? THEN rt.status ELSE coalesce(rt.status,a.status) END=?))
-      ORDER BY ${completeness} DESC,r.name`,+pilot,q,q,dorm,dorm,section,section,status,+reunion,status);
+    const fragment = u.searchParams.get('fragment')==='1';
+    // Classmates are paged (reunion attendees are a short list sorted by catch-up state in full).
+    const pageSize = reunion ? -1 : 30;
+    const [afterRank,afterId] = (u.searchParams.get('after')||'').split('-').map(Number);
+    const keyset = Number.isSafeInteger(afterRank) && Number.isSafeInteger(afterId) && afterId>0;
+    const [dorms,sections,matched] = await Promise.all([
+      fragment ? [] : all("SELECT DISTINCT dorm FROM roster WHERE trim(dorm)<>'' ORDER BY CAST(dorm AS INTEGER),dorm"),
+      fragment ? [] : all('SELECT DISTINCT section FROM roster_sections ORDER BY section'),
+      // Ranking: a published yearbook entry (2), memories by others about them (2), a portrait (1).
+      // The featured set is computed once per request instead of scanning posts for every classmate.
+      all(`WITH featured(target) AS MATERIALIZED (
+          SELECT CAST(p.subject AS TEXT) FROM posts p WHERE p.subject IS NOT NULL AND p.author<>p.subject AND ${postVisible}
+            AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+          UNION SELECT ma.target FROM memory_about ma JOIN posts p ON p.id=ma.post
+            WHERE ma.kind='person' AND CAST(p.author AS TEXT)<>ma.target AND ${postVisible}
+            AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+        ), matches AS MATERIALIZED (
+          SELECT r.id,r.name,r.dorm,r.nickname,rs.section,${portrait} AS portrait,
+            CASE WHEN coalesce(m.attendance_private,0)=0 THEN coalesce(rt.status,a.status) END AS status,
+            2*EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
+              + 2*EXISTS(SELECT 1 FROM featured f WHERE f.target=CAST(r.id AS TEXT)) AS score
+          FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
+          LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id ${seedJoin}
+          WHERE (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' Dorm '||coalesce(r.dorm,'')),lower(?))>0)
+          AND (?='' OR r.dorm=?) AND (?='' OR rs.section=?)
+          AND (?='' OR (coalesce(m.attendance_private,0)=0 AND CASE WHEN ? THEN rt.status ELSE coalesce(rt.status,a.status) END=?))
+        ), ranked AS (SELECT *,score+(portrait IS NOT NULL) AS rank,count(*) OVER () AS total FROM matches)
+        SELECT * FROM ranked WHERE ?=0 OR rank<? OR (rank=? AND (name>(SELECT name FROM roster WHERE id=?)
+          OR (name=(SELECT name FROM roster WHERE id=?) AND id>?)))
+        ORDER BY rank DESC,name,id LIMIT ?`,+pilot,q,q,dorm,dorm,section,section,status,+reunion,status,
+        +keyset,...(keyset?[afterRank,afterRank,afterId,afterId,afterId]:[0,0,0,0,0]),pageSize<0?-1:pageSize+1)
+    ]);
+    const total = matched[0]?.total ?? 0;
+    const more = pageSize>0 && matched.length>pageSize;
+    const rows = more ? matched.slice(0,pageSize) : matched;
+    const nextFilters = new URLSearchParams();
+    for (const [key,value] of Object.entries({q,status:requestedStatus&&status,dorm,section})) if (value) nextFilters.set(key,value);
+    if (more) nextFilters.set('after',rows.at(-1).rank+'-'+rows.at(-1).id);
+    const nextPage = more ? '/people?'+nextFilters : '';
+    if (fragment && !reunion) return json({html:page.directoryCards(rows,attendanceNames,false),next:nextPage});
     let attendees=rows;
     if(reunion){
       const [wishes,checks]=await Promise.all([
@@ -570,7 +596,7 @@ async function route(req, env, record, setViewer) {
     const returnFilters=new URLSearchParams();
     for(const [key,value] of Object.entries({q,dorm,section,catchup}))if(value)returnFilters.set(key,value);
     const reunionReturn='/reunion'+(returnFilters.size?'?'+returnFilters:'')+'#reunion-attendees';
-    const directory = page.directory(attendees,attendanceNames,q,status,dorms,dorm,reunion,sections,section,catchup,reunionReturn);
+    const directory = page.directory(attendees,attendanceNames,q,status,dorms,dorm,reunion,sections,section,catchup,reunionReturn,reunion?attendees.length:total,nextPage);
     if (!reunion) return show('Classmates',directory);
     const tracker = await one("SELECT * FROM reunion_tracker WHERE member=? AND status='attending'",me);
     const saved = tracker && await one('SELECT details FROM reunion_logistics WHERE member=?',me);

@@ -202,7 +202,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=21" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=22" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -380,18 +380,21 @@ export const page={
 
     </div>`;
   },
-  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section='',catchup='',next='/reunion#reunion-attendees'){
-    const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
+  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section='',catchup='',next='/reunion#reunion-attendees',total=rows.length,more=''){
     return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">
       ${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}
       ${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}
       ${select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}
       ${reunion?select('catchup','Catch up status',[['','Everyone attending'],['confirmed','Confirmed'],['requested','Requested · either direction'],['incoming','Awaiting your confirmation'],['outgoing','Awaiting their confirmation'],['none','No request']],catchup):''}<button>Search</button></form>
       ${reunion?'<p class="registry">Awaiting your confirmation first, then confirmed catch-ups, then requests you’ve sent.</p>':''}
-      ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>{
+      ${rows.length?`<p class="registry directory-count">${total} ${reunion?'attending':total===1?'classmate':'classmates'}</p><div class="directory-grid">${page.directoryCards(rows,statuses,reunion,next)}</div>${more?`<p class="directory-more"><a class="cta" href="${e(more)}" data-directory-more>Show more classmates</a></p>`:''}`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;
+  },
+  directoryCards(rows,statuses,reunion=false,next='/reunion#reunion-attendees'){
+    const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
+    return `${rows.map(row=>{
         const content=`<a class="directory-card" href="/people/${row.id}"><span style="display:block;position:relative">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}${reunion&&labels[row.catchup]?`<span style="position:absolute;bottom:.4rem;left:.35rem;right:.35rem;padding:.3rem .4rem;border-radius:.35rem;background:${row.catchup==='confirmed'?'#244e40':'#29221f'};color:#fff;font-size:.75rem;line-height:1.3;text-align:center;font-weight:600">${labels[row.catchup]}</span>`:''}</span><div>${classmate(row,row.section?['Section '+row.section]:[])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`;
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
-      }).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;
+      }).join('')}`;
   },
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
     const own = me === row.id;

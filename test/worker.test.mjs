@@ -1235,3 +1235,52 @@ test('pages share one content-versioned stylesheet instead of inlining the theme
  assert.match(light,/<html lang="en" data-theme="light"/);
  assert.match(text,/data-theme=dark|data-theme="dark"/);
 });
+
+// ---- Performance work: bounded, cheaper directory ----
+test('directory pages 30 classmates at a time in the original ranking with no gaps or duplicates',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');
+ const insertRoster=sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)');
+ for(let id=3;id<=75;id++)insertRoster.run(id,'Classmate '+String(id%9)+' '+id,String(id%5),'N'+id);
+ // Ranking inputs: yearbook entries, memories by others (subject or tagged), muted/hidden/self memories, portraits.
+ const post=sqlite.prepare('INSERT INTO posts(id,author,subject,body,created,hidden) VALUES(?,?,?,?,?,?)');
+ const about=sqlite.prepare("INSERT INTO memory_about VALUES(?,'person',?)");
+ for(let id=3;id<=75;id++){
+  if(id%4===0)sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(id,'{"moment":"x"}','[]');
+  if(id%3===0)post.run('s'+id,1,id,'About',id,0);
+  if(id%5===0){post.run('a'+id,2,null,'Tagged',id,0);about.run('a'+id,String(id));}
+  if(id%7===0){post.run('self'+id,id,id,'Own',id,0);about.run('self'+id,String(id));}
+  if(id%11===0)post.run('h'+id,1,id,'Hidden',id,1);
+  if(id%13===0){post.run('m'+id,1,id,'Muted',id,0);sqlite.prepare('INSERT INTO muted_subjects VALUES(?)').run('m'+id);}
+  if(id%6===0)sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(id,'nowPhotoObject','now'+id);
+ }
+ const featuredOld=sqlite.prepare(`SELECT EXISTS(SELECT 1 FROM posts p WHERE (p.subject=? OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)))
+   AND p.author<>? AND p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))
+   AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)) AS f`);
+ const cards=html=>[...html.matchAll(/class="directory-card" href="\/people\/(\d+)">([\s\S]*?)<\/a>/g)].map(match=>({id:Number(match[1]),portrait:!/class="initials"/.test(match[2])}));
+ const ids=html=>cards(html).map(card=>card.id);
+ let html=await body(await call('/people',ck));
+ assert.match(html,/<p class="registry directory-count">75 classmates<\/p>/);
+ const seen=cards(html);assert.equal(seen.length,30);
+ let next=html.match(/href="([^"]+)" data-directory-more/)?.[1].replaceAll('&amp;','&');
+ while(next){
+  const page=await (await call(next+'&fragment=1',ck)).json();
+  seen.push(...cards(page.html));next=page.next;
+ }
+ assert.equal(seen.length,75);assert.equal(new Set(seen.map(card=>card.id)).size,75);
+ // Same order as the original per-classmate ranking: yearbook 2, memories by others 2, portrait 1, then name.
+ const name=id=>sqlite.prepare('SELECT name FROM roster WHERE id=?').get(id).name;
+ const yearbook=new Set(sqlite.prepare("SELECT member FROM yearbook_public WHERE fields<>'{}' OR images<>'[]'").all().map(r=>r.member));
+ const expected=seen.map(card=>({...card,name:name(card.id),rank:2*yearbook.has(card.id)+2*featuredOld.get(BigInt(card.id),BigInt(card.id),BigInt(card.id)).f+card.portrait}))
+  .sort((a,b)=>b.rank-a.rank||(a.name<b.name?-1:a.name>b.name?1:a.id-b.id)).map(card=>card.id);
+ assert.deepEqual(seen.map(card=>card.id),expected);
+ assert.ok(new Set(expected.map(id=>featuredOld.get(BigInt(id),BigInt(id),BigInt(id)).f)).size===2,'ranking inputs vary');
+ // Filters carry into the next page; reunion attendees stay a single sorted list.
+ html=await body(await call('/people?dorm=1',ck));
+ assert.doesNotMatch(html,/data-directory-more/);
+ assert.ok(ids(html).every(id=>sqlite.prepare('SELECT dorm FROM roster WHERE id=?').get(id).dorm==='1'));
+ html=await body(await call('/people?q=Classmate',ck));
+ assert.match(html,/href="\/people\?q=Classmate&amp;after=\d+-\d+" data-directory-more/);
+ // Fragment requests skip filter lists and page chrome.
+ const fragment=await call('/people?after=0-1&fragment=1',ck);
+ assert.equal(fragment.headers.get('Content-Type'),'application/json');
+});

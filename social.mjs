@@ -18,6 +18,22 @@ export const socialScript = String.raw`
       }catch{const p=document.createElement('p');p.className='meet-hint';p.textContent='Search unavailable. Try again.';list.append(p);}
     },180);});
   }
+  // Classmates load 30 at a time; "Show more" appends the next page in place (a plain link without JS).
+  document.addEventListener('click',async event=>{
+    const more=event.target.closest('[data-directory-more]');if(!more)return;
+    event.preventDefault();if(more.dataset.loading)return;
+    more.dataset.loading='true';const label=more.textContent;more.textContent='Loading…';
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+    try{
+      const url=new URL(more.href,location.href);url.searchParams.set('fragment','1');
+      const response=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+      if(!response.ok||!response.headers.get('Content-Type')?.includes('application/json'))throw new Error();
+      const {html,next}=await response.json();
+      document.querySelector('.directory-grid')?.insertAdjacentHTML('beforeend',html);
+      if(next){more.href=next;more.textContent=label;}else more.closest('.directory-more')?.remove();
+    }catch{more.textContent='Couldn’t load more. Tap to try again.';}
+    finally{clearTimeout(timeout);delete more.dataset.loading;}
+  });
   // Completion links open and focus the exact required editor or photo control.
   const profile=document.querySelector('.alumni-profile');
   if(profile){
