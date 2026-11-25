@@ -1,6 +1,7 @@
 import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock } from './views.mjs';
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
+export { FaceContainer } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
