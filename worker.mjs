@@ -6,6 +6,9 @@ import { completedProfilesCTE } from './completion.mjs';
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
 const photoWidths = new Set(['96','256','480','768','1200']);
+// Sizes generated right after upload: memory cards and viewers, and profile portraits / Then-Now photos.
+const memoryWidths = ['480','1200'];
+const profileWidths = ['96','256','480'];
 const campusAssets = {
   'arches.webp':'image/webp', 'steps.webp':'image/webp', 'light.webp':'image/webp', 'logo.png':'image/png',
 };
@@ -45,7 +48,7 @@ export default {
         if(ctx) ctx.waitUntil(write);
         return write;
       };
-      let response = await route(request, env, record, member=>{viewer=member;});
+      let response = await route(request, env, record, member=>{viewer=member;}, ctx);
       if (env.PREVIEW_LABEL && response.headers.get('Content-Type')?.includes('text/html')) {
         const html=(await response.text()).replace(/<body\b[^>]*>/,tag=>tag+'<div role="note" style="padding:6px 12px;text-align:center;background:#e4c58b;color:#251b14;font:600 12px/1.4 sans-serif">Preview · live data</div>');
         response=new Response(html,{status:response.status,headers:response.headers});
@@ -75,7 +78,7 @@ export default {
   }
 };
 
-async function route(req, env, record, setViewer) {
+async function route(req, env, record, setViewer, ctx) {
   const u = new URL(req.url), path = u.pathname, post = req.method === 'POST';
   const db = env.DB;
   const sql = (query, ...args) => db.prepare(query).bind(...args);
@@ -89,7 +92,7 @@ async function route(req, env, record, setViewer) {
     const asset = path.slice('/campus/'.length);
     if (!Object.hasOwn(campusAssets,asset)) return missing();
     const width=u.searchParams.get('w');
-    if (photoWidths.has(width)) return servePhoto(env,{object_key:'campus-design-v1/'+asset,type:campusAssets[asset]},req,true);
+    if (photoWidths.has(width)) return servePhoto(env,{object_key:'campus-design-v1/'+asset,type:campusAssets[asset]},req,true,ctx);
     const object = await env.MEDIA.get('campus-design-v1/'+asset);
     if (!object) return missing();
     return new Response(object.body,{headers:{'Content-Type':campusAssets[asset],'Cache-Control':'public, max-age=86400'}});
@@ -404,7 +407,7 @@ async function route(req, env, record, setViewer) {
       WHERE y.member=? AND j.key=?`,Number(bits[1]),Number(bits[2]));
     else if (bits[0]==='legacy' && Number(bits[2])>0) row = await one(`SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
       WHERE p.id=? AND ${postVisible} ORDER BY ph.object_key LIMIT 1 OFFSET ?`,bits[1],Number(bits[2])-1);
-    return servePhoto(env,row,req);
+    return servePhoto(env,row,req,false,ctx);
   }
   async function feed(size, q='') {
     const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM uploads up WHERE up.post=p.id)
@@ -677,6 +680,7 @@ async function route(req, env, record, setViewer) {
       await env.MEDIA.put(key,photo.bytes,{httpMetadata:{contentType:photo.type}});
       try { await run('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,inline,key); }
       catch (error) { await env.MEDIA.delete(key); throw error; }
+      warmVariants(env,ctx,key,photo.type,profileWidths);
       if (original?.value) await Promise.allSettled([env.MEDIA.delete(original.value)]);
       return saved();
     }
@@ -725,6 +729,7 @@ async function route(req, env, record, setViewer) {
       await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));
       throw error;
     }
+    for (const upload of uploads) warmVariants(env,ctx,upload.key,upload.photo.type,profileWidths);
     await Promise.allSettled(originals.filter(row=>uploads.some(upload=>upload.field===row.field)&&row.value).map(row=>env.MEDIA.delete(row.value)));
     return saved();
   }
@@ -768,6 +773,7 @@ async function route(req, env, record, setViewer) {
       if (!inserted) await env.MEDIA.delete(object);
     }
     if (!inserted && !await one('SELECT 1 FROM uploads WHERE id=? AND owner=? AND post IS NULL',photoId,me)) return missing();
+    if (inserted) warmVariants(env,ctx,object,clean.type,memoryWidths);
     return json({id:photoId});
   }
   if (path==='/compose') {
@@ -836,6 +842,7 @@ async function route(req, env, record, setViewer) {
         jobs.push(sql('INSERT INTO memory_albums VALUES(?,?,?,?)',key,title,order.includes(cover)?cover:order[0],JSON.stringify(order)));
       }
       await db.batch(jobs);
+      for (const object of uploaded) warmVariants(env,ctx,object,'image/jpeg',memoryWidths);
       uploaded.length=0;
       return success();
     } finally {
@@ -1122,36 +1129,81 @@ function joinBytes(parts) {
   return joined;
 }
 
-async function servePhoto(env,row,req,isPublic=false) {
-  if (!row?.object_key) return missing();
-  const width=new URL(req.url).searchParams.get('w');
-  const variantKey=photoWidths.has(width)?`variants/webp-v1/${width}/${row.object_key}`:null;
-  const cached=variantKey && await env.MEDIA.get(variantKey);
-  if (cached) return photoResponse(cached,'image/webp',req,isPublic);
-
-  const object=await env.MEDIA.get(row.object_key);
-  if (!object) return missing();
-  const type=row.type || object.httpMetadata?.contentType || ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif'})[row.object_key.split('.').pop().toLowerCase()];
-  if (!['image/jpeg','image/png','image/webp','image/gif','image/avif'].includes(type)) return missing();
-
-  if (variantKey && env.IMAGES && type!=='image/gif') {
+// Variant generation shared by concurrent requests in this isolate, keyed by variant object key.
+const variantWork = new Map();
+// Work that must finish but need not delay the response: deferred with waitUntil when available.
+function afterResponse(ctx,work) {
+  if (ctx?.waitUntil) { ctx.waitUntil(work); return Promise.resolve(); }
+  return work;
+}
+// Transform one original into a WebP variant and store it. A variant that would not be smaller than
+// the original is remembered with an empty marker object, so it is never attempted again.
+function makeVariant(env,ctx,variantKey,original,width) {
+  let work = variantWork.get(variantKey);
+  if (work) { original?.body?.cancel?.().catch(()=>{}); return work; }
+  work = (async () => {
+    let store = null, bytes = null;
     try {
-      const result=await env.IMAGES.input(object.body).transform({
-        width:Number(width),height:Number(width)*2,fit:'scale-down'
-      }).output({format:'image/webp',quality:80});
-      const bytes=await result.response().arrayBuffer();
-      if (bytes.byteLength<object.size) {
-        const saved=await env.MEDIA.put(variantKey,bytes,{httpMetadata:{contentType:'image/webp'}}).catch(()=>null);
-        return photoResponse({body:bytes,httpEtag:saved?.httpEtag},'image/webp',req,isPublic);
-      }
+      const result = await env.IMAGES.input(original.body).transform({width:Number(width),height:Number(width)*2,fit:'scale-down'})
+        .output({format:'image/webp',quality:80});
+      const output = await result.response().arrayBuffer();
+      if (output.byteLength<original.size) {
+        bytes = output;
+        store = env.MEDIA.put(variantKey,output,{httpMetadata:{contentType:'image/webp'}});
+      } else store = env.MEDIA.put(variantKey,new Uint8Array(0),{customMetadata:{original:'1'}});
     } catch (error) {
       if (env.DIAGNOSTICS==='true') console.error('Image resize:',error.message);
     }
-    const original=await env.MEDIA.get(row.object_key);
-    if (!original) return missing();
-    return photoResponse(original,type,req,isPublic);
+    await afterResponse(ctx,(store||Promise.resolve()).catch(()=>null).finally(()=>variantWork.delete(variantKey)));
+    return bytes;
+  })();
+  variantWork.set(variantKey,work);
+  return work;
+}
+// Generate the sizes a new photo is shown at, after the upload response has been sent.
+function warmVariants(env,ctx,objectKey,type,widths) {
+  if (!env.IMAGES || !ctx?.waitUntil || type==='image/gif') return;
+  ctx.waitUntil((async () => {
+    for (const width of widths) {
+      const variantKey=`variants/webp-v1/${width}/${objectKey}`;
+      if (variantWork.has(variantKey) || await env.MEDIA.head?.(variantKey)) continue;
+      const original=await env.MEDIA.get(objectKey);
+      if (!original) return;
+      await makeVariant(env,ctx,variantKey,original,width);
+    }
+  })().catch(()=>{}));
+}
+
+async function servePhoto(env,row,req,isPublic=false,ctx=null) {
+  if (!row?.object_key) return missing();
+  const width=new URL(req.url).searchParams.get('w');
+  const variantKey=photoWidths.has(width)?`variants/webp-v1/${width}/${row.object_key}`:null;
+  const serveOriginal = async () => {
+    const object=await env.MEDIA.get(row.object_key);
+    if (!object) return missing();
+    const type=row.type || object.httpMetadata?.contentType || ({jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif'})[row.object_key.split('.').pop().toLowerCase()];
+    if (!['image/jpeg','image/png','image/webp','image/gif','image/avif'].includes(type)) { object.body?.cancel?.().catch(()=>{}); return missing(); }
+    return {object,type};
+  };
+  if (variantKey) {
+    const cached=await env.MEDIA.get(variantKey);
+    // An empty variant is the "not smaller than the original" marker.
+    const marker=cached && (cached.customMetadata?.original==='1' || cached.size===0);
+    if (cached && !marker) return photoResponse(cached,'image/webp',req,isPublic);
+    cached?.body?.cancel?.().catch(()=>{});
+    const pending=!cached && variantWork.get(variantKey);
+    if (pending) { const bytes=await pending; if (bytes) return photoResponse({body:bytes.slice(0)},'image/webp',req,isPublic); }
+    else if (!cached && env.IMAGES) {
+      const original=await serveOriginal();
+      if (original instanceof Response) return original;
+      if (original.type==='image/gif') return photoResponse(original.object,original.type,req,isPublic);
+      const bytes=await makeVariant(env,ctx,variantKey,original.object,width);
+      if (bytes) return photoResponse({body:bytes.slice(0)},'image/webp',req,isPublic);
+    }
   }
-  return photoResponse(object,type,req,isPublic);
+  const original=await serveOriginal();
+  if (original instanceof Response) return original;
+  return photoResponse(original.object,original.type,req,isPublic);
 }
 
 function photoResponse(object,type,req,isPublic) {

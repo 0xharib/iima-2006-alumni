@@ -1317,3 +1317,73 @@ test('memory card tag labels match the original per-roster rule',async()=>{
  assert.deepEqual(after,before);
  assert.ok(before.filter(row=>row.includes('/people/')).length>30&&before.filter(row=>row.includes('/topics/')).length>20,'links are exercised');
 });
+
+// ---- Performance work (P2): photo variants ----
+function photoFixture(){
+ const fx=fixture();
+ // Keep R2-style metadata and sizes, which the shared in-memory store does not model.
+ const get=fx.env.MEDIA.get,put=fx.env.MEDIA.put,meta=new Map();
+ fx.env.MEDIA.put=async(key,bytes,options={})=>{meta.set(key,options);return put(key,bytes instanceof ArrayBuffer?new Uint8Array(bytes):bytes);};
+ fx.env.MEDIA.get=async key=>{const object=await get(key);if(!object)return null;const options=meta.get(key)||{};
+  return {...object,size:object.body.byteLength,customMetadata:options.customMetadata||{},httpMetadata:options.httpMetadata||object.httpMetadata};};
+ const background=[];fx.ctx={waitUntil:promise=>background.push(promise)};fx.background=background;
+ fx.fetch=(path,cookie,init={})=>worker.fetch(new Request('https://test.example'+path,{...init,headers:{Cookie:cookie,Origin:'https://test.example',...(init.headers||{})}}),fx.env,fx.ctx);
+ return fx;
+}
+test('photo variants are returned before they are stored and generated once per size',async()=>{
+ const {session,sqlite,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','original.jpg')");
+ await env.MEDIA.put('original.jpg',new Uint8Array(100));
+ let transforms=0,release;const gate=new Promise(resolve=>{release=resolve;});
+ env.IMAGES={input:()=>({transform(){transforms++;return {async output(){await gate;return {response:()=>new Response(new Uint8Array(12))};}};}})};
+ const put=env.MEDIA.put;let storeRelease;const storeGate=new Promise(resolve=>{storeRelease=resolve;});
+ env.MEDIA.put=async(key,bytes,options)=>{if(key.startsWith('variants/'))await storeGate;return put(key,bytes,options);};
+ // Two viewers ask for the same new size at once: one transformation serves both.
+ const first=fetch('/media/portrait/2?w=256',ck),second=fetch('/media/portrait/2?w=256',ck);
+ release();
+ const responses=await Promise.all([first,second]);
+ assert.equal(transforms,1);
+ for(const response of responses){assert.equal(response.headers.get('content-type'),'image/webp');assert.equal((await response.arrayBuffer()).byteLength,12);}
+ // The responses did not wait for storage; the write finishes in the background.
+ assert.ok(background.length>=1);
+ storeRelease();await Promise.all(background);
+ assert.equal((await env.MEDIA.get('variants/webp-v1/256/original.jpg')).size,12);
+ const cached=await fetch('/media/portrait/2?w=256',ck);
+ assert.equal((await cached.arrayBuffer()).byteLength,12);assert.equal(transforms,1);
+ // Authorization still applies.
+ assert.equal((await worker.fetch(new Request('https://test.example/media/portrait/2?w=256'),env)).status,303);
+});
+
+test('a size that would not be smaller than the original is never re-attempted',async()=>{
+ const {session,sqlite,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','tiny.png')");
+ await env.MEDIA.put('tiny.png',new Uint8Array(10),{httpMetadata:{contentType:'image/png'}});
+ let transforms=0;
+ env.IMAGES={input:()=>({transform(){transforms++;return {async output(){return {response:()=>new Response(new Uint8Array(40))};}};}})};
+ for(let i=0;i<3;i++){
+  const response=await fetch('/media/portrait/2?w=480',ck);
+  assert.equal(response.headers.get('content-type'),'image/png');
+  assert.equal((await response.arrayBuffer()).byteLength,10);
+  await Promise.all(background);
+ }
+ assert.equal(transforms,1);
+});
+
+test('uploads generate their display sizes after the response',async()=>{
+ const {session,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ const widths=[];
+ env.IMAGES={input:()=>({transform(options){widths.push(options.width);return {async output(){return {response:()=>new Response(new Uint8Array(4))};}};}})};
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xdb,0,4,0,0,0xff,0xda,0,2,1,0xff,0xd9]);
+ const form=new FormData();form.set('photo',new File([jpeg],'a.jpg',{type:'image/jpeg'}));
+ const id='22222222-2222-4222-8222-222222222222';
+ const response=await fetch('/compose/photo?id='+id,ck,{method:'POST',body:form});
+ assert.equal(response.status,200);
+ assert.deepEqual(widths,[],'nothing is generated before the response');
+ await Promise.all(background);await Promise.all(background);
+ assert.deepEqual(widths.sort((a,b)=>a-b),[480,1200]);
+ const profile=new FormData();profile.set('profile_form','all');profile.set('nowPhoto',new File([jpeg],'n.jpg',{type:'image/jpeg'}));
+ widths.length=0;
+ assert.equal((await fetch('/profile',ck,{method:'POST',body:profile})).status,303);
+ await Promise.all(background);await Promise.all(background);
+ assert.deepEqual(widths.sort((a,b)=>a-b),[96,256,480]);
+});
