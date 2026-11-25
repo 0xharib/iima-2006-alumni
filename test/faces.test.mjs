@@ -102,3 +102,121 @@ test('analyseImage uses FACE_SERVICE_URL for local development', async()=>{
 });
 import * as workerModule from '../worker.mjs';
 test('the Worker entry exports the container class', ()=>{ assert.equal(workerModule.FaceContainer,FaceContainer); });
+
+import { scanPhoto, handleQueue } from '../faces.mjs';
+
+function faceWorld(mode='on'){
+  const fx=fixture(); const {sqlite,env,objects}=fx;
+  sqlite.exec(`INSERT INTO roster VALUES(3,'Third Person','D3','TP'),(4,'Fourth Person','D4','FP')`);
+  env.FACE_TAGGING=mode;
+  fx.photoFaces={}; fx.serviceDown=false;
+  // The fake service reads the photo's first byte and returns one unit vector per listed dimension.
+  env.FACES={idFromName:n=>n,get:()=>({fetch:async(url,init)=>{
+    if(fx.serviceDown) return new Response('down',{status:503});
+    const dims=fx.photoFaces[new Uint8Array(init.body)[0]]||[];
+    return Response.json({model:'buffalo_l/w600k_r50',width:100,height:100,faces:dims.map((d,i)=>({box:[i*50,0,i*50+40,40],score:0.9,size:40,
+      embedding:Buffer.from(vectorBytes(unitVec(d))).toString('base64')}))});
+  }})};
+  fx.consent=(member,dim,recognise=1)=>{
+    sqlite.prepare('INSERT OR REPLACE INTO face_prefs VALUES(?,?,1)').run(member,recognise);
+    sqlite.prepare("INSERT OR REPLACE INTO face_refs VALUES(?,'portrait','k',?,'buffalo_l/w600k_r50')").run(member,vectorBytes(unitVec(dim)));
+  };
+  fx.photo=(post,id,byte,author=1)=>{
+    if(!sqlite.prepare('SELECT 1 FROM posts WHERE id=?').get(post)) sqlite.prepare('INSERT INTO posts(id,author,body,created) VALUES(?,?,?,?)').run(post,author,'x',1);
+    objects.set('social/'+id,new Uint8Array([byte]));
+    sqlite.prepare('INSERT INTO uploads VALUES(?,?,?,?,?,?,?,?)').run(id,author,'social/'+id,'image/jpeg','h'+id,'',post,1);
+    return 'post/'+id;
+  };
+  return fx;
+}
+const message=body=>{const m={body,attempts:1,acked:0,retried:null,ack(){m.acked++;},retry(o){m.retried=o;}};return m;};
+
+test('on mode tags a consenting member and records the match', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0,9];
+  const out=await scanPhoto(w.env,'p1',m);
+  assert.deepEqual(out,{faces:2,tagged:[2]});
+  assert.deepEqual(w.sqlite.prepare("SELECT media,kind,target,origin FROM photo_tags").all().map(r=>({...r})),[{media:m,kind:'person',target:'2',origin:'auto'}]);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=? AND member=2").get(m).state,'auto');
+  assert.equal(w.sqlite.prepare("SELECT status,faces FROM face_scans WHERE media=?").get(m).faces,2);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM faces WHERE media=?").get(m).n,2);
+});
+test('shadow mode records matches but tags and notifies nobody', async()=>{
+  const w=faceWorld('shadow'); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',m);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=?").get(m).state,'shadow');
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags").get().n,0);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications").get().n,0);
+});
+test('off mode does nothing', async()=>{
+  const w=faceWorld('off'); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  assert.deepEqual(await scanPhoto(w.env,'p1',m),{faces:0,tagged:[]});
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM face_scans").get().n,0);
+});
+test('non-consenting members are never matched', async()=>{
+  const w=faceWorld(); w.consent(4,0,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  assert.deepEqual((await scanPhoto(w.env,'p1',m)).tagged,[]);
+});
+test('one notification per person per memory', async()=>{
+  const w=faceWorld(); w.consent(2,0);
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
+  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p1',b);  // separate jobs; the in-memory fixture cannot nest transactions
+  const rows=w.sqlite.prepare("SELECT actor,kind,post,event_key FROM notifications WHERE recipient=2").all().map(r=>({...r}));
+  assert.deepEqual(rows,[{actor:1,kind:'mention',post:'p1',event_key:'found:p1'}]);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2'").get().n,2);
+});
+test('uploader is tagged without notifying themselves', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1,2); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',m);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2'").get().n,1);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,0);
+});
+test('Not me is respected on rescan', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,2,'p1',NULL,0.9,'removed',1)").run(m);
+  assert.deepEqual((await scanPhoto(w.env,'p1',m)).tagged,[]);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=?").get(m).state,'removed');
+});
+test('a member already tagged by hand is not tagged again', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target) VALUES('p1',?,'person','2')").run(m);
+  assert.deepEqual((await scanPhoto(w.env,'p1',m)).tagged,[]);
+  assert.equal(w.sqlite.prepare("SELECT origin FROM photo_tags").get().origin,'manual');
+});
+test('media job retries when the face service fails', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.serviceDown=true;
+  const msg=message({type:'media',post:'p1',media:m});
+  await handleQueue({messages:[msg]},w.env);
+  assert.equal(msg.acked,0); assert.deepEqual(msg.retried,{delaySeconds:30});
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM faces").get().n,0);
+  w.serviceDown=false; const ok=message({type:'media',post:'p1',media:m});
+  await handleQueue({messages:[ok]},w.env); assert.equal(ok.acked,1);
+});
+test('a job that keeps failing is recorded as a failed scan', async()=>{
+  const w=faceWorld(); const m=w.photo('p1','u1',1); w.serviceDown=true;
+  const msg=message({type:'media',post:'p1',media:m}); msg.attempts=5;
+  await handleQueue({messages:[msg]},w.env);
+  assert.equal(w.sqlite.prepare("SELECT status FROM face_scans WHERE media=?").get(m).status,'failed');
+});
+test('posting queues each photo and never fails because of the queue', async()=>{
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
+  for (const queue of [undefined,{sendBatch:async()=>{throw new Error('queue down');}},'record']) {
+    const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
+    if(queue==='record') w.env.FACE_JOBS={sendBatch:async msgs=>{sent.push(...msgs);}}; else if(queue) w.env.FACE_JOBS=queue;
+    const f=new FormData(); const key=crypto.randomUUID(); f.set('id',key); f.set('body','Hello');
+    f.append('images',new File([png],'a.png',{type:'image/png'}));
+    const res=await w.call('/compose',ck,f);
+    assert.equal(res.status,303,await res.text());
+    if(queue==='record'){
+      assert.equal(sent.length,1); assert.equal(sent[0].body.type,'media'); assert.equal(sent[0].body.post,key);
+      assert.match(sent[0].body.media,/^post\/[0-9a-f-]{36}$/);
+    }
+  }
+});
+test('hiding a post removes its faces', async()=>{
+  const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',m);
+  const ck=await w.session(1,'aaaa');
+  assert.equal((await w.call('/posts/p1',ck,{action:'delete'})).status,303);
+  for (const t of ['faces','face_scans','face_matches']) assert.equal(w.sqlite.prepare(`SELECT count(*) n FROM ${t}`).get().n,0,t);
+  assert.deepEqual(await scanPhoto(w.env,'p1',m),{faces:0,tagged:[]});
+});

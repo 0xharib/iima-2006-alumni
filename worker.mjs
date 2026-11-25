@@ -2,6 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
+import { enqueuePhotos, forgetPostFaces, handleQueue } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -35,6 +36,7 @@ function photosForTags(links) {
 }
 
 export default {
+  queue: (batch, env) => handleQueue(batch, env),
   async fetch(request, env, ctx) {
     try {
       const path=new URL(request.url).pathname;
@@ -674,6 +676,7 @@ async function route(req, env, record, setViewer) {
       }
       await db.batch(jobs);
       uploaded.length=0;
+      await enqueuePhotos(env,key,order.map(photo=>'post/'+photo));
       return success();
     } finally {
       await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));
@@ -746,7 +749,7 @@ async function route(req, env, record, setViewer) {
     } else if (action==='unassociate' && item.is_about_me) {
       await run("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,String(me));
     } else if (action==='delete' && item.author===me) {
-      await run('UPDATE posts SET hidden=1 WHERE id=?',key);
+      await db.batch([sql('UPDATE posts SET hidden=1 WHERE id=?',key),...forgetPostFaces(db,key)]);
       return redirect('/');
     } else if (action==='edit' && item.author===me) {
       const body = str(f,'body');
@@ -907,7 +910,7 @@ async function route(req, env, record, setViewer) {
       return redirect(path);
     }
     if (!update || !reason) return invalid('Choose an action and provide a reason.');
-    await db.batch([update,sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
+    await db.batch([update,...(action==='hide-post'?forgetPostFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
     return redirect(path);
   }
   return missing();
