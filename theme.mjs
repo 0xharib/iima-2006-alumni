@@ -970,4 +970,7 @@ label,.profile-facts dt,.profile-entry dt{font-weight:600}
 .collage-card button[data-comment-again]:hover{background:transparent;color:var(--brick-deep);text-decoration:underline;text-underline-offset:.2em}
 .collage-card button[data-comment-again]:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}
 .collage-card button[data-comment-again][hidden]{display:none}
+.profile-save-status{margin:.6rem 0 0;font:500 .95rem/1.5 var(--sans)}
+.profile-save-status.is-saved{color:var(--ink,inherit)}
+.profile-save-status.is-error{color:var(--brick)}
 `;

@@ -165,6 +165,27 @@ export function reunionCatchups(rows,wishes,me,unlocked,filter='') {
     .sort((a,b)=>rank[a.catchup]-rank[b.catchup]||a.name.localeCompare(b.name));
 }
 
+// Shared site styles: one static stylesheet served from a content-versioned URL and cached for a year.
+// Pages link to it instead of inlining ~80 KB of CSS in every private, uncacheable HTML response.
+export const siteCSS = `
+  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+  ${fontFaces}
+  ${theme}
+  .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
+  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
+  .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
+  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
+  .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
+  @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
+  ${mobileNavCSS}
+  `;
+// FNV-1a over the stylesheet: any style change produces a new URL, so immutable caching is safe.
+export const siteCSSVersion = (() => {
+  let a=0x811c9dc5,b=0x01000193^0x5bd1e995;
+  for (let i=0;i<siteCSS.length;i++){const c=siteCSS.charCodeAt(i);a=Math.imul(a^c,0x01000193)>>>0;b=Math.imul(b^c,0x5bd1e995)>>>0;}
+  return a.toString(36)+b.toString(36);
+})();
+export const siteStylesheet = '/styles/site-'+siteCSSVersion+'.css';
 export function render(title,body,member,{home=false,active=null}={}) {
   const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications',WhatsApp:'/wa/','WhatsApp Insights':'/wa/','Edit profile':'/people'};
   const current = active || (title===reunionTitle ? '/' : sectionOf[title]);
@@ -181,18 +202,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
-  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
-  ${fontFaces}
-  ${theme}
-  .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
-  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
-  .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
-  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
-  .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
-  @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  ${mobileNavCSS}
-  </style><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=20" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=23" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -255,10 +265,13 @@ export function memoriesCompletionPrompt(content,checks,me) {
 export const page={
   socialScript,
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
-    box.addEventListener('input',async()=>{const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
-    try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
+    let timer=0, pending=null;
+    // Debounce typing and cancel the previous lookup; a stale answer never replaces a newer one.
+    box.addEventListener('input',()=>{clearTimeout(timer); pending?.abort(); const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
+    timer=setTimeout(async()=>{ const controller=pending=new AbortController(); const deadline=setTimeout(()=>controller.abort(),8000);
+    try { const response=await fetch('/names?q='+encodeURIComponent(q),{signal:controller.signal}); const names=await response.json(); if(request!==revision)return;
     for(const item of names){ const li=document.createElement('li'), a=document.createElement('a'); a.textContent=item.name; a.href='/signin?id='+item.id+'&next='+encodeURIComponent(box.dataset.next); li.append(a); results.append(li); }
-    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; }});
+    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; } finally { clearTimeout(deadline); } },180);});
     document.addEventListener('submit',async event=>{
       const form=event.target;
       if (form.getAttribute('action')!=='/request-link') return;
@@ -370,18 +383,21 @@ export const page={
 
     </div>`;
   },
-  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section='',catchup='',next='/reunion#reunion-attendees'){
-    const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
+  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section='',catchup='',next='/reunion#reunion-attendees',total=rows.length,more=''){
     return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">
       ${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}
       ${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}
       ${select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}
       ${reunion?select('catchup','Catch up status',[['','Everyone attending'],['confirmed','Confirmed'],['requested','Requested · either direction'],['incoming','Awaiting your confirmation'],['outgoing','Awaiting their confirmation'],['none','No request']],catchup):''}<button>Search</button></form>
       ${reunion?'<p class="registry">Awaiting your confirmation first, then confirmed catch-ups, then requests you’ve sent.</p>':''}
-      ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>{
+      ${rows.length?`<p class="registry directory-count">${total} ${reunion?'attending':total===1?'classmate':'classmates'}</p><div class="directory-grid">${page.directoryCards(rows,statuses,reunion,next)}</div>${more?`<p class="directory-more"><a class="cta" href="${e(more)}" data-directory-more>Show more classmates</a></p>`:''}`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;
+  },
+  directoryCards(rows,statuses,reunion=false,next='/reunion#reunion-attendees'){
+    const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
+    return `${rows.map(row=>{
         const content=`<a class="directory-card" href="/people/${row.id}"><span style="display:block;position:relative">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}${reunion&&labels[row.catchup]?`<span style="position:absolute;bottom:.4rem;left:.35rem;right:.35rem;padding:.3rem .4rem;border-radius:.35rem;background:${row.catchup==='confirmed'?'#244e40':'#29221f'};color:#fff;font-size:.75rem;line-height:1.3;text-align:center;font-weight:600">${labels[row.catchup]}</span>`:''}</span><div>${classmate(row,row.section?['Section '+row.section]:[])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`;
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
-      }).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;
+      }).join('')}`;
   },
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
     const own = me === row.id;
@@ -503,7 +519,7 @@ export const page={
       <h3>Profile picture</h3><label>Choose photo<input type="file" name="portraitPhoto" accept="image/jpeg,image/png"></label>
       ${select('attendance','Reunion attendance',[['unknown','Choose an option'],['attending','Attending'],['declined','Not attending']],fields.attendance||'unknown')}
       ${rows(more)}${checkbox('attendance_private','Hide my attendance status',!!member.attendance_private)}</details>
-      <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data"');
+      <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data" data-profile-form');
   },
   images,
   topics(rows,q){return `<form method="get">${input('q','Find a memory topic',q)}<button>Search</button></form><p>${link('/compose','Create a topic and add a memory')}</p>`+list(rows.map(r=>link('/topics/'+r.id,r.title)+' '+badge(r.kind)),'No topics yet.');},
@@ -528,7 +544,7 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos);
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos);
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}

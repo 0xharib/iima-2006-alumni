@@ -998,3 +998,289 @@ test('reunion details collapse when complete and stay open when incomplete or ju
  html=await body(await call('/reunion?saved=1',ck));assert.match(html,/<details class="reunion-details-panel" open>/);
  assert.match(html,/srcset="[^"]*w=480/);
 });
+
+// ---- Performance work: per-member completion summary (migration 0018) ----
+import { completedProfilesCTE } from '../completion.mjs';
+function completionOracle(sqlite){
+ const out={};
+ for(const pilot of [0,1])for(const row of sqlite.prepare(`${completedProfilesCTE} SELECT id,city,life FROM completed_profiles`).all(pilot))
+  (out[row.id] ||= {})[pilot?'pilot':'public']={city:row.city,life:row.life};
+ return out;
+}
+function summaryState(sqlite){
+ const out={};
+ for(const row of sqlite.prepare('SELECT * FROM profile_completion_state').all()){
+  if(row.complete_public)(out[row.member] ||= {}).public={city:row.city_public,life:row.life_public};
+  if(row.complete_pilot)(out[row.member] ||= {}).pilot={city:row.city_pilot,life:row.life_pilot};
+ }
+ return out;
+}
+
+test('completion summary matches the full-roster rule through overrides, deletes, enrichment and photos',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO roster VALUES(3,'Third','D3','Three'),(4,'Fourth','D4','Four'),(5,'Fifth','','Five');
+  INSERT INTO profile_seeds VALUES(3,'{"Life, Lately draft":"Seed life 3","Tracker city":"Seed city 3"}','approved',NULL);
+  INSERT INTO profile_seeds VALUES(4,'{"Life, Lately draft":"Seed life 4","Tracker city":"Seed city 4"}','pending',NULL);
+  INSERT INTO submissions VALUES('self-3',3,3,'self','{}','2026-01-01'),('self-4',4,4,'self','{}','2026-01-01');`);
+ let seed=7;const rand=n=>Math.floor((seed=(seed*48271)%2147483647)/2147483647*n);
+ const fields=['dorm','nickname','city','life','family','thenPhotoObject','nowPhotoObject','company','portraitObject'];
+ const values=['','  ','Value','Another value'];
+ const fill=m=>{for(const key of ['city','life','family','thenPhotoObject','nowPhotoObject'])
+  if(rand(4))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,key,'Filled '+key);
+  else sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,key);};
+ // Relies on enrichment for city and Life, Lately, so approved and pending seeds differ.
+ const fillFromSeed=m=>{fill(m);sqlite.prepare("DELETE FROM profile_fields WHERE member=? AND field IN ('city','life')").run(m);
+  sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m);};
+ const operations=[fill,fill,fillFromSeed,fillFromSeed,
+  m=>sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('INSERT INTO profile_fields VALUES(?,?,?) ON CONFLICT(member,field) DO UPDATE SET value=excluded.value').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,fields[rand(fields.length)]),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(m,JSON.stringify({city:'Yearbook city',life:'Yearbook life',family:rand(2)?'Yearbook family':''}),
+    JSON.stringify(rand(2)?[{submission:'self-'+m,key:'legacy-'+m+'.jpg'}]:[])),
+  m=>sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m),
+  m=>sqlite.prepare('UPDATE profile_seeds SET review_status=? WHERE roster_id=?').run(['approved','pending','rejected'][rand(3)],m),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO photos VALUES(?,?,?,?)').run('self-'+m,'legacy-'+m+'.jpg',['then','now','other'][rand(3)],''),
+  m=>sqlite.prepare('DELETE FROM photos WHERE submission=?').run('self-'+m),
+  m=>sqlite.prepare('UPDATE roster SET dorm=? WHERE id=?').run(values[rand(values.length)],m),
+ ];
+ let completeSteps=0,pilotOnlySteps=0;
+ for(let step=0;step<600;step++){
+  operations[rand(operations.length)](1+rand(5));
+  const state=summaryState(sqlite);
+  assert.deepEqual(state,completionOracle(sqlite),'mismatch after step '+step);
+  if(Object.values(state).some(item=>item.public))completeSteps++;
+  if(Object.values(state).some(item=>item.pilot&&!item.public))pilotOnlySteps++;
+ }
+ // The random walk must actually reach complete and pilot-only states for the comparison to mean anything.
+ assert.ok(completeSteps>50,'complete states reached: '+completeSteps);
+ assert.ok(pilotOnlySteps>10,'pilot-only states reached: '+pilotOnlySteps);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_refresh').get().n,0);
+});
+
+test('completion summary keeps first completion through replacement writes and incomplete cycles',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'city','Pune'),(2,'life','Life'),(2,'family','Family'),(2,'thenPhotoObject','t.jpg')`);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion WHERE member=2').get().n,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'nowPhotoObject','n.jpg')`);
+ const first=sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get();
+ assert.ok(first.completed_at>0);assert.equal(first.basis,'recorded');
+ sqlite.exec(`UPDATE profile_completion SET completed_at=1000 WHERE member=2`);
+ // Owner edits, blank overrides and recompletion never move or replace the first record.
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Bangalore')`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','')`);
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=2').get().complete_public,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','Family again')`);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get()},{completed_at:1000,basis:'recorded'});
+ assert.equal(sqlite.prepare("SELECT city_public FROM profile_completion_state WHERE member=2").get().city_public,'Bangalore');
+});
+
+test('edits unrelated to completion do no completion work',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`UPDATE profile_completion_state SET refreshed_at=1 WHERE member=2`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'company','Acme'),(2,'portraitObject','p.jpg'),(2,'education','School')`);
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'company','Other') ON CONFLICT(member,field) DO UPDATE SET value=excluded.value`);
+ sqlite.exec(`DELETE FROM profile_fields WHERE member=2 AND field='company'`);
+ sqlite.exec(`UPDATE roster SET name='Renamed' WHERE id=2`);
+ assert.equal(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at,1);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Chennai')`);
+ assert.ok(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at>1);
+});
+
+test('summary backfill is rerunnable and never labels older profiles as newly completed',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"Older life","family":"Family"}','[]');
+  INSERT INTO profile_fields VALUES(1,'thenPhotoObject','t.jpg'),(1,'nowPhotoObject','n.jpg');
+  UPDATE profile_completion SET completed_at=NULL,basis='baseline' WHERE member=1;
+  DELETE FROM profile_completion_state;`);
+ // Simulate a profile that is complete but has no history row (for example, completed before 0017).
+ sqlite.exec(`DELETE FROM profile_completion WHERE member=1`);
+ const migration=readFileSync(new URL('../migrations/0018_completion_summary.sql',import.meta.url),'utf8');
+ sqlite.exec(migration);sqlite.exec(migration);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=1').get()},{completed_at:null,basis:'baseline'});
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=1').get().complete_public,1);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_state').get().n,2);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'completion_%' AND name NOT LIKE 'completion_summary_%'").get().n,0);
+});
+
+test('Home fresh-profile query reads the summary, not the roster’s profile sources',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ await body(await call('/',ck));
+ const fresh=seen.find(query=>query.includes('profile_completion_state'));
+ assert.ok(fresh,'Home uses the completion summary');
+ assert.ok(!seen.some(query=>query.includes('ranked_profile')),'Home does not rank every member’s fields');
+ const plan=sqlite.prepare('EXPLAIN QUERY PLAN '+fresh).all(0).map(row=>row.detail).join('\n');
+ assert.doesNotMatch(plan,/SCAN (profile_fields|yearbook_public|profile_seeds)\b/);
+});
+
+// ---- Performance work: action-specific routes and page chrome ----
+function recordQueries(env){
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ return {seen,reset(){seen.length=0;}};
+}
+const chromeQuery=query=>/n\.is_read=0/.test(query);
+const fullPostQuery=query=>/collage_photos/.test(query);
+
+test('likes and comment panels do only the necessary work and keep permissions',async()=>{
+ const {call,session,sqlite,env}=fixture();const author=await session(2,'bbbb'),viewer=await session(1,'aaaa');
+ const created=await call('/compose',author,{id:'11111111-1111-4111-8111-111111111111',body:'A lightweight memory'});
+ assert.equal(created.status,303);
+ const key='11111111-1111-4111-8111-111111111111',json={Accept:'application/json'};
+ const queries=recordQueries(env);
+ let response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.ok(!queries.seen.some(chromeQuery),'like does not load page chrome');
+ assert.ok(!queries.seen.some(fullPostQuery),'like does not hydrate the full memory card');
+ // Repeating a like is idempotent and creates one notification.
+ response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM notifications WHERE kind='like' AND post=?").get(key).n,1);
+ queries.reset();
+ response=await call('/posts/'+key,viewer,{action:'comment',body:'Lovely'},{...json});
+ assert.equal((await response.json()).comment.body,'Lovely');
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)));
+ queries.reset();
+ const panel=await (await call('/posts/'+key+'?panel=comments',viewer)).json();
+ assert.deepEqual(panel.map(({name,body,canDelete})=>({name,body,canDelete})),[{name:'Test Admin',body:'Lovely',canDelete:true}]);
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)||/uploads|photo_tags|FROM tags/.test(query)),
+  'comments panel reads no chrome, images or tags:\n'+queries.seen.join('\n---\n'));
+ // Another member cannot edit or delete the author's memory.
+ assert.equal((await call('/posts/'+key,viewer,{action:'edit',body:'Changed'})).status,400);
+ assert.equal((await call('/posts/'+key,viewer,{action:'delete'})).status,400);
+ assert.equal(sqlite.prepare('SELECT body,hidden FROM posts WHERE id=?').get(key).body,'A lightweight memory');
+ // Hidden memories stay unavailable to likes, comments and panels.
+ sqlite.prepare('UPDATE posts SET hidden=1 WHERE id=?').run(key);
+ assert.equal((await call('/posts/'+key,viewer,{action:'like',liked:'0'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key,viewer,{action:'comment',body:'Hidden'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key+'?panel=comments',viewer)).status,404);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM likes WHERE post=?').get(key).n,1);
+});
+
+test('JSON endpoints skip page chrome while pages still show the unread count',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key,created,is_read,sample) VALUES(2,1,'mention',NULL,'s1','bench-sample',1,0,1)");
+ const queries=recordQueries(env);
+ for(const path of ['/memories?fragment=1','/memory-targets?q=Test','/tag-search?q=Test']){
+  queries.reset();
+  assert.equal((await call(path,ck)).status,200);
+  assert.ok(!queries.seen.some(chromeQuery),path+' loads no page chrome');
+ }
+ queries.reset();
+ const html=await body(await call('/memories',ck,undefined,{Accept:'text/html'}));
+ assert.match(html,/Notifications \(1 unread\)/);
+ assert.equal(queries.seen.filter(chromeQuery).length,1,'chrome loads once per page');
+ assert.match(await body(await call('/people/2',ck)),/Notifications \(1 unread\)/);
+});
+
+// ---- Performance work: profile editor saves in place ----
+test('profile editor saves return compact state for JavaScript and keep redirects without it',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');const json={Accept:'application/json'};
+ sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
+ const editor=await body(await call('/profile',ck));
+ assert.match(editor,/<form method="post" action="\/profile" enctype="multipart\/form-data" data-profile-form>/);
+ // Without JavaScript the form still redirects to the profile.
+ assert.equal((await call('/profile',ck,{profile_form:'all',city:'Pune'})).status,303);
+ let response=await call('/profile',ck,{profile_form:'all',city:'Pune',family:'Family',life:'Mine'},{...json});
+ assert.equal(response.status,200);
+ let state=await response.json();
+ assert.equal(state.saved,true);assert.equal(state.profile,'/people/2');
+ assert.deepEqual(state.missing,['now']);assert.equal(state.complete,false);
+ assert.equal(state.photos.then.href,'/media/yearbook/2/0');assert.equal(state.lifeGenerated,false);
+ // An explicitly hidden owner value stays blank instead of falling back to imported content.
+ sqlite.prepare("UPDATE profile_seeds SET source_data=?,review_status='approved' WHERE roster_id=2").run(JSON.stringify({'Tracker city':'Seed city','Life, Lately draft':'Seed life'}));
+ state=await (await call('/profile',ck,{profile_form:'all',hide_city:'on',city:'ignored'},{...json})).json();
+ assert.ok(state.missing.includes('city'));
+ assert.equal(sqlite.prepare("SELECT value FROM profile_fields WHERE member=2 AND field='city'").get().value,'');
+ // Photo uploads return a versioned preview URL and unlock the profile in the same response.
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xdb,0,4,0,0,0xff,0xda,0,2,1,0xff,0xd9]);
+ const upload=new FormData();upload.set('profile_form','all');upload.set('city','Pune');
+ upload.set('nowPhoto',new File([jpeg],'now.jpg',{type:'image/jpeg'}));
+ state=await (await call('/profile',ck,upload,{...json})).json();
+ assert.equal(state.complete,true);assert.match(state.photos.now.src,/^\/media\/profile-photo\/2\/now\?w=480&v=[\w-]{12}$/);
+ const replacement=new FormData();replacement.set('field','nowPhotoObject');replacement.set('photo',new File([jpeg],'again.jpg',{type:'image/jpeg'}));
+ const next=await (await call('/profile',ck,replacement,{...json})).json();
+ assert.notEqual(next.photos.now.src,state.photos.now.src);
+ // Attendance and single-field saves answer with JSON too, without redirecting.
+ response=await call('/profile',ck,{field:'attendance',value:'attending'},{...json});
+ assert.equal(response.status,200);assert.equal((await response.json()).attendance,'Attending');
+ assert.equal((await (await call('/profile',ck,{field:'displayName',value:'Tee Cee'},{...json})).json()).name,'Tee Cee');
+ // Invalid photos fail without a false success.
+ const bad=new FormData();bad.set('profile_form','all');bad.set('nowPhoto',new File([new Uint8Array([1,2,3])],'x.jpg',{type:'image/jpeg'}));
+ response=await call('/profile',ck,bad,{...json});
+ assert.equal(response.status,400);assert.match(await response.text(),/have not been saved/);
+});
+
+// ---- Performance work: shared stylesheet ----
+test('pages share one content-versioned stylesheet instead of inlining the theme',async()=>{
+ const {call,session}=fixture();const ck=await session(2,'bbbb');
+ const {siteCSS,siteCSSVersion,siteStylesheet}=await import('../views.mjs');
+ for(const path of ['/','/memories','/people','/people/2','/profile']){
+  const response=await call(path,ck);const html=await body(response);
+  assert.ok(html.includes(`<link rel="stylesheet" href="${siteStylesheet}">`),path);
+  assert.doesNotMatch(html,/<style>[\s\S]*--brick-fired/,path+' does not inline the shared theme');
+  assert.match(response.headers.get('Content-Security-Policy'),/style-src 'self' 'unsafe-inline'/);
+  assert.equal(response.headers.get('Cache-Control'),'private, no-store');
+ }
+ const css=await call(siteStylesheet);
+ assert.equal(css.status,200);assert.equal(css.headers.get('Content-Type'),'text/css; charset=utf-8');
+ assert.equal(css.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+ const text=await css.text();assert.equal(text,siteCSS);
+ for(const rule of ['@font-face','--brick-fired','.app-bottom-nav','.profile-save-status','.directory-grid'])assert.ok(text.includes(rule),rule);
+ // A page rendered before a deploy still gets current styles, but they are not cached for long.
+ const stale=await call('/styles/site-oldversion1.css');
+ assert.equal(stale.status,200);assert.equal(stale.headers.get('Cache-Control'),'public, max-age=300');
+ assert.equal((await call('/styles/site-'+siteCSSVersion+'.css/x')).status!==200,true);
+ // Light theme still flips the document attribute; the stylesheet carries both themes.
+ const light=await body(await call('/',ck+'; theme=light'));
+ assert.match(light,/<html lang="en" data-theme="light"/);
+ assert.match(text,/data-theme=dark|data-theme="dark"/);
+});
+
+// ---- Performance work: bounded, cheaper directory ----
+test('directory pages 30 classmates at a time in the original ranking with no gaps or duplicates',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');
+ const insertRoster=sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)');
+ for(let id=3;id<=75;id++)insertRoster.run(id,'Classmate '+String(id%9)+' '+id,String(id%5),'N'+id);
+ // Ranking inputs: yearbook entries, memories by others (subject or tagged), muted/hidden/self memories, portraits.
+ const post=sqlite.prepare('INSERT INTO posts(id,author,subject,body,created,hidden) VALUES(?,?,?,?,?,?)');
+ const about=sqlite.prepare("INSERT INTO memory_about VALUES(?,'person',?)");
+ for(let id=3;id<=75;id++){
+  if(id%4===0)sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(id,'{"moment":"x"}','[]');
+  if(id%3===0)post.run('s'+id,1,id,'About',id,0);
+  if(id%5===0){post.run('a'+id,2,null,'Tagged',id,0);about.run('a'+id,String(id));}
+  if(id%7===0){post.run('self'+id,id,id,'Own',id,0);about.run('self'+id,String(id));}
+  if(id%11===0)post.run('h'+id,1,id,'Hidden',id,1);
+  if(id%13===0){post.run('m'+id,1,id,'Muted',id,0);sqlite.prepare('INSERT INTO muted_subjects VALUES(?)').run('m'+id);}
+  if(id%6===0)sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(id,'nowPhotoObject','now'+id);
+ }
+ const featuredOld=sqlite.prepare(`SELECT EXISTS(SELECT 1 FROM posts p WHERE (p.subject=? OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)))
+   AND p.author<>? AND p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))
+   AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)) AS f`);
+ const cards=html=>[...html.matchAll(/class="directory-card" href="\/people\/(\d+)">([\s\S]*?)<\/a>/g)].map(match=>({id:Number(match[1]),portrait:!/class="initials"/.test(match[2])}));
+ const ids=html=>cards(html).map(card=>card.id);
+ let html=await body(await call('/people',ck));
+ assert.match(html,/<p class="registry directory-count">75 classmates<\/p>/);
+ const seen=cards(html);assert.equal(seen.length,30);
+ let next=html.match(/href="([^"]+)" data-directory-more/)?.[1].replaceAll('&amp;','&');
+ while(next){
+  const page=await (await call(next+'&fragment=1',ck)).json();
+  seen.push(...cards(page.html));next=page.next;
+ }
+ assert.equal(seen.length,75);assert.equal(new Set(seen.map(card=>card.id)).size,75);
+ // Same order as the original per-classmate ranking: yearbook 2, memories by others 2, portrait 1, then name.
+ const name=id=>sqlite.prepare('SELECT name FROM roster WHERE id=?').get(id).name;
+ const yearbook=new Set(sqlite.prepare("SELECT member FROM yearbook_public WHERE fields<>'{}' OR images<>'[]'").all().map(r=>r.member));
+ const expected=seen.map(card=>({...card,name:name(card.id),rank:2*yearbook.has(card.id)+2*featuredOld.get(BigInt(card.id),BigInt(card.id),BigInt(card.id)).f+card.portrait}))
+  .sort((a,b)=>b.rank-a.rank||(a.name<b.name?-1:a.name>b.name?1:a.id-b.id)).map(card=>card.id);
+ assert.deepEqual(seen.map(card=>card.id),expected);
+ assert.ok(new Set(expected.map(id=>featuredOld.get(BigInt(id),BigInt(id),BigInt(id)).f)).size===2,'ranking inputs vary');
+ // Filters carry into the next page; reunion attendees stay a single sorted list.
+ html=await body(await call('/people?dorm=1',ck));
+ assert.doesNotMatch(html,/data-directory-more/);
+ assert.ok(ids(html).every(id=>sqlite.prepare('SELECT dorm FROM roster WHERE id=?').get(id).dorm==='1'));
+ html=await body(await call('/people?q=Classmate',ck));
+ assert.match(html,/href="\/people\?q=Classmate&amp;after=\d+-\d+" data-directory-more/);
+ // Fragment requests skip filter lists and page chrome.
+ const fragment=await call('/people?after=0-1&fragment=1',ck);
+ assert.equal(fragment.headers.get('Content-Type'),'application/json');
+});
