@@ -1367,6 +1367,9 @@ test('a size that would not be smaller than the original is never re-attempted',
   await Promise.all(background);
  }
  assert.equal(transforms,1);
+ // The marker lives outside the variant prefix, so an older Worker never serves it as an image.
+ assert.equal(await env.MEDIA.get('variants/webp-v1/480/tiny.png'),null);
+ assert.equal((await env.MEDIA.get('variants/webp-v1-original/480/tiny.png')).size,0);
 });
 
 test('uploads generate their display sizes after the response',async()=>{

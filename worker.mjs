@@ -1137,7 +1137,9 @@ function afterResponse(ctx,work) {
   return work;
 }
 // Transform one original into a WebP variant and store it. A variant that would not be smaller than
-// the original is remembered with an empty marker object, so it is never attempted again.
+// the original is remembered with an empty marker under a separate prefix (never at the variant key,
+// which older Worker versions would serve as an image), so it is never attempted again.
+const markerKey = variantKey => variantKey.replace(/^variants\/webp-v1\//,'variants/webp-v1-original/');
 function makeVariant(env,ctx,variantKey,original,width) {
   let work = variantWork.get(variantKey);
   if (work) { original?.body?.cancel?.().catch(()=>{}); return work; }
@@ -1150,7 +1152,7 @@ function makeVariant(env,ctx,variantKey,original,width) {
       if (output.byteLength<original.size) {
         bytes = output;
         store = env.MEDIA.put(variantKey,output,{httpMetadata:{contentType:'image/webp'}});
-      } else store = env.MEDIA.put(variantKey,new Uint8Array(0),{customMetadata:{original:'1'}});
+      } else store = env.MEDIA.put(markerKey(variantKey),new Uint8Array(0),{customMetadata:{original:'1'}});
     } catch (error) {
       if (env.DIAGNOSTICS==='true') console.error('Image resize:',error.message);
     }
@@ -1166,7 +1168,7 @@ function warmVariants(env,ctx,objectKey,type,widths) {
   ctx.waitUntil((async () => {
     for (const width of widths) {
       const variantKey=`variants/webp-v1/${width}/${objectKey}`;
-      if (variantWork.has(variantKey) || await env.MEDIA.head?.(variantKey)) continue;
+      if (variantWork.has(variantKey) || await env.MEDIA.head?.(variantKey) || await env.MEDIA.head?.(markerKey(variantKey))) continue;
       const original=await env.MEDIA.get(objectKey);
       if (!original) return;
       await makeVariant(env,ctx,variantKey,original,width);
@@ -1187,13 +1189,14 @@ async function servePhoto(env,row,req,isPublic=false,ctx=null) {
   };
   if (variantKey) {
     const cached=await env.MEDIA.get(variantKey);
-    // An empty variant is the "not smaller than the original" marker.
-    const marker=cached && (cached.customMetadata?.original==='1' || cached.size===0);
-    if (cached && !marker) return photoResponse(cached,'image/webp',req,isPublic);
+    if (cached && cached.size!==0) return photoResponse(cached,'image/webp',req,isPublic);
     cached?.body?.cancel?.().catch(()=>{});
-    const pending=!cached && variantWork.get(variantKey);
+    const pending=variantWork.get(variantKey);
+    // Only on a miss: has this size already proved no smaller than the original?
+    const marker=!pending && env.IMAGES && (await (env.MEDIA.head ? env.MEDIA.head(markerKey(variantKey)) : env.MEDIA.get(markerKey(variantKey))));
+    marker?.body?.cancel?.().catch(()=>{});
     if (pending) { const bytes=await pending; if (bytes) return photoResponse({body:bytes.slice(0)},'image/webp',req,isPublic); }
-    else if (!cached && env.IMAGES) {
+    else if (!marker && env.IMAGES) {
       const original=await serveOriginal();
       if (original instanceof Response) return original;
       if (original.type==='image/gif') return photoResponse(original.object,original.type,req,isPublic);
