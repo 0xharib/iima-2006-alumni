@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { consentState, enqueuePhotos, enqueueRefs, faceRoute, forgetPostFaces, handleQueue, photosOfYou } from './faces.mjs';
+import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceRoute, forgetPostFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -37,6 +37,7 @@ function photosForTags(links) {
 
 export default {
   queue: (batch, env) => handleQueue(batch, env),
+  scheduled: (event, env) => sweep(env),
   async fetch(request, env, ctx) {
     try {
       const path=new URL(request.url).pathname;
@@ -865,6 +866,16 @@ async function route(req, env, record, setViewer) {
     return show('Admin View',page.adminSummary(coverage,attendees.map(({details,...row})=>({
       ...row,saved:!!details,missing:missingReunionDetails(reunionValues(row,parse(details)))
     }))));
+  }
+  if (path==='/admin/faces' && admin) {
+    if (!post) return show('Face tagging',page.adminFaces(await faceAdminData(env),Number(u.searchParams.get('queued'))||0,Number(u.searchParams.get('published'))));
+    const action=str(await data(),'action',20);
+    if (action==='scan-all') return redirect('/admin/faces?queued='+await sweep(env,5000));
+    if (action==='publish') {
+      const published=await publishShadow(env);
+      return published===null?invalid('Switch FACE_TAGGING to on before publishing.'):redirect('/admin/faces?published='+published);
+    }
+    return invalid('Choose an action.');
   }
   if (path==='/admin' && admin) {
     if (!post) return show('Batch admin',page.admin(

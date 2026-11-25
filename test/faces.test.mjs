@@ -372,3 +372,55 @@ test('the memory page offers Not me on my own auto tag only', async()=>{
   assert.match(await (await w.call('/posts/p1',await w.session(2,'bbbb'))).text(),/action="\/faces\/not-me"/);
   assert.doesNotMatch(await (await w.call('/posts/p1',await w.session(1,'aaaa'))).text(),/action="\/faces\/not-me"/);
 });
+
+import { sweep } from '../faces.mjs';
+test('sweep queues unscanned visible photos including legacy ones, and nothing when off', async()=>{
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async()=>{}};
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2), hidden=w.photo('p3','u3',3);
+  w.sqlite.exec(`UPDATE posts SET hidden=1 WHERE id='p3'; INSERT INTO posts(id,author,body,created,origin) VALUES('lp',1,'old',1,'sub1');
+    INSERT INTO photos VALUES('sub1','old1.jpg','memory','Old one')`);
+  w.sqlite.prepare("INSERT INTO face_scans VALUES(?,'p2','done',0,'m',1)").run(b);
+  assert.equal(await sweep(w.env),2);
+  assert.deepEqual(sent.map(m=>m.body.media).sort(),['legacy/lp/1',a]);
+  assert.deepEqual(sent.map(m=>m.body.type),['media','media']);
+  const off=faceWorld('off'); off.env.FACE_JOBS=w.env.FACE_JOBS; off.photo('p1','u1',1);
+  assert.equal(await sweep(off.env),0);
+});
+test('failed scans are swept again', async()=>{
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const a=w.photo('p1','u1',1); w.sqlite.prepare("INSERT INTO face_scans VALUES(?,'p1','failed',0,'m',1)").run(a);
+  assert.equal(await sweep(w.env),1);
+});
+test('the Worker runs the sweep on its schedule', async()=>{
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}}; w.photo('p1','u1',1);
+  await workerModule.default.scheduled({cron:'17 * * * *'},w.env,{waitUntil(){}});
+  assert.equal(sent.length,1);
+});
+test('admin faces page is admin-only and shows counts without embeddings', async()=>{
+  const w=faceWorld('shadow'); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.notEqual((await w.call('/admin/faces',await w.session(2,'bbbb'))).status,200);
+  const page=await (await w.call('/admin/faces',await w.session(1,'aaaa'))).text();
+  assert.match(page,/Face tagging/); assert.match(page,/shadow/i); assert.match(page,/Test Classmate/);
+  assert.match(page,/\/media\/post\/u1\?w=256/);
+  assert.doesNotMatch(page,/embedding/i);
+});
+test('publish turns shadow matches into tags with one summary each', async()=>{
+  const w=faceWorld('shadow'); w.consent(2,0); const ck=await w.session(1,'aaaa');
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
+  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p2',b);
+  assert.equal((await w.call('/admin/faces',ck,{action:'publish'})).status,400);   // only once switched on
+  w.env.FACE_TAGGING='on';
+  const res=await w.call('/admin/faces',ck,{action:'publish'});
+  assert.equal(res.status,303);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2' AND origin='auto'").get().n,2);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM face_matches WHERE state='shadow'").get().n,0);
+  const notes=w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all();
+  assert.equal(notes.length,1); assert.match(notes[0].event_key,/^found-all:2:/);
+});
+test('scan-all queues everything unscanned', async()=>{
+  const w=faceWorld('shadow'); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  w.photo('p1','u1',1); w.photo('p2','u2',2);
+  const res=await w.call('/admin/faces',await w.session(1,'aaaa'),{action:'scan-all'});
+  assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/admin/faces?queued=2'); assert.equal(sent.length,2);
+});

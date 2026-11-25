@@ -348,3 +348,50 @@ export async function faceRoute({req, env, me, path, post}) {
   }
   return see(safeNext(form.get('next')));
 }
+
+// ---------- hourly sweep and the admin page ----------
+
+// Every photo shown in a visible memory, with the media id the site uses for it.
+const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
+    UNION ALL
+    SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,p.id AS post
+      FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${POST_VISIBLE}`;
+const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
+  WHERE NOT EXISTS(SELECT 1 FROM face_scans s WHERE s.media=shown.media AND s.status='done')`;
+
+// Queue photos that have never been scanned, or whose scan failed. Runs hourly; also the backlog run.
+export async function sweep(env, limit = 200) {
+  if (faceMode(env) === 'off' || !env.FACE_JOBS) return 0;
+  const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?', limit);
+  for (let i = 0; i < todo.length; i += 100)
+    await env.FACE_JOBS.sendBatch(todo.slice(i, i + 100).map(t => ({body: {type: 'media', post: t.post, media: t.media}})));
+  return todo.length;
+}
+
+export async function faceAdminData(env) {
+  const db = env.DB;
+  const count = async (query, ...args) => (await first(db, query, ...args)).n;
+  return {
+    mode: faceMode(env),
+    counts: {
+      photos: await count(`SELECT count(*) n FROM (${SHOWN_PHOTOS})`),
+      scanned: await count(`SELECT count(*) n FROM face_scans WHERE status='done'`),
+      failed: await count(`SELECT count(*) n FROM face_scans WHERE status='failed'`),
+      faces: await count('SELECT count(*) n FROM faces'),
+      consenting: await count('SELECT count(*) n FROM face_prefs WHERE recognise=1'),
+      shadow: await count(`SELECT count(*) n FROM face_matches WHERE state='shadow'`),
+      auto: await count(`SELECT count(*) n FROM face_matches WHERE state='auto'`),
+      removed: await count(`SELECT count(*) n FROM face_matches WHERE state='removed'`),
+    },
+    // Lowest scores first: those are the ones worth checking by eye.
+    shadow: await rows(db, `SELECT m.media,m.post,m.score,r.name FROM face_matches m JOIN roster r ON r.id=m.member
+      WHERE m.state='shadow' ORDER BY m.score LIMIT 200`),
+  };
+}
+
+// Turn shadow matches into real tags, with one summary notification per member.
+export async function publishShadow(env) {
+  if (faceMode(env) !== 'on') return null;
+  const shadow = await rows(env.DB, `SELECT media,post,member,face,score FROM face_matches WHERE state='shadow' AND score>=? ORDER BY member`, FACE_BAR);
+  return (await writeMatches(env, shadow, 'summary')).length;
+}

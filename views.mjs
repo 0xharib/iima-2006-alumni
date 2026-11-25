@@ -460,6 +460,20 @@ export const page={
       `<details class="comment-menu"><summary aria-label="Comment options">⋯</summary><div>${action(url,'delete-comment','Delete comment',{comment:c.id})}</div></details><details><summary>Edit comment</summary>${form(url,field('action','edit-comment')+field('comment',c.id)+input('body','Comment',c.body,'required'),'Save')}</details>`:''}${report('comment',c.id)}<p class="story">${e(c.body)}</p></div>`),'No comments yet.')+
       (()=>{const composer=form(url,field('action','comment')+area('body','Add a comment','','required maxlength="1200"'),'Post comment');return commentPosted?`<details><summary>Add another comment</summary>${composer}</details>`:composer;})();
   },
+  adminFaces(data,queued=0,published=NaN){
+    const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
+    const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
+    return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+      <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
+      ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}
+      <dl class="face-stats">${stat('Photos on the site',c.photos)}${stat('Scanned',c.scanned)}${stat('Failed scans',c.failed)}${stat('Faces found',c.faces)}
+        ${stat('Members who said yes',c.consenting)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
+      <div class="face-admin-actions">${form('/admin/faces',field('action','scan-all'),'Scan all photos now')}
+        ${data.mode==='on'&&c.shadow?form('/admin/faces',field('action','publish'),'Publish shadow matches as tags'):''}</div>
+      <h2>Shadow matches, lowest scores first</h2>
+      ${data.shadow.length?`<section class="photos-of-you">${data.shadow.map(m=>`<figure><a href="/posts/${e(m.post)}#photo-${e(m.media.replaceAll('/','-'))}"><img src="${mediaSrc(m.media,256)}" alt="Photo matched to ${e(m.name)}" loading="lazy"></a>
+        <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span></figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}`;
+  },
   photosOfYou(list){
     return `<h1>Photos of you</h1><p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
       ${list.length?`<section class="photos-of-you">${list.map(p=>`<figure><a href="/posts/${e(p.post)}#photo-${e(p.media.replaceAll('/','-'))}"><img src="${mediaSrc(p.media,480)}" alt="Photo you're tagged in" loading="lazy"></a>
@@ -529,7 +543,7 @@ export const page={
       ${table(['Classmate','Yearbook submitted','Profile details saved','Photo','Enriched information'],coverage.map(row=>[row,yes(row.submitted),yes(row.edited),yes(row.portrait||row.has_photos),yes(row.enriched)]))}`;
   },
   admin(reports,seeds,topics,memories){const actions=['invite','revoke','approve-seed','hold-seed','resolve-report','hide-post','restore-post','hide-comment','restore-comment','rename-topic','hide-topic','merge-topic','publish-memory'];
-    return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
+    return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')} · ${link('/admin/faces','Face tagging')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
       <h2>Take action</h2>${form('/admin',select('action','Action',actions.map(a=>[a,a.replaceAll('-',' ')]))+input('target','Target ID','','required')+
       input('reason','Reason','','required')+input('into','Merge destination topic ID')+input('title','New topic title'),'Apply action')}
       <h2>Reunion tracker</h2><p>${link('/admin/export?kind=reunion','Download attendee logistics')}</p>${form('/admin',field('action','attendance-preview')+area('rsvp','CSV with roster_id,status (attending, declined, unknown)','','required'),'Preview import')}

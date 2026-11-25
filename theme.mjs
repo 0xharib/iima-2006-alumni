@@ -751,6 +751,8 @@ p,dd,.memory-quote{text-wrap:pretty}
 .face-consent-switch strong{color:var(--ink);margin-right:.25rem}.face-consent-switch form{margin:0}
 .face-not-me{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.85rem;color:var(--muted);margin:.5rem 0}.face-not-me form{margin:0}
 .photos-of-you{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:1rem 0}
+.face-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin:1rem 0}.face-stats div{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:10px 12px}.face-stats dt{font-size:.8rem;color:var(--muted)}.face-stats dd{margin:0;font-size:1.4rem}
+.face-admin-actions{display:flex;gap:.75rem;flex-wrap:wrap}.face-admin-actions form{margin:0}
 .photos-of-you figure{margin:0}.photos-of-you img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:4px;display:block}
 .photos-of-you figcaption{display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.82rem;color:var(--muted);margin-top:.35rem}.photos-of-you figcaption form{margin:0}
 
