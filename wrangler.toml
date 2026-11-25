@@ -20,3 +20,32 @@ bucket_name = "iima-2006-alumni-media"
 
 [images]
 binding = "IMAGES"
+
+# Automatic face tagging (docs/operations.md, "Face tagging"). FACE_TAGGING (off | shadow | on) is set in the
+# Cloudflare dashboard, not here: keep_vars = true keeps it across deploys, and unset means off.
+[[queues.producers]]
+binding = "FACE_JOBS"
+queue = "face-jobs"
+
+[[queues.consumers]]
+queue = "face-jobs"
+max_batch_size = 4
+max_retries = 5
+dead_letter_queue = "face-jobs-dlq"
+
+[[containers]]
+class_name = "FaceContainer"
+image = "./face-service/Dockerfile"
+instance_type = "standard-1"
+max_instances = 2
+
+[[durable_objects.bindings]]
+name = "FACES"
+class_name = "FaceContainer"
+
+[[migrations]]
+tag = "faces-v1"
+new_sqlite_classes = ["FaceContainer"]
+
+[triggers]
+crons = ["17 * * * *"]

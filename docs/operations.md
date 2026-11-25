@@ -82,3 +82,51 @@ The server removes the session and expires the cookie. It returns a small confir
 ## Reunion browsing
 
 Reunion attendees use two compact square-thumbnail cards per mobile row with responsive 256/480/768px image candidates. Personal reunion details are collapsed when the existing completeness rules are satisfied, and stay open when required details are missing or after a save. The review link and child/detail fragment links reopen the accordion. The agenda is a compact expandable section near the top, before personal details and the attendee list.
+
+
+## Face tagging
+
+Batchmates who say yes are found in memory photos and tagged automatically. Each photo is sent to a face service
+(`face-service/`, InsightFace in a Cloudflare Container), every face's embedding is kept in D1, and faces are compared
+with the member's own profile photos (portrait, Then, Now) and their 2006 yearbook portrait. A match scoring 0.35 or
+more (`FACE_BAR` in `faces.mjs`) becomes a photo tag with `origin='auto'`. Design and test results:
+`docs/superpowers/specs/2026-11-25-face-tagging-design.md`.
+
+**Modes.** `FACE_TAGGING` is set as a variable on the Worker in the Cloudflare dashboard, not in
+`wrangler.toml`; `keep_vars = true` keeps it across deploys, and unset means `off`.
+- `off`: nothing is scanned, queued or shown. The consent prompt is hidden.
+- `shadow`: photos are scanned and matched against members who said yes, but nobody is tagged or notified. Admins see
+  the would-be tags at `/admin/faces`, lowest scores first.
+- `on`: matches become tags. Each person gets one notification per memory ("You're in 3 photos"); matches found later
+  (a new member, a new profile photo, publishing) arrive as one "We found you in N photos" notification.
+
+**Consent.** Signed-in members see "Find me in batch photos?" on Home once. "Not now" is remembered; either answer can
+be changed on their own profile. Turning it off deletes their reference faces and their automatic tags (manual tags
+stay). "Not me" on a photo removes that tag for good. Only members who said yes are ever matched.
+
+**One-time setup (Arun).**
+1. Create the queues: `npx wrangler queues create face-jobs` and `npx wrangler queues create face-jobs-dlq`.
+2. Back up D1, then add the tables (safe on its own; it changes no existing rows):
+   `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql`.
+3. Set `FACE_TAGGING=shadow` in the dashboard.
+4. Merge. The Git integration runs `npx wrangler deploy`, which also builds `face-service/Dockerfile` and rolls out the
+   container. The Worker goes live first; until the container is ready, photo jobs fail and are retried (posting is
+   never affected). If the build cannot build the image, run `npx wrangler deploy` once from a machine with Docker.
+5. At `/admin/faces`, press **Scan all photos now** (the hourly sweep would get there too, 200 photos an hour).
+   Check a sample of the shadow matches.
+6. Set `FACE_TAGGING=on`, then press **Publish shadow matches as tags**.
+
+**Staging.** Workers that contain a Durable Object get no preview URLs from `wrangler versions upload`. If the staging
+Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.
+
+**Running costs.** The container (`standard-1`, at most 2 instances) starts on demand and stops after five idle
+minutes. InsightFace takes about 2 seconds per photo, well within the usage included in Workers Paid.
+
+**Licence.** The InsightFace `buffalo_l` models are licensed for non-commercial research use; Hari has taken
+responsibility for that question. The models are downloaded when the image is built and are never committed.
+
+**Local development.** Run the service with the models unpacked locally:
+`cd face-service && FACE_MODELS=/path/to/buffalo_l PORT=8080 python3 app.py`, and start the Worker with
+`FACE_SERVICE_URL=http://localhost:8080` and `FACE_TAGGING=shadow` in `.dev.vars`. `wrangler.local.toml` has no queue, so
+photos are only scanned locally if you copy the two queue blocks from `wrangler.toml` into it. Tests:
+`cd face-service && python3 -m unittest` (add `FACE_MODELS=…` to include the model check).
