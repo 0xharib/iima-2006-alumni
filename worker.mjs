@@ -720,16 +720,16 @@ async function route(req, env, record, setViewer) {
       if (!await limit('tag:'+me,10,20)) return new Response('Please wait before tagging again.',{status:429});
       const tagJobs=[sql('INSERT INTO notification_tag_actor VALUES(?,?)',key,me)];
       if (kind==='person' && /^\d+$/.test(target) && await one('SELECT id FROM roster WHERE id=?',Number(target))) {
-        if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags VALUES(?,?,'person',?)",key,photoScope,target));
+        if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?)",key,photoScope,target));
         else tagJobs.push(sql("INSERT INTO tags VALUES(?,?,'accepted') ON CONFLICT(post,member) DO UPDATE SET status='accepted' WHERE tags.status='pending'",key,Number(target)));
       } else if (kind==='topic' && await one('SELECT 1 FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',target)) {
-        if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags VALUES(?,?,'topic',?)",key,photoScope,target));
+        if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'topic',?)",key,photoScope,target));
         else tagJobs.push(sql("INSERT OR IGNORE INTO memory_about VALUES(?,'topic',?)",key,target));
       } else if (['new-place','new-event'].includes(kind)) {
         tagJobs.push(
           sql('INSERT OR IGNORE INTO topics(id,title,kind) VALUES(?,?,?)',id(),target,kind==='new-place'?'Place':'Event'),
           photoScope
-            ? sql("INSERT OR IGNORE INTO photo_tags SELECT ?,?,'topic',id FROM topics WHERE title=? COLLATE NOCASE AND hidden=0 AND redirect IS NULL",key,photoScope,target)
+            ? sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) SELECT ?,?,'topic',id FROM topics WHERE title=? COLLATE NOCASE AND hidden=0 AND redirect IS NULL",key,photoScope,target)
             : sql("INSERT OR IGNORE INTO memory_about SELECT ?,'topic',id FROM topics WHERE title=? COLLATE NOCASE AND hidden=0 AND redirect IS NULL",key,target)
         );
       } else return invalid('Choose a classmate, place or event.');
@@ -899,7 +899,7 @@ async function route(req, env, record, setViewer) {
       if (to===target || !await one('SELECT id FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',to)) return invalid('Choose an active destination topic.');
       await db.batch([sql('UPDATE posts SET topic=? WHERE topic=?',to,target),
         sql("INSERT OR IGNORE INTO memory_about SELECT post,kind,? FROM memory_about WHERE kind='topic' AND target=?",to,target),
-        sql("INSERT OR IGNORE INTO photo_tags SELECT post,media,kind,? FROM photo_tags WHERE kind='topic' AND target=?",to,target),
+        sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) SELECT post,media,kind,? FROM photo_tags WHERE kind='topic' AND target=?",to,target),
         sql("DELETE FROM photo_tags WHERE kind='topic' AND target=?",target),
         sql("DELETE FROM memory_about WHERE kind='topic' AND target=?",target),sql('UPDATE topics SET redirect=? WHERE id=?',to,target),
         sql('UPDATE topics SET redirect=? WHERE redirect=?',to,target),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
