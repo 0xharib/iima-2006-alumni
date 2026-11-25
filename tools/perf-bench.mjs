@@ -101,6 +101,7 @@ const cases = [
   ['GET /people', () => request('/people')],
   ['GET /people/2', () => request('/people/2')],
   ['GET /profile', () => request('/profile')],
+  ['GET /gallery (100 memory cards)', () => request('/gallery')],
   ['POST /profile full form (redirect)', () => request('/profile', {profile_form: 'all', city: 'City 2', life: 'Life lately 2', family: 'Family 2', company: 'Company 2'})],
   ['POST /profile full form (JSON)', () => request('/profile', {profile_form: 'all', city: 'City 2', life: 'Life lately 2', family: 'Family 2', company: 'Company 2'}, {...json})],
   ['POST /profile attendance (JSON)', () => request('/profile', {field: 'attendance', value: 'attending'}, {...json})],
