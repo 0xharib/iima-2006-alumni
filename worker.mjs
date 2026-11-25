@@ -1,4 +1,4 @@
-import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock, reunionCatchups } from './views.mjs';
+import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock, reunionCatchups, siteCSS, siteCSSVersion } from './views.mjs';
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 import { completedProfilesCTE } from './completion.mjs';
@@ -67,7 +67,7 @@ export default {
       if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control','private, no-store');
       response.headers.set('X-Content-Type-Options','nosniff');
       if (!response.headers.has('Referrer-Policy')) response.headers.set('Referrer-Policy','strict-origin');
-      if (!response.headers.has('Content-Security-Policy')) response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+      if (!response.headers.has('Content-Security-Policy')) response.headers.set('Content-Security-Policy',"default-src 'none'; img-src 'self' blob: https://archives.iima.ac.in; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
       return response;
     } catch (error) { if (env.DIAGNOSTICS === 'true') console.error(error.name, error.message);
       return new Response('The site could not complete that request. Please try again.', {status:500});
@@ -99,6 +99,11 @@ async function route(req, env, record, setViewer) {
     if (!Object.hasOwn(fonts,name)) return missing();
     return new Response(Uint8Array.from(atob(fonts[name]),c=>c.charCodeAt(0)),{headers:{'Content-Type':'font/woff2','Cache-Control':'public, max-age=31536000, immutable'}});
   }
+  // Shared styles contain no member data. The current version is immutable for a year; an older
+  // versioned URL (a page rendered just before a deploy) still gets current styles, briefly cached.
+  const stylesheet = !post && path.match(/^\/styles\/site-([a-z0-9]+)\.css$/);
+  if (stylesheet) return new Response(siteCSS,{headers:{'Content-Type':'text/css; charset=utf-8',
+    'Cache-Control':stylesheet[1]===siteCSSVersion?'public, max-age=31536000, immutable':'public, max-age=300'}});
   if (path==='/social.js' && !post) return new Response(page.socialScript,{
     headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300'}});
   if (path==='/theme' && post) {

@@ -1209,3 +1209,29 @@ test('profile editor saves return compact state for JavaScript and keep redirect
  response=await call('/profile',ck,bad,{...json});
  assert.equal(response.status,400);assert.match(await response.text(),/have not been saved/);
 });
+
+// ---- Performance work: shared stylesheet ----
+test('pages share one content-versioned stylesheet instead of inlining the theme',async()=>{
+ const {call,session}=fixture();const ck=await session(2,'bbbb');
+ const {siteCSS,siteCSSVersion,siteStylesheet}=await import('../views.mjs');
+ for(const path of ['/','/memories','/people','/people/2','/profile']){
+  const response=await call(path,ck);const html=await body(response);
+  assert.ok(html.includes(`<link rel="stylesheet" href="${siteStylesheet}">`),path);
+  assert.doesNotMatch(html,/<style>[\s\S]*--brick-fired/,path+' does not inline the shared theme');
+  assert.match(response.headers.get('Content-Security-Policy'),/style-src 'self' 'unsafe-inline'/);
+  assert.equal(response.headers.get('Cache-Control'),'private, no-store');
+ }
+ const css=await call(siteStylesheet);
+ assert.equal(css.status,200);assert.equal(css.headers.get('Content-Type'),'text/css; charset=utf-8');
+ assert.equal(css.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+ const text=await css.text();assert.equal(text,siteCSS);
+ for(const rule of ['@font-face','--brick-fired','.app-bottom-nav','.profile-save-status','.directory-grid'])assert.ok(text.includes(rule),rule);
+ // A page rendered before a deploy still gets current styles, but they are not cached for long.
+ const stale=await call('/styles/site-oldversion1.css');
+ assert.equal(stale.status,200);assert.equal(stale.headers.get('Cache-Control'),'public, max-age=300');
+ assert.equal((await call('/styles/site-'+siteCSSVersion+'.css/x')).status!==200,true);
+ // Light theme still flips the document attribute; the stylesheet carries both themes.
+ const light=await body(await call('/',ck+'; theme=light'));
+ assert.match(light,/<html lang="en" data-theme="light"/);
+ assert.match(text,/data-theme=dark|data-theme="dark"/);
+});
