@@ -220,3 +220,97 @@ test('hiding a post removes its faces', async()=>{
   for (const t of ['faces','face_scans','face_matches']) assert.equal(w.sqlite.prepare(`SELECT count(*) n FROM ${t}`).get().n,0,t);
   assert.deepEqual(await scanPhoto(w.env,'p1',m),{faces:0,tagged:[]});
 });
+
+import { refreshRefs, rematchMember } from '../faces.mjs';
+const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
+const storedFace=(w,media,post,dim)=>w.sqlite.prepare("INSERT INTO faces(media,post,box,score,size,embedding,model) VALUES(?,?,'[0,0,40,40]',0.9,40,?,'buffalo_l/w600k_r50')").run(media,post,vectorBytes(unitVec(dim))).lastInsertRowid;
+
+test('consent card shows once and Not now hides it', async()=>{
+  const w=faceWorld(); const ck=await w.session(2,'bbbb');
+  const home=await (await w.call('/',ck)).text();
+  assert.match(home,/Find me in batch photos\?/);
+  assert.match(home,/We use your profile photos and your 2006 yearbook photo to find you in batch photos\. You can turn this off any time\./);
+  const res=await w.call('/faces/consent',ck,{choice:'no',next:'/'});
+  assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/');
+  assert.doesNotMatch(await (await w.call('/',ck)).text(),/Find me in batch photos\?/);
+  assert.equal(w.sqlite.prepare('SELECT recognise FROM face_prefs WHERE member=2').get().recognise,0);
+});
+test('consent card is hidden while face tagging is off', async()=>{
+  const w=faceWorld('off'); const ck=await w.session(2,'bbbb');
+  assert.doesNotMatch(await (await w.call('/',ck)).text(),/Find me in batch photos/);
+  assert.equal((await w.call('/faces/consent',ck,{choice:'yes'})).status,404);
+});
+test('yes builds refs from own photos and the yearbook portrait', async()=>{
+  const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
+  w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
+  w.objects.set('profile/p2',new Uint8Array([5])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
+  w.photoFaces[5]=[0]; w.photoFaces[1]=[0];   // portrait.jpg (the fixture's yearbook portrait) starts with byte 1
+  assert.equal((await w.call('/faces/consent',ck,{choice:'yes',next:'/people/2'})).status,303);
+  assert.deepEqual(sent,[{type:'ref',member:2}]);
+  await handleQueue({messages:[message(sent[0])]},w.env);
+  assert.deepEqual(w.sqlite.prepare('SELECT source,object_key FROM face_refs WHERE member=2 ORDER BY source').all().map(r=>[r.source,r.object_key]),
+    [['portrait','profile/p2'],['yearbook','portrait.jpg']]);
+});
+test('a profile photo with no face leaves no reference', async()=>{
+  const w=faceWorld(); w.consent(2,0);
+  w.objects.set('profile/p2',new Uint8Array([7])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
+  w.sqlite.exec("UPDATE face_refs SET object_key='profile/p2'");   // the old portrait ref
+  assert.equal(await refreshRefs(w.env,2),0);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=2').get().n,0);
+});
+test('rematch tags earlier photos and sends one summary', async()=>{
+  const w=faceWorld(); w.consent(2,0);
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2);
+  w.sqlite.exec("UPDATE posts SET created=5 WHERE id='p2'");
+  storedFace(w,a,'p1',0); storedFace(w,b,'p2',0); storedFace(w,b,'p2',9);
+  assert.equal(await rematchMember(w.env,2),2);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2' AND origin='auto'").get().n,2);
+  const notes=w.sqlite.prepare('SELECT actor,post,anchor,event_key FROM notifications WHERE recipient=2').all();
+  assert.equal(notes.length,1); assert.equal(notes[0].actor,null); assert.equal(notes[0].post,'p2');
+  assert.equal(notes[0].anchor,'photo-'+b.replace('/','-')); assert.match(notes[0].event_key,/^found-all:2:\d+$/);
+});
+test('rematch leaves a face that already belongs to someone else', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1);
+  const face=storedFace(w,a,'p1',0);
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,3,'p1',?,0.95,'auto',1)").run(a,face);
+  assert.equal(await rematchMember(w.env,2),0);
+});
+test('withdrawing removes auto tags but keeps manual tags', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target) VALUES('p1',?,'person','2')").run(b);
+  await w.call('/faces/consent',ck,{choice:'no'});
+  assert.deepEqual(w.sqlite.prepare("SELECT media,origin FROM photo_tags WHERE target='2'").all().map(r=>[r.media,r.origin]),[[b,'manual']]);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=2').get().n,0);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_matches WHERE member=2').get().n,0);
+});
+test('re-consent restores tags but keeps Not me', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
+  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p2',b);
+  w.sqlite.prepare("UPDATE face_matches SET state='removed' WHERE media=?").run(b);
+  w.sqlite.prepare("DELETE FROM photo_tags WHERE media=?").run(b);
+  await w.call('/faces/consent',ck,{choice:'no'});
+  w.consent(2,0);
+  await rematchMember(w.env,2);
+  assert.deepEqual(w.sqlite.prepare("SELECT media FROM photo_tags WHERE target='2'").all().map(r=>r.media),[a]);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=? AND member=2").get(b).state,'removed');
+});
+test('saving a new Then photo queues a ref job only for consenting members', async()=>{
+  for (const recognise of [1,0]) {
+    const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
+    w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
+    w.sqlite.prepare('INSERT INTO face_prefs VALUES(2,?,1)').run(recognise);
+    const f=new FormData(); f.set('field','thenPhotoObject'); f.set('photo',new File([pngBytes],'t.png',{type:'image/png'}));
+    assert.equal((await w.call('/profile',ck,f)).status,303);
+    assert.deepEqual(sent,recognise?[{type:'ref',member:2}]:[]);
+  }
+});
+test('own profile shows the switch and the note beside photo uploads', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const page=await (await w.call('/people/2',ck)).text();
+  assert.match(page,/Find me in batch photos: On/);
+  assert.match(page,/We use your profile photos and your 2006 yearbook photo/);
+  assert.doesNotMatch(await (await w.call('/people/2',await w.session(1,'aaaa'))).text(),/Find me in batch photos/);
+});

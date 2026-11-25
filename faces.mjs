@@ -215,6 +215,7 @@ export async function handleQueue(batch, env) {
     const job = msg.body || {};
     try {
       if (job.type === 'media') await scanPhoto(env, job.post, job.media);
+      else if (job.type === 'ref' && faceMode(env) !== 'off') { await refreshRefs(env, job.member); await rematchMember(env, job.member); }
       msg.ack();
     } catch (error) {
       console.error('face job', job.type, error?.message);
@@ -233,3 +234,100 @@ export const forgetPostFaces = (db, post) => [
   q(db, 'DELETE FROM face_scans WHERE post=?', post),
   q(db, "DELETE FROM face_matches WHERE post=? AND state<>'removed'", post),
 ];
+
+// ---------- consent and reference faces ----------
+
+export const FACE_COPY = 'We use your profile photos and your 2006 yearbook photo to find you in batch photos. You can turn this off any time.';
+const safeNext = value => /^\/(?![\/\\])[^\r\n\\]*$/.test(String(value || '')) ? String(value) : '/';
+const see = url => new Response(null, {status: 303, headers: {Location: url}});
+
+// 'hidden' while face tagging is off; 'ask' until the member has answered; then 'on' or 'off'.
+export async function consentState(env, me) {
+  if (faceMode(env) === 'off') return 'hidden';
+  const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', me);
+  return !row ? 'ask' : row.recognise ? 'on' : 'off';
+}
+
+async function sendJob(env, body) {
+  try { if (env.FACE_JOBS) await env.FACE_JOBS.send(body); } catch (error) { console.error('face queue', error?.message); }
+}
+
+// After a profile photo changes: rebuild that member's references, if they have said yes.
+export async function enqueueRefs(env, member) {
+  if (faceMode(env) === 'off') return;
+  const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', member);
+  if (row?.recognise) await sendJob(env, {type: 'ref', member});
+}
+
+async function refSources(db, member) {
+  const sources = {};
+  for (const row of await rows(db, `SELECT field,value FROM profile_fields WHERE member=? AND field IN ('portraitObject','thenPhotoObject','nowPhotoObject') AND trim(value)<>''`, member))
+    sources[{portraitObject: 'portrait', thenPhotoObject: 'then', nowPhotoObject: 'now'}[row.field]] = row.value;
+  const seed = await first(db, `SELECT portrait_key FROM profile_seeds WHERE roster_id=? AND portrait_key IS NOT NULL AND portrait_key<>''`, member);
+  const yearbook = seed || await first(db, `SELECT ph.object_key AS portrait_key FROM yearbook_public y,json_each(y.images) j
+    JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
+    WHERE y.member=? ORDER BY j.key LIMIT 1`, member);
+  if (yearbook?.portrait_key) sources.yearbook = yearbook.portrait_key;
+  return sources;
+}
+
+export async function refreshRefs(env, member) {
+  const db = env.DB, kept = [];
+  for (const [source, key] of Object.entries(await refSources(db, member))) {
+    const bytes = await readObject(env, key);
+    if (!bytes) continue;
+    const face = (await analyseImage(env, bytes, 'portrait')).faces[0];
+    if (!face) continue;
+    await q(db, 'INSERT OR REPLACE INTO face_refs VALUES(?,?,?,?,?)', member, source, key, face.bytes, FACE_MODEL).run();
+    kept.push(source);
+  }
+  await q(db, `DELETE FROM face_refs WHERE member=? AND source NOT IN (${kept.map(() => '?').join(',') || "''"})`, member, ...kept).run();
+  return kept.length;
+}
+
+// Match one member against every face already stored (photos shared before they joined or said yes).
+export async function rematchMember(env, member) {
+  const db = env.DB;
+  if (!(await first(db, 'SELECT recognise FROM face_prefs WHERE member=?', member))?.recognise) return 0;
+  const refs = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
+  if (!refs.length) return 0;
+  const best = new Map();
+  for (let after = 0; ;) {
+    const page = await rows(db, 'SELECT id,media,post,embedding FROM faces WHERE id>? ORDER BY id LIMIT 500', after);
+    if (!page.length) break;
+    for (const face of page) {
+      const vector = toVector(face.embedding);
+      let score = -1;
+      for (const ref of refs) score = Math.max(score, similarity(vector, ref));
+      if (score >= FACE_BAR && !(best.get(face.media)?.score >= score)) best.set(face.media, {media: face.media, post: face.post, member, face: face.id, score});
+    }
+    after = page[page.length - 1].id;
+  }
+  const matches = [];
+  for (const m of best.values()) {
+    const taken = await first(db, `SELECT 1 AS yes FROM face_matches WHERE media=? AND face=? AND member<>? AND state IN ('shadow','auto')`, m.media, m.face, member);
+    if (!taken) matches.push(m);
+  }
+  return (await writeMatches(env, matches, 'summary')).length;
+}
+
+export async function faceRoute({req, env, me, path, post}) {
+  if (path !== '/faces/consent' || !post) return null;
+  if (faceMode(env) === 'off') return new Response('Page unavailable', {status: 404});
+  const form = await req.formData();
+  const choice = String(form.get('choice') || '');
+  if (!['yes', 'no'].includes(choice)) return new Response('Choose yes or no.', {status: 400});
+  const db = env.DB;
+  const pref = q(db, 'INSERT INTO face_prefs VALUES(?,?,?) ON CONFLICT(member) DO UPDATE SET recognise=excluded.recognise,decided=excluded.decided',
+    me, +(choice === 'yes'), Date.now());
+  if (choice === 'yes') {
+    await pref.run();
+    await sendJob(env, {type: 'ref', member: me});
+  } else {
+    await db.batch([pref,
+      q(db, 'DELETE FROM face_refs WHERE member=?', me),
+      q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(me)),
+      q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", me)]);
+  }
+  return see(safeNext(form.get('next')));
+}

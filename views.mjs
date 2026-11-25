@@ -1,3 +1,4 @@
+import { FACE_COPY } from './faces.mjs';
 import {navigationLinks,mobileNavigation,mobileNavCSS} from './navigation.mjs';
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
@@ -12,6 +13,15 @@ const input=(name,label,value='',extra='')=>`<label>${e(label)}<input name="${e(
 const area=(name,label,value='',extra='')=>`<label>${e(label)}<textarea name="${e(name)}" ${extra}>${e(value)}</textarea></label>`;
 export const field=(name,value)=>`<input type="hidden" name="${e(name)}" value="${e(value)}">`;
 export const form=(action,body,label,extra='')=>`<form method="post" action="${e(action)}" ${extra}>${body}<button type="submit">${e(label)}</button></form>`;
+const faceCopy=FACE_COPY;
+// Consent for automatic face tagging: a card on Home while unanswered, a switch on the owner's profile afterwards.
+function faceConsent(state,next){
+  const choice=(value,label,extra='')=>form('/faces/consent',field('choice',value)+field('next',next),label,extra);
+  if(state==='ask') return `<section class="meet-banner face-consent" aria-label="Find me in batch photos"><h2>Find me in batch photos?</h2>
+    <p>${faceCopy}</p><div class="face-consent-actions">${choice('yes','Yes, find me','class="cta-form"')}${choice('no','Not now')}</div></section>`;
+  return `<div class="face-consent face-consent-switch"><p><strong>Find me in batch photos: ${state==='on'?'On':'Off'}</strong> ${faceCopy}</p>
+    ${choice(state==='on'?'no':'yes',state==='on'?'Turn off':'Turn on')}<a href="/photos-of-you">Photos of you</a></div>`;
+}
 const action=(url,name,label,values={})=>form(url,field('action',name)+Object.entries(values).map(([key,val])=>field(key,val)).join(''),label,'class="inline"');
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
@@ -197,12 +207,13 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people,next,key,me,meet={available:false},unlock=[]){
+  home(rows,people,next,key,me,meet={available:false},unlock=[],faces='hidden'){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
       </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
+      ${faces==='ask'?faceConsent('ask','/'):''}
       ${meet.available?`<section class="meet-banner" aria-label="Looking to catch up">
         <p class="meet-count">${meetCountLine(meet.count)}</p>
         <div class="meet-mine">${meet.picked.length?`<span class="meet-faces">${meetFaces(meet.picked)}</span><span class="registry">You’ve picked ${meet.picked.length}</span>`:'<span class="meet-hint">Send a catch-up request to the WIMWIans you want to meet in Jaipur. They’ll be notified and can accept it.</span>'}
@@ -293,7 +304,7 @@ export const page={
   },
   directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
     ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces='hidden'){
     const own = me === row.id;
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
@@ -387,7 +398,7 @@ export const page={
                 ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
                   ${field('field',slot+'PhotoObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
                   <button type="button" data-upload class="required-photo-button" aria-label="Upload ${label} photo">${photo?'Change':'Add'} ${label} photo</button></form>`:''}</div>`;
-            }).join('')}</div></section>`:''}
+            }).join('')}</div>${own&&faces!=='hidden'?faceConsent(faces,'/people/'+me):''}</section>`:''}
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
           <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories from classmates</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
