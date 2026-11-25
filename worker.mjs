@@ -131,7 +131,22 @@ async function route(req, env, record, setViewer) {
       WHERE y.member=r.id AND ph.slot='then' ORDER BY j.key LIMIT 1)
   )`;
   const seedJoin = `LEFT JOIN profile_seeds s ON s.roster_id=r.id AND ${visibleSeed}`;
-  const show = (title,body) => render(title,body,member);
+  const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
+  const notificationVisible=`(n.sample=1 OR n.kind IN ('catchup_request','catchup_accepted') OR (p.id IS NOT NULL AND ${postVisible}
+    AND (n.kind<>'comment' OR EXISTS(SELECT 1 FROM comments c WHERE 'comment-'||c.id=n.anchor AND c.post=p.id AND c.hidden=0))))`;
+  const notificationFrom='FROM notifications n LEFT JOIN posts p ON p.id=n.post';
+  // Page chrome (header avatar and unread count) is loaded only when an HTML page is rendered for a
+  // signed-in GET. JSON panels, fragments and action endpoints never pay for it.
+  let chrome;
+  const loadChrome = () => chrome ||= Promise.all([
+    one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,member.id),
+    one(`SELECT count(*) AS total ${notificationFrom} WHERE n.recipient=? AND n.is_read=0 AND ${notificationVisible}`,member.id)
+  ]).then(([profile,unread])=>{member.portrait=profile?.portrait;member.unread=unread.total;});
+  async function renderPage(title,body,who,options) {
+    if (who && who===member && !post) await loadChrome();
+    return render(title,body,who,options);
+  }
+  const show = (title,body) => renderPage(title,body,member);
   const data = () => req.formData();
   const mailHelp = 'mailto:s.tahseen.q@gmail.com,arun.devanathan@gmail.com?subject=IIMA%20Class%20of%202006%20roster%20email&body=Name%3A%0ADorm%20Number%3A%0ADorm%20Name%3A%0ACorrect%20Email%20ID%3A';
   const rosterEmail = key => one(`SELECT email FROM reminder_contacts c WHERE batchmate_id=? AND trim(email) LIKE '%_@_%._%' AND
@@ -207,7 +222,7 @@ async function route(req, env, record, setViewer) {
   }
   if (path === '/verify') {
     if (!post) {
-      const response=show('Signing in','<p role="status">Signing you in…</p><form method="post" action="/verify" id="verify-form" hidden>'
+      const response=await show('Signing in','<p role="status">Signing you in…</p><form method="post" action="/verify" id="verify-form" hidden>'
         +field('token',u.searchParams.get('token') || '')+'</form><noscript><p>Enable JavaScript to open this sign-in link.</p></noscript><script src="/verify.js?v=2" defer></script>');
       response.headers.set('Cache-Control','no-store');
       response.headers.set('Referrer-Policy','strict-origin');
@@ -232,6 +247,8 @@ async function route(req, env, record, setViewer) {
   }
   if (!member) return redirect('/signin?next='+encode(path+u.search));
   const me = member.id;
+  // Browser navigations ask for HTML: start the chrome queries alongside the page's own queries.
+  if (!post && /text\/html/.test(req.headers.get('Accept')||'') && u.searchParams.get('fragment')!=='1') loadChrome().catch(()=>{});
   if (path==='/preview' && !post) {
     if (env.PREVIEW_LABEL) return redirect('/');
     if (member.role!=='admin') return new Response('Preview access is limited to batch admins.',{status:403});
@@ -268,19 +285,18 @@ async function route(req, env, record, setViewer) {
     if (path==='/wa/' && u.searchParams.get('preview')==='locked') {
       if (!admin) return new Response('Admin access required.',{status:403});
       const checks=whatsappRequirements({},{});
-      return render('WhatsApp Insights',`<aside class="panel"><strong>Admin preview: locked WhatsApp Insights</strong><p>This simulates an incomplete profile. Your profile and access have not changed.</p><a href="/wa/">Exit preview</a></aside>`+whatsappUnlock(checks,me),member);
+      return renderPage('WhatsApp Insights',`<aside class="panel"><strong>Admin preview: locked WhatsApp Insights</strong><p>This simulates an incomplete profile. Your profile and access have not changed.</p><a href="/wa/">Exit preview</a></aside>`+whatsappUnlock(checks,me),member);
     }
     const checks=await whatsappCompletion();
     if (checks.some(check=>!check.complete)) {
       if (path.startsWith('/wa/api/')) return new Response(JSON.stringify({error:'profile_incomplete',message:'Complete your profile to unlock WhatsApp Insights.',missing:checks.filter(check=>!check.complete).map(check=>check.label),profile:'/people/'+me+'?complete=whatsapp#whatsapp-unlock'}),{status:403,headers:{'Content-Type':'application/json','Cache-Control':'private, no-store'}});
-      return render('WhatsApp Insights',whatsappUnlock(checks,me),member);
+      return renderPage('WhatsApp Insights',whatsappUnlock(checks,me),member);
     }
 
     const author=path==='/wa/'?await one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=88`,+pilot):null;
-    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render,author});
+    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render:renderPage,author});
     if (response) return response;
   }
-  const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
   const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT)))`;
   const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
   const postQuery = `SELECT p.*,r.name AS author_name,${portrait} AS author_portrait,(SELECT title FROM memory_albums WHERE post=p.id) AS album_title,(SELECT cover FROM memory_albums WHERE post=p.id) AS album_cover,t.title AS topic_title,subject.name AS subject_name,
@@ -354,17 +370,6 @@ async function route(req, env, record, setViewer) {
     else if (bits[0]==='legacy' && Number(bits[2])>0) row = await one(`SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
       WHERE p.id=? AND ${postVisible} ORDER BY ph.object_key LIMIT 1 OFFSET ?`,bits[1],Number(bits[2])-1);
     return servePhoto(env,row,req);
-  }
-  const notificationVisible=`(n.sample=1 OR n.kind IN ('catchup_request','catchup_accepted') OR (p.id IS NOT NULL AND ${postVisible}
-    AND (n.kind<>'comment' OR EXISTS(SELECT 1 FROM comments c WHERE 'comment-'||c.id=n.anchor AND c.post=p.id AND c.hidden=0))))`;
-  const notificationFrom='FROM notifications n LEFT JOIN posts p ON p.id=n.post';
-  if (!post && u.searchParams.get('fragment')!=='1') {
-    const [profile,unread]=await Promise.all([
-      one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,member.id),
-      one(`SELECT count(*) AS total ${notificationFrom} WHERE n.recipient=? AND n.is_read=0 AND ${notificationVisible}`,me)
-    ]);
-    member.portrait=profile?.portrait;
-    member.unread=unread.total;
   }
   async function feed(size, q='') {
     const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM uploads up WHERE up.post=p.id)
@@ -480,7 +485,7 @@ async function route(req, env, record, setViewer) {
   }
   if (path==='/') {
     const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),freshProfiles()]);
-    return render('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh),member,{home:true,active:'/'});
+    return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
@@ -538,7 +543,7 @@ async function route(req, env, record, setViewer) {
     if (!reunion) return show('Classmates',directory);
     const tracker = await one("SELECT * FROM reunion_tracker WHERE member=? AND status='attending'",me);
     const saved = tracker && await one('SELECT details FROM reunion_logistics WHERE member=?',me);
-    return render('December reunion',page.reunion(member,tracker,saved && parse(saved.details),directory,u.searchParams.get('saved')==='1'),member,{home:true});
+    return renderPage('December reunion',page.reunion(member,tracker,saved && parse(saved.details),directory,u.searchParams.get('saved')==='1'),member,{home:true});
   }
   const person = path.match(/^\/people\/(\d+)$/);
   if (person) {
@@ -567,7 +572,7 @@ async function route(req, env, record, setViewer) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return render(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true,active:'/people'});
+    return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true,active:'/people'});
   }
 
   if (path==='/profile') {
@@ -777,7 +782,15 @@ async function route(req, env, record, setViewer) {
   const postMatch = path.match(/^\/posts\/([\w-]+)$/);
   if (postMatch) {
     const key = postMatch[1];
-    const item = (await posts('p.id=?',[key],1))[0];
+    const f = post ? await data() : null, action = f?.get('action');
+    const panel = !post && u.searchParams.get('panel')==='comments';
+    // Routine actions and the comments panel need only an authorized, visible post, not its full card.
+    const light = panel || ['like','comment','edit-comment','delete-comment','tag-accept','tag-remove','unassociate','delete','edit'].includes(action);
+    const item = light
+      ? await one(`SELECT p.id,p.author,p.subject,p.origin,
+          EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)) AS is_about_me
+          FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic WHERE p.id=? AND ${postVisible}`,me,key)
+      : (await posts('p.id=?',[key],1))[0];
     if (!item) return missing();
     const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label
       FROM photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.kind='person'
@@ -785,18 +798,20 @@ async function route(req, env, record, setViewer) {
       JOIN topics t ON t.id=pt.target WHERE pt.post=? AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       ORDER BY kind,label`,key,key);
     if (!post) {
-      const comments = await all('SELECT c.*,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key);
-      const tags = await all("SELECT t.*,r.name FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND (t.status='accepted' OR t.member=? OR ?=?)",key,me,me,item.author);
-      const images = await all("SELECT 'post/'||id AS media,caption,'/posts/'||post AS source FROM uploads WHERE post=? UNION ALL SELECT 'legacy/'||?||'/'||ROW_NUMBER() OVER(ORDER BY object_key),caption,'/posts/'||? FROM photos WHERE submission=?",key,key,key,item.origin);
-      if (u.searchParams.get('panel')==='comments') return json(comments.map(({id,author,name,body})=>({id,name,body,canDelete:author===me})));
-      const links=photosForTags(await photoLinks());
+      if (panel) return json((await all('SELECT c.id,c.author,c.body,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key)).map(({id,author,name,body})=>({id,name,body,canDelete:author===me})));
+      const [comments,tags,images,tagLinks,album] = await Promise.all([
+        all('SELECT c.*,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key),
+        all("SELECT t.*,r.name FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND (t.status='accepted' OR t.member=? OR ?=?)",key,me,me,item.author),
+        all("SELECT 'post/'||id AS media,caption,'/posts/'||post AS source FROM uploads WHERE post=? UNION ALL SELECT 'legacy/'||?||'/'||ROW_NUMBER() OVER(ORDER BY object_key),caption,'/posts/'||? FROM photos WHERE submission=?",key,key,key,item.origin),
+        photoLinks(),
+        one('SELECT photo_order FROM memory_albums WHERE post=?',key)
+      ]);
+      const links=photosForTags(tagLinks);
       for(const photo of images) photo.linked_tags=JSON.stringify(links.get(photo.media)||[]);
-      const album=await one('SELECT photo_order FROM memory_albums WHERE post=?',key);
       const order=album?new Map(JSON.parse(album.photo_order).map((photo,index)=>['post/'+photo,index])):null;
       if (order) images.sort((a,b)=>(order.get(a.media)??Infinity)-(order.get(b.media)??Infinity));
       return show(item.album_title || (images.length>1?'Photo album':'A batch memory'),page.post(item,comments,tags,images,me,u.searchParams.has('comment-posted')));
     }
-    const f = await data(), action = f.get('action');
     let savedComment,photoScope;
     if (action==='like') {
       if (f.get('liked')==='1') await run('INSERT OR IGNORE INTO likes VALUES(?,?)',key,me);
@@ -849,8 +864,8 @@ async function route(req, env, record, setViewer) {
     } else return invalid('Action unavailable.');
     if (req.headers.get('Accept')==='application/json' && ['like','comment','tag-add','delete-comment'].includes(action)) {
       if (action==='like') {
-        const updated = (await posts('p.id=?',[key],1))[0];
-        return json({liked:!!updated?.liked,likes:updated?.likes??0});
+        const updated = await one('SELECT (SELECT count(*) FROM likes WHERE post=?) AS likes,EXISTS(SELECT 1 FROM likes WHERE post=? AND member=?) AS liked',key,key,me);
+        return json({liked:!!updated.liked,likes:updated.likes});
       }
       if (savedComment) return json({comment:savedComment});
       if (action==='tag-add') {

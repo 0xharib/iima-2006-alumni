@@ -1112,3 +1112,62 @@ test('Home fresh-profile query reads the summary, not the roster’s profile sou
  const plan=sqlite.prepare('EXPLAIN QUERY PLAN '+fresh).all(0).map(row=>row.detail).join('\n');
  assert.doesNotMatch(plan,/SCAN (profile_fields|yearbook_public|profile_seeds)\b/);
 });
+
+// ---- Performance work: action-specific routes and page chrome ----
+function recordQueries(env){
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ return {seen,reset(){seen.length=0;}};
+}
+const chromeQuery=query=>/n\.is_read=0/.test(query);
+const fullPostQuery=query=>/collage_photos/.test(query);
+
+test('likes and comment panels do only the necessary work and keep permissions',async()=>{
+ const {call,session,sqlite,env}=fixture();const author=await session(2,'bbbb'),viewer=await session(1,'aaaa');
+ const created=await call('/compose',author,{id:'11111111-1111-4111-8111-111111111111',body:'A lightweight memory'});
+ assert.equal(created.status,303);
+ const key='11111111-1111-4111-8111-111111111111',json={Accept:'application/json'};
+ const queries=recordQueries(env);
+ let response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.ok(!queries.seen.some(chromeQuery),'like does not load page chrome');
+ assert.ok(!queries.seen.some(fullPostQuery),'like does not hydrate the full memory card');
+ // Repeating a like is idempotent and creates one notification.
+ response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM notifications WHERE kind='like' AND post=?").get(key).n,1);
+ queries.reset();
+ response=await call('/posts/'+key,viewer,{action:'comment',body:'Lovely'},{...json});
+ assert.equal((await response.json()).comment.body,'Lovely');
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)));
+ queries.reset();
+ const panel=await (await call('/posts/'+key+'?panel=comments',viewer)).json();
+ assert.deepEqual(panel.map(({name,body,canDelete})=>({name,body,canDelete})),[{name:'Test Admin',body:'Lovely',canDelete:true}]);
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)||/uploads|photo_tags|FROM tags/.test(query)),
+  'comments panel reads no chrome, images or tags:\n'+queries.seen.join('\n---\n'));
+ // Another member cannot edit or delete the author's memory.
+ assert.equal((await call('/posts/'+key,viewer,{action:'edit',body:'Changed'})).status,400);
+ assert.equal((await call('/posts/'+key,viewer,{action:'delete'})).status,400);
+ assert.equal(sqlite.prepare('SELECT body,hidden FROM posts WHERE id=?').get(key).body,'A lightweight memory');
+ // Hidden memories stay unavailable to likes, comments and panels.
+ sqlite.prepare('UPDATE posts SET hidden=1 WHERE id=?').run(key);
+ assert.equal((await call('/posts/'+key,viewer,{action:'like',liked:'0'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key,viewer,{action:'comment',body:'Hidden'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key+'?panel=comments',viewer)).status,404);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM likes WHERE post=?').get(key).n,1);
+});
+
+test('JSON endpoints skip page chrome while pages still show the unread count',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key,created,is_read,sample) VALUES(2,1,'mention',NULL,'s1','bench-sample',1,0,1)");
+ const queries=recordQueries(env);
+ for(const path of ['/memories?fragment=1','/memory-targets?q=Test','/tag-search?q=Test']){
+  queries.reset();
+  assert.equal((await call(path,ck)).status,200);
+  assert.ok(!queries.seen.some(chromeQuery),path+' loads no page chrome');
+ }
+ queries.reset();
+ const html=await body(await call('/memories',ck,undefined,{Accept:'text/html'}));
+ assert.match(html,/Notifications \(1 unread\)/);
+ assert.equal(queries.seen.filter(chromeQuery).length,1,'chrome loads once per page');
+ assert.match(await body(await call('/people/2',ck)),/Notifications \(1 unread\)/);
+});
