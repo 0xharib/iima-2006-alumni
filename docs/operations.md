@@ -156,7 +156,7 @@ on a photo removes that tag for good and is the only control. Someone who no lon
 automatic tags at the next batch (manual tags stay).
 
 **The batch.** Nothing happens when a memory is posted or a profile photo is saved (saving only marks the member's
-references for a rebuild). Every 3 hours (cron `17 */3 * * *`, about 22:47, 01:47, … IST) the Worker:
+references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 11:47 … 02:47 IST) the Worker:
 1. removes the references and automatic tags of anyone without a profile picture;
 2. queues photos not yet scanned (and failed ones; see below), up to 500;
 3. queues reference rebuilds for members with a profile picture who are new or changed a profile photo, up to 100;

@@ -736,3 +736,13 @@ test('B6: the batch removes the automatic tags of anyone without a profile pictu
 test('B7: the batch runs every 3 hours', ()=>{
   assert.match(readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8'),/crons = \["17 \*\/3 \* \* \*"\]/);
 });
+test('B8: the finish job reads the stored faces once for everyone it re-matches', async()=>{
+  const w=faceWorld();
+  for(let m=10;m<70;m++){ w.sqlite.prepare("INSERT INTO roster VALUES(?,?,'D','N')").run(m,'P'+m); w.sqlite.prepare('INSERT OR IGNORE INTO members(id) VALUES(?)').run(m);
+    picture(w,m); w.consent(m,m%8); w.sqlite.prepare('UPDATE face_prefs SET ref_tried=? WHERE member=?').run(Date.now(),m); }
+  for(let i=0;i<1200;i++){ const media=w.photo('p'+i,'u'+i,1); storedFace(w,media,'p'+i,20+(i%5)); }   // nobody's face
+  let pages=0; const prepare=w.env.DB.prepare.bind(w.env.DB);
+  w.env.DB={...w.env.DB,prepare(sql){ if(/FROM faces WHERE id>/.test(sql)) pages++; return prepare(sql); },batch:w.env.DB.batch.bind(w.env.DB)};
+  await finishRun(w.env);
+  assert.ok(pages<=4,'pages '+pages);
+});

@@ -411,26 +411,35 @@ export async function refreshRefs(env, member) {
   return kept.length;
 }
 
-// Match one member against every face already stored (photos shared before their references were built).
-export async function rematchMember(env, member) {
-  const db = env.DB;
-  if (!await eligible(db, member)) return 0;
-  const refs = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
-  if (!refs.length) return 0;
-  const best = new Map();
+// Match members against every face already stored (photos shared before their references were built), reading the
+// stored faces once for all of them. Each member's best face per photo is offered; writeMatches applies the rules.
+export async function rematchMembers(env, members) {
+  const db = env.DB, refs = new Map();
+  for (const member of members) {
+    if (!await eligible(db, member)) continue;
+    const vectors = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
+    if (vectors.length) refs.set(member, vectors);
+  }
+  if (!refs.size) return 0;
+  const best = new Map();   // member/media -> match
   for (let after = 0; ;) {
     const page = await rows(db, 'SELECT id,media,post,embedding FROM faces WHERE id>? ORDER BY id LIMIT 500', after);
     if (!page.length) break;
     for (const face of page) {
       const vector = toVector(face.embedding);
-      let score = -1;
-      for (const ref of refs) score = Math.max(score, similarity(vector, ref));
-      if (score >= FACE_BAR && !(best.get(face.media)?.score >= score)) best.set(face.media, {media: face.media, post: face.post, member, face: face.id, score});
+      for (const [member, vectors] of refs) {
+        let score = -1;
+        for (const ref of vectors) score = Math.max(score, similarity(vector, ref));
+        const key = member + '/' + face.media;
+        if (score >= FACE_BAR && !(best.get(key)?.score >= score)) best.set(key, {media: face.media, post: face.post, member, face: face.id, score});
+      }
     }
     after = page[page.length - 1].id;
   }
   return (await writeMatches(env, [...best.values()], 'later')).length;
 }
+
+export const rematchMember = (env, member) => rematchMembers(env, [member]);
 
 // Every photo the member is tagged in, newest memory first.
 export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM photo_tags pt JOIN posts p ON p.id=pt.post
@@ -517,7 +526,7 @@ export async function finishRun(env) {
   if (faceMode(env) === 'off' || !await faceSchema(db)) return;
   const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member')}
     AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
-  for (const {member} of recent) await rematchMember(env, member);
+  await rematchMembers(env, recent.map(r => r.member));
   await summarise(env);
 }
 
