@@ -1284,3 +1284,36 @@ test('directory pages 30 classmates at a time in the original ranking with no ga
  const fragment=await call('/people?after=0-1&fragment=1',ck);
  assert.equal(fragment.headers.get('Content-Type'),'application/json');
 });
+
+// ---- Performance work (P2): memory card tag labels ----
+test('memory card tag labels match the original per-roster rule',async()=>{
+ const {sqlite}=fixture();
+ const original=`(SELECT json_group_array(json_object('href',href,'label',label,'kind',kind)) FROM (
+      SELECT '/people/'||rr.id AS href,rr.name AS label,'person' AS kind FROM roster rr
+      WHERE (rr.id=p.subject OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(rr.id AS TEXT))
+        OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=rr.id AND t.status='accepted'))
+        AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+      UNION SELECT '/topics/'||tt.id,tt.title,'topic' FROM topics tt WHERE tt.hidden=0 AND tt.redirect IS NULL
+        AND (tt.id=p.topic OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=tt.id))
+      ORDER BY kind,label))`;
+ const source=readFileSync(new URL('../worker.mjs',import.meta.url),'utf8');
+ const current=source.match(/(\(SELECT json_group_array\(json_object\('href',href,'label',label,'kind',kind\)\) FROM \([\s\S]*?ORDER BY kind,label\s*\)\)) AS linked_tags/)[1];
+ assert.notEqual(current.replace(/\s+/g,' '),original.replace(/\s+/g,' '),'the rewritten query is under test');
+ for(let id=3;id<=30;id++)sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Person '+(id%7)+' '+id,'1','N');
+ for(const [id,title,hidden,redirect] of [['t1','Perf topic A',0,null],['t2','Perf topic hidden',1,null],['t3','Perf topic moved',0,'t1'],['t4','Perf topic D',0,null]])
+  sqlite.prepare('INSERT INTO topics(id,title,kind,hidden,redirect) VALUES(?,?,?,?,?)').run(id,title,'Other',hidden,redirect);
+ let seed=11;const rand=n=>Math.floor((seed=(seed*48271)%2147483647)/2147483647*n);
+ const targets=['3','4','012','12','99','30',' 5','abc'];
+ for(let i=0;i<120;i++){
+  const id='p'+i;
+  sqlite.prepare('INSERT INTO posts(id,author,subject,topic,body,created) VALUES(?,?,?,?,?,?)').run(id,1,rand(3)?null:1+rand(32),rand(3)?null:['t1','t2','t3','t4','t9'][rand(5)],'b',i);
+  for(let j=rand(4);j>0;j--)sqlite.prepare("INSERT OR IGNORE INTO memory_about VALUES(?,'person',?)").run(id,targets[rand(targets.length)]);
+  for(let j=rand(3);j>0;j--)sqlite.prepare("INSERT OR IGNORE INTO memory_about VALUES(?,'topic',?)").run(id,['t1','t2','t3','t4','zz'][rand(5)]);
+  for(let j=rand(3);j>0;j--)sqlite.prepare('INSERT OR IGNORE INTO tags VALUES(?,?,?)').run(id,1+rand(32),['accepted','pending','declined'][rand(3)]);
+  if(!rand(8))sqlite.prepare('INSERT OR IGNORE INTO muted_subjects VALUES(?)').run(id);
+ }
+ const read=expr=>sqlite.prepare(`SELECT p.id,${expr} AS tags FROM posts p ORDER BY p.id`).all().map(row=>row.id+' '+row.tags);
+ const before=read(original),after=read(current);
+ assert.deepEqual(after,before);
+ assert.ok(before.filter(row=>row.includes('/people/')).length>30&&before.filter(row=>row.includes('/topics/')).length>20,'links are exercised');
+});

@@ -334,12 +334,16 @@ async function route(req, env, record, setViewer) {
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
     (SELECT a.id FROM uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
     (SELECT json_group_array(json_object('href',href,'label',label,'kind',kind)) FROM (
+      -- Start from this memory's own links instead of testing every classmate and topic per card.
       SELECT '/people/'||rr.id AS href,rr.name AS label,'person' AS kind FROM roster rr
-      WHERE (rr.id=p.subject OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(rr.id AS TEXT))
-        OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=rr.id AND t.status='accepted'))
+      WHERE rr.id IN (SELECT p.subject
+          UNION ALL SELECT CAST(ma.target AS INTEGER) FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person'
+            AND ma.target=CAST(CAST(ma.target AS INTEGER) AS TEXT)
+          UNION ALL SELECT t.member FROM tags t WHERE t.post=p.id AND t.status='accepted')
         AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
-      UNION SELECT '/topics/'||tt.id,tt.title,'topic' FROM topics tt WHERE tt.hidden=0 AND tt.redirect IS NULL
-        AND (tt.id=p.topic OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=tt.id))
+      UNION SELECT '/topics/'||tt.id,tt.title,'topic' FROM topics tt
+      WHERE tt.id IN (SELECT p.topic UNION ALL SELECT ma.target FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic')
+        AND tt.hidden=0 AND tt.redirect IS NULL
       ORDER BY kind,label
     )) AS linked_tags,
     (SELECT json_group_array(media) FROM (
