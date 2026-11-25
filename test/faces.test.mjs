@@ -314,3 +314,61 @@ test('own profile shows the switch and the note beside photo uploads', async()=>
   assert.match(page,/We use your profile photos and your 2006 yearbook photo/);
   assert.doesNotMatch(await (await w.call('/people/2',await w.session(1,'aaaa'))).text(),/Find me in batch photos/);
 });
+
+const apostrophe="(?:'|&#39;|&#x27;|’)";
+test('found notification reads You are in 2 photos and opens the photo', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
+  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p1',b);
+  const page=await (await w.call('/notifications',ck)).text();
+  assert.match(page,new RegExp(`You${apostrophe}re in 2 photos`));
+  const id=w.sqlite.prepare("SELECT id FROM notifications WHERE recipient=2").get().id;
+  const open=await w.call('/notifications?open='+id,ck);
+  assert.equal(open.headers.get('location'),'/posts/p1#photo-post-u1');
+});
+test('found-all notification opens Photos of you', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2); storedFace(w,a,'p1',0); storedFace(w,b,'p2',0);
+  await rematchMember(w.env,2);
+  const page=await (await w.call('/notifications',ck)).text();
+  assert.match(page,/We found you in 2 photos/); assert.match(page,/Batch photos/);
+  const id=w.sqlite.prepare("SELECT id FROM notifications WHERE recipient=2").get().id;
+  assert.equal((await w.call('/notifications?open='+id,ck)).headers.get('location'),'/photos-of-you');
+});
+test('Not me removes only my own auto tag and sticks', async()=>{
+  const w=faceWorld(); w.consent(2,0); w.consent(3,1); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0,1];
+  await scanPhoto(w.env,'p1',a);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target) VALUES('p1',?,'person','2')").run(b);
+  const res=await w.call('/faces/not-me',ck,{media:a,next:'/photos-of-you'});
+  assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/photos-of-you');
+  assert.deepEqual(w.sqlite.prepare("SELECT media,target,origin FROM photo_tags ORDER BY target,media").all().map(r=>[r.media,r.target,r.origin]),
+    [[b,'2','manual'],[a,'3','auto']]);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=? AND member=2").get(a).state,'removed');
+  assert.equal((await w.call('/faces/not-me',ck,{media:b})).status,404);
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE media=? AND target='2'").get(a).n,0);
+});
+test('profile gallery shows photos I am tagged in, uploaded and legacy', async()=>{
+  const w=faceWorld(); const ck=await w.session(1,'aaaa');
+  const a=w.photo('p1','u1',1);
+  w.sqlite.exec(`INSERT INTO posts(id,author,body,created,origin) VALUES('lp',1,'old',1,'sub1');
+    INSERT INTO photos VALUES('sub1','old1.jpg','memory','Old one')`);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('p1',?,'person','2','auto'),('lp','legacy/lp/1','person','2','auto')").run(a);
+  const page=await (await w.call('/people/2',ck)).text();
+  assert.match(page,/\/media\/post\/u1/); assert.match(page,/\/media\/legacy\/lp\/1/);
+});
+test('Photos of you shows Not me only on auto tags', async()=>{
+  const w=faceWorld(); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('p1',?,'person','2','auto'),('p2',?,'person','2','manual')").run(a,b);
+  const page=await (await w.call('/photos-of-you',ck)).text();
+  assert.match(page,/\/media\/post\/u1/); assert.match(page,/\/media\/post\/u2/);
+  assert.equal((page.match(/action="\/faces\/not-me"/g)||[]).length,1);
+});
+test('the memory page offers Not me on my own auto tag only', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.match(await (await w.call('/posts/p1',await w.session(2,'bbbb'))).text(),/action="\/faces\/not-me"/);
+  assert.doesNotMatch(await (await w.call('/posts/p1',await w.session(1,'aaaa'))).text(),/action="\/faces\/not-me"/);
+});

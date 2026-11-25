@@ -311,7 +311,24 @@ export async function rematchMember(env, member) {
   return (await writeMatches(env, matches, 'summary')).length;
 }
 
+// Every photo the member is tagged in, newest memory first.
+export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM photo_tags pt JOIN posts p ON p.id=pt.post
+  WHERE pt.kind='person' AND pt.target=? AND ${POST_VISIBLE} ORDER BY p.created DESC,pt.media`, String(me));
+
+async function notMe(req, env, me) {
+  const form = await req.formData();
+  const media = String(form.get('media') || '');
+  const tag = await first(env.DB, `SELECT post FROM photo_tags WHERE media=? AND kind='person' AND target=? AND origin='auto'`, media, String(me));
+  if (!tag) return new Response('Page unavailable', {status: 404});
+  await env.DB.batch([
+    q(env.DB, `DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=? AND origin='auto'`, media, String(me)),
+    q(env.DB, `INSERT INTO face_matches VALUES(?,?,?,NULL,0,'removed',?) ON CONFLICT(media,member) DO UPDATE SET state='removed'`, media, me, tag.post, Date.now()),
+  ]);
+  return see(form.get('next') ? safeNext(form.get('next')) : '/photos-of-you');
+}
+
 export async function faceRoute({req, env, me, path, post}) {
+  if (path === '/faces/not-me' && post) return notMe(req, env, me);
   if (path !== '/faces/consent' || !post) return null;
   if (faceMode(env) === 'off') return new Response('Page unavailable', {status: 404});
   const form = await req.formData();

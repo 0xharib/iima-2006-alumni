@@ -745,6 +745,14 @@ p,dd,.memory-quote{text-wrap:pretty}
 .meet-face:first-child{margin-left:0}
 .meet-face :is(img,.initials){width:100%;height:100%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:.7rem}
 .meet-banner .cta{white-space:nowrap}
+.face-consent h2{margin:0;font-size:1.25rem}.face-consent p{margin:.25rem 0;max-width:62ch;color:var(--muted)}
+.face-consent-actions{display:flex;gap:.75rem;flex-wrap:wrap}.face-consent-actions form{margin:0}
+.face-consent-switch{margin-top:1rem;display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center}.face-consent-switch p{flex:1 1 28ch;margin:0;font-size:.92rem}
+.face-consent-switch strong{color:var(--ink);margin-right:.25rem}.face-consent-switch form{margin:0}
+.face-not-me{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.85rem;color:var(--muted);margin:.5rem 0}.face-not-me form{margin:0}
+.photos-of-you{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:1rem 0}
+.photos-of-you figure{margin:0}.photos-of-you img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:4px;display:block}
+.photos-of-you figcaption{display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.82rem;color:var(--muted);margin-top:.35rem}.photos-of-you figcaption form{margin:0}
 
 .profile-meet{border-top-color:var(--brick)!important}
 .profile-meet .meet-count{margin:.2rem 0 .6rem;font-size:clamp(1.05rem,1.8vw,1.25rem)}

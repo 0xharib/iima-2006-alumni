@@ -15,6 +15,11 @@ export const field=(name,value)=>`<input type="hidden" name="${e(name)}" value="
 export const form=(action,body,label,extra='')=>`<form method="post" action="${e(action)}" ${extra}>${body}<button type="submit">${e(label)}</button></form>`;
 const faceCopy=FACE_COPY;
 // Consent for automatic face tagging: a card on Home while unanswered, a switch on the owner's profile afterwards.
+// "Not me" on the viewer's own automatic tag on a photo.
+function notMe(photo,me){
+  const mine=JSON.parse(photo.linked_tags||'[]').some(tag=>tag.kind==='person'&&tag.member===me&&tag.origin==='auto');
+  return mine?`<div class="face-not-me"><span>You were found in this photo automatically.</span>${form('/faces/not-me',field('media',photo.media)+field('next','/posts/'+String(photo.source||'').split('/').pop()+'#photo-'+photo.media.replaceAll('/','-')),'Not me')}</div>`:'';
+}
 function faceConsent(state,next){
   const choice=(value,label,extra='')=>form('/faces/consent',field('choice',value)+field('next',next),label,extra);
   if(state==='ask') return `<section class="meet-banner face-consent" aria-label="Find me in batch photos"><h2>Find me in batch photos?</h2>
@@ -441,8 +446,8 @@ export const page={
     const gallery=isAlbum?`<section aria-label="Album photos" class="album-panels memory-collage">${photos.map((photo,i)=>`<article class="album-photo-panel collage-card" data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" id="photo-${e(photo.media.replaceAll('/','-'))}">
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
-        <div data-memory-tags>${memoryTags(photo)}</div>${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos);
+        <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
@@ -454,6 +459,12 @@ export const page={
       '<h2 id="comments">Comments</h2>'+list(comments.map(c=>`<div class="comment-row" id="comment-${e(c.id)}">${link('/people/'+c.author,c.name)}${c.author===me?
       `<details class="comment-menu"><summary aria-label="Comment options">⋯</summary><div>${action(url,'delete-comment','Delete comment',{comment:c.id})}</div></details><details><summary>Edit comment</summary>${form(url,field('action','edit-comment')+field('comment',c.id)+input('body','Comment',c.body,'required'),'Save')}</details>`:''}${report('comment',c.id)}<p class="story">${e(c.body)}</p></div>`),'No comments yet.')+
       (()=>{const composer=form(url,field('action','comment')+area('body','Add a comment','','required maxlength="1200"'),'Post comment');return commentPosted?`<details><summary>Add another comment</summary>${composer}</details>`:composer;})();
+  },
+  photosOfYou(list){
+    return `<h1>Photos of you</h1><p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
+      ${list.length?`<section class="photos-of-you">${list.map(p=>`<figure><a href="/posts/${e(p.post)}#photo-${e(p.media.replaceAll('/','-'))}"><img src="${mediaSrc(p.media,480)}" alt="Photo you're tagged in" loading="lazy"></a>
+        ${p.origin==='auto'?`<figcaption>Found automatically ${form('/faces/not-me',field('media',p.media)+field('next','/photos-of-you'),'Not me')}</figcaption>`:''}</figure>`).join('')}</section>`
+        :'<p>No photos of you yet. When batchmates share photos you’re in, they’ll appear here.</p>'}`;
   },
   notifications(rows,me,unlocked=true){
     const labels={mention:'mentioned you',like:'liked your memory',comment:'commented on your memory',tag:'added a tag to your memory',catchup_request:'wants to catch up with you',catchup_accepted:'accepted your catch-up request'};
@@ -467,18 +478,21 @@ export const page={
         const requestAction=n.kind==='catchup_request'?(n.meet_request?(n.meet_accepted?'<p class="meet-status">You accepted this request.</p>':meetForm('accept',n.actor,'/notifications','Accept request','notification-accept',n.meet_request)):'<p class="meet-hint">This request is no longer active.</p>'):'';
         const body=['Shared a yearbook photo.','Shared a photo.'].includes(n.memory_text)?'':n.memory_text;
         const photo=n.anchor.startsWith('photo-');
+        const found=n.event_key?.startsWith('found:'), foundAll=n.event_key?.startsWith('found-all:');
+        const foundLabel=foundAll?`We found you in ${Number(n.event_key.split(':')[1])} photo${Number(n.event_key.split(':')[1])===1?'':'s'}`
+          :found?(n.found_count>1?`You're in ${n.found_count} photos`:`You're in a photo`):'';
         const summary=n.comment_text||body;
         return `<article class="notification-card${n.is_read?'':' new'}">
           <div class="notification-byline">
-             ${n.actor_name?`<a href="/people/${n.actor}">${portrait({name:n.actor_name,portrait:n.actor_portrait})}${e(n.actor_name)}</a>`:`<strong>${n.sample?'Test activity':'A classmate'}</strong>`}
+             ${n.actor_name?`<a href="/people/${n.actor}">${portrait({name:n.actor_name,portrait:n.actor_portrait})}${e(n.actor_name)}</a>`:`<strong>${n.sample?'Test activity':foundAll?'Batch photos':'A classmate'}</strong>`}
             <small>${n.sample?'Test · ':''}${dates.format(n.created*1000)}${n.is_read?'':' · Unread'}</small>
           </div>
           <a class="notification-preview" href="${url}">
             ${n.preview_media?`<img src="${mediaSrc(n.preview_media,256)}" srcset="${mediaSet(n.preview_media,[256,480])}" sizes="(max-width: 600px) 100px, 170px" alt="${photo?'Tagged photo':'Memory preview'}" loading="lazy">`:''}
-            <div><strong>${labels[n.kind]}${photo?' on a photo':''}</strong>
+            <div><strong>${foundLabel?e(foundLabel):labels[n.kind]+(photo?' on a photo':'')}</strong>
               ${n.album_title?`<span class="notification-album">${e(n.album_title)}</span>`:''}
               ${summary?`<p>${e(summary.slice(0,240))}${summary.length>240?'…':''}</p>`:''}
-              <span class="notification-open">${n.kind==='comment'&&!n.sample?'View comment':photo?'View photo':n.post?'Open memory':catchup?'View catch-up':'Mark as read'}</span>
+              <span class="notification-open">${foundAll?'See your photos':n.kind==='comment'&&!n.sample?'View comment':photo?'View photo':n.post?'Open memory':catchup?'View catch-up':'Mark as read'}</span>
             </div>
           </a>
           ${requestAction}

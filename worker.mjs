@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { consentState, enqueuePhotos, enqueueRefs, faceRoute, forgetPostFaces, handleQueue } from './faces.mjs';
+import { consentState, enqueuePhotos, enqueueRefs, faceRoute, forgetPostFaces, handleQueue, photosOfYou } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -306,11 +306,15 @@ async function route(req, env, record, setViewer) {
     const uploads = `SELECT 'post/'||a.id AS media,a.caption,'/posts/'||p.id AS source,a.object_key
       FROM uploads a JOIN posts p ON p.id=a.post WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
       (EXISTS(SELECT 1 FROM (SELECT ? AS id) person_ref WHERE ${aboutPerson('person_ref.id')}) AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR
-      EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted'))`;
-    const memories = `SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,ph.caption,'/posts/'||p.id AS source,ph.object_key
-      FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
-      (p.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)))`;
-    const rows = await all(`${seed} UNION ALL ${yearbook} UNION ALL ${uploads} UNION ALL ${memories}`,+pilot,...Array(11).fill(person));
+      EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted') OR
+      EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.media='post/'||a.id AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
+    // Legacy media ids are numbered within each memory, so number first and then filter (a photo tag names that id).
+    const memories = `SELECT media,caption,source,object_key FROM (SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,
+      ph.caption,'/posts/'||p.id AS source,ph.object_key,p.id AS post,p.author,p.subject
+      FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${postVisible}) lp WHERE (? IS NULL OR lp.author=? OR
+      (lp.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=lp.post)) OR
+      EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=lp.post AND pt.media=lp.media AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
+    const rows = await all(`${seed} UNION ALL ${yearbook} UNION ALL ${uploads} UNION ALL ${memories}`,+pilot,...Array(13).fill(person));
     const seen = new Set();
     return rows.filter(row => {if (seen.has(row.object_key)) return false; seen.add(row.object_key); return true;});
   }
@@ -525,6 +529,7 @@ async function route(req, env, record, setViewer) {
     return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me?await consentState(env,me):'hidden'),member,{home:true,active:'/people'});
   }
 
+  if (path==='/photos-of-you' && !post) return show('Photos of you',page.photosOfYou(await photosOfYou(db,me)));
   if (path==='/profile') {
     if (!post) {
       const [roster,fields]=await Promise.all([
@@ -690,9 +695,9 @@ async function route(req, env, record, setViewer) {
     const key = postMatch[1];
     const item = (await posts('p.id=?',[key],1))[0];
     if (!item) return missing();
-    const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label
+    const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label,pt.origin,r.id AS member
       FROM photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.kind='person'
-      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title FROM photo_tags pt
+      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title,pt.origin,NULL FROM photo_tags pt
       JOIN topics t ON t.id=pt.target WHERE pt.post=? AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       ORDER BY kind,label`,key,key);
     if (!post) {
@@ -789,17 +794,19 @@ async function route(req, env, record, setViewer) {
     }
     const opened=Number(u.searchParams.get('open'));
     if(Number.isSafeInteger(opened)&&opened>0){
-      const item=await one(`SELECT n.id,n.post,n.anchor,n.kind,n.actor ${notificationFrom}
+      const item=await one(`SELECT n.id,n.post,n.anchor,n.kind,n.actor,n.event_key ${notificationFrom}
         WHERE n.id=? AND n.recipient=? AND ${notificationVisible}`,opened,me);
       if(!item)return missing();
       await run('UPDATE notifications SET is_read=1 WHERE id=? AND recipient=?',opened,me);
       if (item.kind==='catchup_request') return redirect('/people/'+me+'#meet');
       if (item.kind==='catchup_accepted') return redirect('/people/'+item.actor);
+      if (item.event_key.startsWith('found-all:')) return redirect('/photos-of-you');
       return redirect(item.post?'/posts/'+encode(item.post)+(item.anchor?'#'+encode(item.anchor):''):path);
     }
     const rows=await all(`SELECT n.*,r.name AS actor_name,${portrait} AS actor_portrait,
       w.request_id AS meet_request,w.accepted_at AS meet_accepted,
       p.body AS memory_text,a.title AS album_title,c.body AS comment_text,
+      (SELECT count(*) FROM photo_tags ft WHERE ft.post=n.post AND ft.kind='person' AND ft.target=CAST(n.recipient AS TEXT) AND ft.origin='auto') AS found_count,
       CASE
         WHEN n.anchor LIKE 'photo-post-%' THEN 'post/'||substr(n.anchor,12)
         WHEN n.anchor LIKE 'photo-legacy-%' THEN 'legacy/'||p.id||'/'||substr(n.anchor,length(p.id)+15)
