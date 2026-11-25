@@ -6,16 +6,18 @@ export const socialScript = String.raw`
     const box=meet.querySelector('[data-meet-search]'), list=meet.querySelector('[data-meet-results]'), add=meet.querySelector('[data-meet-add]');
     const picked=new Set((meet.dataset.picked||'').split(',').filter(Boolean));
     let revision=0, timer=0;
-    box.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{
+    let pending=null;
+    box.addEventListener('input',()=>{clearTimeout(timer);pending?.abort();timer=setTimeout(async()=>{
       const request=++revision, q=box.value.trim(); list.replaceChildren(); if(q.length<2) return;
+      const controller=pending=new AbortController(),deadline=setTimeout(()=>controller.abort(),8000);
       try{
-        const rows=await (await fetch('/tag-search?q='+encodeURIComponent(q))).json(); if(request!==revision) return;
+        const rows=await (await fetch('/tag-search?q='+encodeURIComponent(q),{signal:controller.signal})).json(); clearTimeout(deadline); if(request!==revision) return;
         const fresh=rows.filter(row=>!picked.has(String(row.id)));
         if(!fresh.length){const p=document.createElement('p');p.className='meet-hint';p.textContent=rows.length?'Already on your list.':'No matching classmates.';list.append(p);return;}
         for(const row of fresh){const b=document.createElement('button');b.type='button';b.setAttribute('role','option');
           b.textContent=row.name+(row.nickname?' · '+row.nickname:'');
           b.addEventListener('click',()=>{add.elements.target.value=row.id;b.disabled=true;add.submit();});list.append(b);}
-      }catch{const p=document.createElement('p');p.className='meet-hint';p.textContent='Search unavailable. Try again.';list.append(p);}
+      }catch{clearTimeout(deadline);if(request!==revision)return;const p=document.createElement('p');p.className='meet-hint';p.textContent='Search unavailable. Try again.';list.append(p);}
     },180);});
   }
   // Classmates load 30 at a time; "Show more" appends the next page in place (a plain link without JS).
@@ -224,7 +226,9 @@ export const socialScript = String.raw`
       current=(index+albumPhotos.length)%albumPhotos.length;
       const photo=albumPhotos[current];
       const image=viewer.querySelector('img');
-      image.src=photo.href;image.alt=photo.querySelector('img').alt;
+      // A display-sized variant fills the viewer; the original stays one tap away.
+      image.srcset=photo.href+'?w=768 768w, '+photo.href+'?w=1200 1200w';image.src=photo.href+'?w=1200';image.alt=photo.querySelector('img').alt;
+      const original=viewer.querySelector('[data-album-original]');if(original)original.href=photo.href;
       viewer.querySelector('[role=status]').textContent=(current+1)+' of '+albumPhotos.length;
     };
     albumPhotos.forEach((photo,index)=>photo.addEventListener('click',event=>{
@@ -323,9 +327,10 @@ export const socialScript = String.raw`
         const photo=copy.querySelector('[data-full-src]');
         if(photo){
           photo.removeAttribute('loading');
-          photo.removeAttribute('srcset');
-          photo.removeAttribute('sizes');
-          photo.src=photo.dataset.fullSrc;
+          // Enlarged memories use display-sized variants rather than downloading the original.
+          photo.srcset=photo.dataset.fullSrc+'?w=768 768w, '+photo.dataset.fullSrc+'?w=1200 1200w';
+          photo.sizes='100vw';
+          photo.src=photo.dataset.fullSrc+'?w=1200';
         }
         dialog.querySelector('[data-dialog-content]').replaceChildren(copy);
         dialog.showModal();

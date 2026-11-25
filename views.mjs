@@ -202,7 +202,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=22" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=23" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -265,10 +265,13 @@ export function memoriesCompletionPrompt(content,checks,me) {
 export const page={
   socialScript,
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
-    box.addEventListener('input',async()=>{const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
-    try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
+    let timer=0, pending=null;
+    // Debounce typing and cancel the previous lookup; a stale answer never replaces a newer one.
+    box.addEventListener('input',()=>{clearTimeout(timer); pending?.abort(); const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
+    timer=setTimeout(async()=>{ const controller=pending=new AbortController(); const deadline=setTimeout(()=>controller.abort(),8000);
+    try { const response=await fetch('/names?q='+encodeURIComponent(q),{signal:controller.signal}); const names=await response.json(); if(request!==revision)return;
     for(const item of names){ const li=document.createElement('li'), a=document.createElement('a'); a.textContent=item.name; a.href='/signin?id='+item.id+'&next='+encodeURIComponent(box.dataset.next); li.append(a); results.append(li); }
-    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; }});
+    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; } finally { clearTimeout(deadline); } },180);});
     document.addEventListener('submit',async event=>{
       const form=event.target;
       if (form.getAttribute('action')!=='/request-link') return;
@@ -541,7 +544,7 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos);
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos);
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
