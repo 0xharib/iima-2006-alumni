@@ -129,7 +129,7 @@ const anchorFor = media => 'photo-' + media.replace(/\//g, '-');
 const changes = result => result?.meta?.changes ?? result?.changes ?? 0;
 const CHUNK = 30;   // matches per db.batch: three statements each, well inside D1's limits
 
-// Migration 0017 may not have run yet (it must follow the deploy). Until it has, face tagging stays hidden and
+// Migration 0019 may not have run yet (it must follow the deploy). Until it has, face tagging stays hidden and
 // nothing touches its tables or columns. Only a positive answer is cached, per database binding.
 const schemaReady = new WeakSet();
 export async function faceSchema(db) {
@@ -313,7 +313,7 @@ export async function handleQueue(batch, env) {
   }
 }
 
-// Statements that forget a hidden memory's faces (Not me choices are kept). Empty before migration 0017.
+// Statements that forget a hidden memory's faces (Not me choices are kept). Empty before migration 0019.
 export async function forgetPostFaces(db, post) {
   if (!await faceSchema(db)) return [];
   return [

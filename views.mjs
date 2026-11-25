@@ -31,6 +31,22 @@ const action=(url,name,label,values={})=>form(url,field('action',name)+Object.en
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
 const labelFor=key=>({dorm:'Dorm number',nickname:'Dorm name',city:'Current city',life:'Life, Lately',professionalFocus:'Professional focus',researchHighlight:'Selected work and achievements',firstDayAdvice:'Advice to my first-day self',outsideWork:'Outside work',reunionStory:'Reunion story',anythingElse:'Anything else',printName:'Yearbook name',moment:'A memorable moment'}[key]||key[0].toUpperCase()+key.slice(1));
+
+const profilePrompts = {
+  life: ['What has life looked like since WIMWI?', 'Where has life taken you over the last twenty years? Share a few sentences about work, unexpected turns, and what matters to you these days.'],
+  family: ['Tell us about your family and life outside work', 'Who shares your world these days? Tell us about your partner, children, parents, pets—or the people and pursuits that make life yours. Add a small detail your batchmates wouldn’t know.'],
+  outsideWork: ['What could your batchmates happily talk to you about for hours?', 'A hobby, a passion, a side project, or your latest obsession—give someone a reason to start a conversation.'],
+  moment: ['What’s a WIMWI memory that still makes you smile?', 'Take us back to a particular moment: where were you, who was there, and what happened?'],
+  firstDayAdvice: ['What would you tell your first-day-at-WIMWI self?', 'With twenty years of hindsight, what advice—or unexpected news—would you share?'],
+  anythingElse: ['What else would you like your batchmates to know?', 'An unexpected turn, a proud moment, or something we haven’t asked about.']
+};
+const profileControl = (name,key,value='') => {
+  const prompt=profilePrompts[key], label=prompt?.[0]||labelFor(key);
+  return `<label>${e(label)}${prompt?`<small style="display:block;font-weight:400;line-height:1.5;margin:.4rem 0;text-transform:none;letter-spacing:normal">${e(prompt[1])}</small>`:''}<textarea name="${e(name)}" maxlength="4000" rows="${prompt?4:2}" style="min-height:${prompt?'7':'3.5'}rem" placeholder="${prompt?'A few sentences will help your batchmates catch up with you.':''}">${e(value)}</textarea></label>`;
+};
+const generatedLifeNote="<div class=\"profile-generated-review\" style=\"margin:.8rem 0;padding:.8rem;border:1px solid var(--brick-fired);border-radius:var(--r);background:var(--brick-wash)\"><strong>Make your introduction your own</strong><p style=\"margin:.35rem 0\">This Life, Lately introduction was auto-generated. We encourage you to rewrite it in your own words—tell your classmates what life looks like for you today.</p></div>";
+const moreYouIntro = '<h2>A little more you</h2><p>Pick one—or answer them all. These are often the best parts to read.</p>';
+
 const mediaSrc = (media,width) => `/media/${e(media)}?w=${width}`;
 const mediaSet = (media,widths) => widths.map(width=>`${mediaSrc(media,width)} ${width}w`).join(', ');
 const images=items=>items.length?`<div class="photos">${items.map(row=>`<figure><a href="/media/${e(row.media)}"><img src="${mediaSrc(row.media,256)}" srcset="${mediaSet(row.media,[256,480])}" sizes="(max-width: 520px) 45vw, 200px" loading="lazy" alt="${e(row.caption||'Batch photo')}"></a>${row.caption?`<figcaption>${e(row.caption)}</figcaption>`:''}</figure>`).join('')}</div>`:'<p>No published photos yet.</p>';
@@ -53,6 +69,11 @@ const dormLabel = dorm => /^\d+$/.test(dorm) ? 'Dorm '+dorm : dorm;
 const classmate = (row,extra=[]) => {
   const registry = [row.dorm&&dormLabel(row.dorm),...extra].filter(Boolean).join(' · ');
   return `<strong>${e(row.name)}</strong>${row.nickname?`<small class="nickname">“${e(row.nickname)}”</small>`:''}${registry?`<small class="registry">${e(registry)}</small>`:''}`;
+};
+const completionLabel = timestamp => {
+  const day=value=>Math.floor((value+19800000)/86400000);
+  const days=Math.max(0,day(Date.now())-day(Number(timestamp)));
+  return days===0?'Completed today':days===1?'Completed yesterday':`Completed ${days} days ago`;
 };
 // Catch-up requests reveal the sender to the recipient and can be accepted.
 const checkIcon = '<svg class="icon-inline" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5 9.5 18 20 6"/></svg>', extIcon = '<svg class="icon-inline icon-ext" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>';
@@ -82,21 +103,40 @@ const tagPanel=()=>`<div class="memory-inline" data-panel-content="tags" hidden>
 const tagControls=(scope)=>`${icon('tag','Tag '+scope,'data-panel="tags" aria-expanded="false"')}${tagPanel()}
   <div class="memory-result" role="status"></div>`;
 const memoryAuthor=post=>`<div class="memory-author"><a href="/people/${post.author}">${portrait({name:post.author_name,portrait:post.author_portrait})}${e(post.author_name)}</a></div>`;
+
+export function profileMemoryRows(rows,person){
+  return rows.flatMap(post=>{
+    if(post.author===person||post.profile_album_tag)return [post];
+    const photos=JSON.parse(post.collage_photos||'[]');
+    const links=JSON.parse(post.profile_photo_links||'[]');
+    const tagged=[...new Set(links.filter(tag=>tag.kind==='person'&&tag.href==='/people/'+person&&photos.includes(tag.media)).map(tag=>tag.media))];
+    return tagged.map(media=>({...post,photo_scope:media,album_photo_total:photos.length,
+      collage_photos:JSON.stringify([media]),album_cover:null,
+      linked_tags:JSON.stringify(links.filter(tag=>tag.media===media))}));
+  });
+}
+
 const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
   const photos=JSON.parse(post.collage_photos||'[]');
-  const album=photos.length>1, photo=post.album_cover?'post/'+post.album_cover:photos[0];
+  const scoped=!!post.photo_scope;
+  const album=!scoped&&photos.length>1, photo=post.album_cover?'post/'+post.album_cover:photos[0];
   const title=post.album_title||'Photo album';
+  const previews=album?[photo,...photos.filter(media=>media!==photo)].slice(0,3):[];
+  const albumImages=previews.map((media,slot)=>`<span class="album-preview-tile"><img src="${mediaSrc(media,slot===0?480:256)}" srcset="${mediaSet(media,slot===0?[256,480,768]:[96,256,480])}" sizes="${slot===0?'(max-width: 490px) 63vw, (max-width: 850px) 30vw, 270px':'(max-width: 490px) 32vw, (max-width: 850px) 15vw, 135px'}" alt="" decoding="async" ${priority&&index<3&&slot===0?'fetchpriority="high"':'loading="lazy"'}>${slot===2&&photos.length>3?`<span class="album-more"><strong>+${photos.length-3}</strong><span>more photos</span></span>`:''}</span>`).join('');
   const image=photo?`<img src="${mediaSrc(photo,480)}" srcset="${mediaSet(photo,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" data-full-src="/media/${e(photo)}" alt="${e(album?title:'Memory shared by '+post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:'';
-  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}">
+  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}"${scoped?` data-photo-scope="${e(post.photo_scope)}"`:''}>
     ${memoryAuthor(post)}
     <div class="collage-visual">
-      ${album?`<a class="album-cover" href="/posts/${e(post.id)}">${image}<span class="album-photo-count">${photos.length} photos</span></a>`:
+      ${album?`<a class="album-cover album-collage album-collage-${previews.length}" href="/posts/${e(post.id)}" aria-label="Open ${e(title)}, ${photos.length} photos">${albumImages}</a>`:
         `<button type="button" class="memory-enlarge" data-enlarge aria-label="View memory from ${e(post.author_name)}">
         ${photo?image:`<span class="memory-quote">${e(post.body)}</span>${post.body.length>240?'<span class="memory-read-more">Read full memory</span>':''}`}</button>`}
     </div>
     <div class="memory-card-footer">
+    ${scoped?`<p class="registry">Photo from ${e(title)}</p>`:''}
     ${album?`<h3 class="memory-album-title">${link('/posts/'+post.id,title)}</h3>`:''}
     ${photo&&post.body&&!['Shared a yearbook photo.','Shared a photo.'].includes(post.body)?`<p class="memory-caption">${e(post.body)}</p>`:''}
+    ${album?`<a class="album-open-link" href="/posts/${e(post.id)}">Tap to open album · ${photos.length} photos <span aria-hidden="true">→</span></a>`:''}
+    ${scoped?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(post.photo_scope.replaceAll('/','-'))}">Tap to open album · ${post.album_photo_total} photos <span aria-hidden="true">→</span></a><small style="display:block">Likes and comments are shared with the original memory.</small>`:''}
     <div data-memory-tags>${memoryTags(post)}</div>
     <div class="collage-actions">
       <div class="memory-like">${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span></div>
@@ -118,6 +158,49 @@ const memoryBatch=(rows,priority=false)=>`<div class="memory-collage">${memoryCa
 const collage=(rows,next,priority=false)=>`<div data-feed>${memoryBatch(rows,priority)}</div>
 ${next?`<a class="feed-more" data-feed-next href="${e(next)}" aria-label="Load more memories">Load more memories</a>`:''}
 ${memoryDialog()}`;
+
+export function reunionCatchups(rows,wishes,me,unlocked,filter='') {
+  const byPerson=new Map();
+  for(const wish of wishes){
+    const outgoing=wish.member===me;
+    if(!outgoing&&!unlocked)continue;
+    const key=outgoing?wish.target:wish.member;
+    const state=byPerson.get(key)||{confirmed:false,incoming:null,outgoing:false};
+    state.confirmed ||= wish.accepted_at!==null && wish.accepted_at!==undefined;
+    if(!wish.accepted_at){if(outgoing)state.outgoing=true;else state.incoming=wish.request_id;}
+    byPerson.set(key,state);
+  }
+  const enriched=rows.map(row=>{
+    const state=byPerson.get(row.id);
+    const catchup=row.id===me?'none':state?.confirmed?'confirmed':state?.incoming?'incoming':state?.outgoing?'outgoing':'none';
+    return {...row,catchup,catchup_request:catchup==='incoming'?state.incoming:null};
+  });
+  const rank={incoming:0,confirmed:1,outgoing:2,none:3};
+  return enriched.filter(row=>!filter||(filter==='requested'?['incoming','outgoing'].includes(row.catchup):row.catchup===filter))
+    .sort((a,b)=>rank[a.catchup]-rank[b.catchup]||a.name.localeCompare(b.name));
+}
+
+// Shared site styles: one static stylesheet served from a content-versioned URL and cached for a year.
+// Pages link to it instead of inlining ~80 KB of CSS in every private, uncacheable HTML response.
+export const siteCSS = `
+  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
+  ${fontFaces}
+  ${theme}
+  .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
+  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
+  .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
+  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
+  .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
+  @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
+  ${mobileNavCSS}
+  `;
+// FNV-1a over the stylesheet: any style change produces a new URL, so immutable caching is safe.
+export const siteCSSVersion = (() => {
+  let a=0x811c9dc5,b=0x01000193^0x5bd1e995;
+  for (let i=0;i<siteCSS.length;i++){const c=siteCSS.charCodeAt(i);a=Math.imul(a^c,0x01000193)>>>0;b=Math.imul(b^c,0x5bd1e995)>>>0;}
+  return a.toString(36)+b.toString(36);
+})();
+export const siteStylesheet = '/styles/site-'+siteCSSVersion+'.css';
 export function render(title,body,member,{home=false,active=null}={}) {
   const sectionOf = {Memories:'/memories',Classmates:'/people','December reunion':'/reunion',Gallery:'/gallery',Notifications:'/notifications',WhatsApp:'/wa/','WhatsApp Insights':'/wa/','Edit profile':'/people'};
   const current = active || (title===reunionTitle ? '/' : sectionOf[title]);
@@ -134,37 +217,43 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<style>
-  ${tokens}*{box-sizing:border-box}body{margin:0;background:var(--lime);color:var(--ink);font:1rem/1.55 var(--sans)}a{color:var(--brick);text-underline-offset:.18em}button,input,textarea,select{font:inherit}button{cursor:pointer;border:0;border-radius:2rem;background:var(--brick);color:var(--on-brick);padding:.55rem 1rem;margin-block:.4rem}input:not([type=checkbox]),textarea,select{display:block;width:100%;padding:.5rem;border:1px solid var(--line);border-radius:.5rem;background:var(--paper);color:var(--ink)}textarea{min-height:6rem}input[type=checkbox]{margin-right:.35rem}label{display:block;margin:.6rem 0}.check{display:flex;align-items:center}.bar{background:#f1e0cf;border-bottom:1px solid var(--line)}.bar div,main,footer{max-width:960px;margin:auto;padding:1rem clamp(1rem,4vw,2.3rem)}.wordmark{font:700 1.25rem var(--serif);text-decoration:none}nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;margin-top:.65rem}nav a{font-weight:600}h1,h2,h3{line-height:1.14;font-family:var(--serif)}h1{font-size:clamp(2.3rem,7vw,4.5rem);margin:.65em 0 .3em}h2{font-size:1.65rem}article,fieldset,.panel{background:var(--tile);border:1px solid var(--line);border-radius:.9rem;padding:1rem;margin:1rem 0;min-width:0}article header{display:flex;gap:.5rem 1rem;justify-content:space-between;flex-wrap:wrap}time,small{color:var(--muted)}.plain{list-style:none;padding:0}.plain li{padding:.45rem 0;border-bottom:1px solid var(--line)}.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(145px,100%),1fr));gap:1rem}figure{margin:0}img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:.6rem;display:block;background:var(--tint)}figcaption{font-size:.9rem}.inline{display:inline-block;margin-right:.4rem}.story{white-space:pre-wrap;overflow-wrap:anywhere}.new{font-weight:700}:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}summary{cursor:pointer;margin:.5rem 0}dd{margin:0 0 .8rem;white-space:pre-wrap;overflow-wrap:anywhere}dt{font-weight:650}
-  ${fontFaces}
-  ${theme}
-  .bar .account-menu{position:absolute;right:0;top:100%;z-index:5;min-width:10rem;padding:.8rem;background:var(--tile);border:1px solid var(--line);border-radius:.8rem;box-shadow:0 12px 28px #24161030}
-  .account{position:relative;margin-left:auto}.account summary{list-style:none;margin:0}.account summary::-webkit-details-marker{display:none}.account summary img,.account summary .initials{width:2.4rem;height:2.4rem;border-radius:50%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint)}
-  .account-menu a{display:block;margin-bottom:.4rem}.directory-controls{display:grid;grid-template-columns:2fr 1fr auto;align-items:end;gap:.75rem;margin-bottom:1.25rem}
-  .directory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(10rem,100%),1fr));gap:1rem}.directory-card{display:block;overflow:hidden;background:var(--tile);border:1px solid var(--line);border-radius:1rem;text-decoration:none}.directory-card img,.directory-card .initials{width:100%;aspect-ratio:1;display:grid;place-items:center;background:var(--tint);border-radius:0;font-size:2rem}.directory-card div{padding:.75rem}.directory-card small{display:block}
-  .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
-  @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
-  ${mobileNavCSS}
-  </style><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=19" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=24" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
     .map(([key,label])=>({key,label,complete:!!String(details[key]??'').trim()}))
     .concat(['then','now'].map(slot=>({key:slot,label:slot==='then'?'Then photo (2006)':'Now photo (2026)',complete:!!photos[slot]})));
 }
-export function whatsappUnlock(checks, me, own=false) {
+export function whatsappUnlock(checks, me, own=false, details={}) {
   const missing=checks.filter(check=>!check.complete), complete=!missing.length;
-  if(own)return `<section class="panel profile-completion-summary" id="whatsapp-unlock" aria-labelledby="profile-progress-title">
-    <div class="profile-progress-heading"><h2 id="profile-progress-title">${complete?'Profile complete':'Your profile'}</h2><strong>${checks.length-missing.length} of ${checks.length} complete</strong></div>
-    ${complete?'<p>Your WhatsApp Insights are unlocked.</p><a href="/wa/">View WhatsApp Insights</a>':`<progress max="${checks.length}" value="${checks.length-missing.length}" aria-label="Profile completion"></progress><p>Finish these items to unlock memories, WhatsApp Insights and incoming catch-up names.</p><ul class="profile-missing-items">${missing.map(check=>`<li><a href="#profile-field-${check.key}" data-required-jump="${check.key}">${e(check.label)}</a></li>`).join('')}</ul><a class="cta profile-primary" data-unlock-edit data-required-jump="${missing[0].key}" href="#profile-field-${missing[0].key}">Continue profile</a>`}
-    <details class="profile-all-requirements"><summary>All 7 requirements</summary><p>Only the five details and two photos below are required. Your profile picture and optional questions do not count.</p><ul class="unlock-checklist">${checks.map(check=>`<li><span aria-hidden="true">${check.complete?'✓':'○'}</span><span>${e(check.label)}</span><small>${check.complete?'Complete':'Required'}</small></li>`).join('')}</ul></details>
-  </section>`;
-  const target=key=>own?'#profile-field-'+key:'/people/'+me+'?complete=whatsapp#profile-field-'+key;
+  if(own){
+    const extraKeys=['company','education','outsideWork','moment','firstDayAdvice','anythingElse'];
+    const extra=extraKeys.map(key=>({key,label:profilePrompts[key]?.[0]||labelFor(key),complete:!!String(details[key]??'').trim()}));
+    const extraDone=extra.filter(item=>item.complete).length;
+    const firstExtra=extra.find(item=>!item.complete);
+    return `<div class="profile-completion-scores">
+    <section class="panel profile-completion-summary" id="whatsapp-unlock" aria-labelledby="profile-progress-title">
+      <div class="profile-progress-heading"><h2 id="profile-progress-title">Minimum requirements completion</h2><strong>${checks.length-missing.length} / ${checks.length}</strong></div>
+      <progress max="${checks.length}" value="${checks.length-missing.length}" aria-label="Minimum requirements completion"></progress>
+      ${complete?'<p><strong>Your essentials are all set.</strong> Memories, WhatsApp Insights and incoming catch-up names are unlocked. Enjoy reconnecting!</p><a href="/wa/">Explore WhatsApp Insights</a>':`<p>You’re on your way. These five details and two photos unlock memories, WhatsApp Insights and the names of classmates who want to catch up with you.</p><a class="cta profile-primary" href="/profile#profile-field-${missing[0].key}">Continue your profile</a>`}
+      ${details.lifeGenerated?`${generatedLifeNote}<a href="/profile#profile-field-life">Rewrite my introduction</a>`:''}
+      <details class="profile-all-requirements"><summary>${complete?'Your seven essentials':'What’s left to add?'}</summary><ul class="unlock-checklist">${checks.map(check=>`<li><span aria-hidden="true">${check.complete?'✓':'○'}</span><a href="/profile#profile-field-${check.key}">${e(check.label)}</a><small>${check.complete?'Complete':'Required'}</small></li>`).join('')}</ul></details>
+    </section>
+    <section class="panel profile-completion-summary" aria-labelledby="additional-progress-title">
+      <div class="profile-progress-heading"><h2 id="additional-progress-title">Additional info completion</h2><strong>${extraDone} / ${extra.length}</strong></div>
+      <progress max="${extra.length}" value="${extraDone}" aria-label="Additional info completion"></progress>
+      <p>${extraDone===extra.length?'<strong>There’s so much more of you here now.</strong> Thank you for giving your classmates more stories and conversation starters.':extraDone?'<strong>Your story is taking shape.</strong> Another memory, a passion, or an unexpected turn helps classmates get to know the person you are today.':'<strong>A little more you goes a long way.</strong> Share a memory, a passion, or a little about your journey. Give your classmates something to smile about—or ask you about.'}</p>
+      <p><small>Always optional. Your access is unlocked by the minimum requirements alone. This score counts details shared, not how much you write.</small></p>
+      <a href="/profile#${firstExtra?'profile-field-'+firstExtra.key:'a-little-more-you'}">${extraDone===extra.length?'Revisit your stories':'Add a little more you'}</a>
+      <details class="profile-all-requirements"><summary>Six ways to share more</summary><ul class="unlock-checklist">${extra.map(item=>`<li><span aria-hidden="true">${item.complete?'✓':'○'}</span><a href="/profile#profile-field-${item.key}">${e(item.label)}</a><small>${item.complete?'Shared':'Optional'}</small></li>`).join('')}</ul></details>
+    </section></div>`;
+  }
+  const target=key=>'/profile#profile-field-'+key;
   return `<section class="panel whatsapp-unlock" id="whatsapp-unlock" aria-labelledby="whatsapp-unlock-title">
     <h2 id="whatsapp-unlock-title">${complete?'Your WhatsApp Insights are unlocked':own?'Complete these 7 items to unlock everything':'Complete your profile to unlock WhatsApp Insights'}</h2>
     <p>${complete?'Your memories, WhatsApp Insights and catch-up requests are unlocked.':own?'Unlock memories, WhatsApp Insights and the names of classmates who want to catch up. Only the five details and two photos below are required.':'Discover your WhatsApp story and the batch’s years together. Complete these five details and both photos.'}</p>
-    ${complete?'':`<p><strong>${checks.length-missing.length} of ${checks.length} requirements complete</strong></p><ul class="unlock-checklist">${checks.map(check=>`<li class="${check.complete?'is-complete':'is-required'}"><span aria-hidden="true">${check.complete?'✓':'○'}</span> ${check.complete?`<span>${e(check.label)}</span>`:`<a href="${target(check.key)}"${own?` data-required-jump="${check.key}"`:''}>Add ${e(check.label)}</a>`} <small>${check.complete?'Complete':'Required'}</small></li>`).join('')}</ul><p class="unlock-optional-note">Your profile picture, company, education and optional questions are not required.</p>`}
-    <a class="cta profile-primary" ${own&&!complete?`data-unlock-edit data-required-jump="${missing[0].key}"`:''}href="${complete?'/wa/':target(missing[0].key)}">${complete?'View WhatsApp Insights':own?'Add next required item':'Complete my profile'}</a>
+    ${complete?'':`<p><strong>${checks.length-missing.length} of ${checks.length} requirements complete</strong></p><ul class="unlock-checklist">${checks.map(check=>`<li class="${check.complete?'is-complete':'is-required'}"><span aria-hidden="true">${check.complete?'✓':'○'}</span> ${check.complete?`<span>${e(check.label)}</span>`:`<a href="${target(check.key)}">Add ${e(check.label)}</a>`} <small>${check.complete?'Complete':'Required'}</small></li>`).join('')}</ul><p class="unlock-optional-note">Your profile picture, company, education and optional questions are not required.</p>`}
+    <a class="cta profile-primary" href="${complete?'/wa/':target(missing[0].key)}">${complete?'View WhatsApp Insights':own?'Edit profile':'Complete my profile'}</a>
   </section>`;
 }
 export function catchupLocked(count,me,compact=false) {
@@ -191,10 +280,13 @@ export function memoriesCompletionPrompt(content,checks,me) {
 export const page={
   socialScript,
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
-    box.addEventListener('input',async()=>{const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
-    try { const response=await fetch('/names?q='+encodeURIComponent(q)); const names=await response.json(); if(request!==revision)return;
+    let timer=0, pending=null;
+    // Debounce typing and cancel the previous lookup; a stale answer never replaces a newer one.
+    box.addEventListener('input',()=>{clearTimeout(timer); pending?.abort(); const request=++revision; const q=box.value.trim(); results.replaceChildren(); if(q.length<2)return;
+    timer=setTimeout(async()=>{ const controller=pending=new AbortController(); const deadline=setTimeout(()=>controller.abort(),8000);
+    try { const response=await fetch('/names?q='+encodeURIComponent(q),{signal:controller.signal}); const names=await response.json(); if(request!==revision)return;
     for(const item of names){ const li=document.createElement('li'), a=document.createElement('a'); a.textContent=item.name; a.href='/signin?id='+item.id+'&next='+encodeURIComponent(box.dataset.next); li.append(a); results.append(li); }
-    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; }});
+    if(!names.length) results.textContent='No matching names.'; } catch { if(request===revision)results.textContent='Search unavailable. Try again.'; } finally { clearTimeout(deadline); } },180);});
     document.addEventListener('submit',async event=>{
       const form=event.target;
       if (form.getAttribute('action')!=='/request-link') return;
@@ -212,21 +304,21 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,people,next,key,me,meet={available:false},unlock=[],faces='hidden'){
+  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],faces='hidden'){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
       </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
       ${faces==='ask'?faceConsent('ask','/'):''}
+      <section class="home-classmates home-fresh" aria-labelledby="fresh-profiles-title"><div class="section-head"><h2 id="fresh-profiles-title">Freshly completed profiles</h2>${link('/people','See all')}</div>
+        ${fresh.length?`<div class="fresh-browse"><span>Latest first · ${fresh.length} profiles</span><div><button type="button" data-fresh-step="-1" aria-label="Previous completed profiles" disabled>←</button><button type="button" data-fresh-step="1" aria-label="Next completed profiles">→</button></div></div><div class="people-grid" role="region" aria-label="Freshly completed profiles, newest first. Swipe or use the arrows to browse" data-fresh-strip tabindex="0">${fresh.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,row.city?[row.city]:[])}${row.completed_at||row.completion_basis==='observed'?`<small class="completed-label">${row.completed_at?completionLabel(row.completed_at):'Recently completed'}</small>`:''}</div></a>`).join('')}</div>`:'<p class="fresh-empty">Completed profiles will appear here. Be one of the first to share your story.</p>'}
+      </section>
       ${meet.available?`<section class="meet-banner" aria-label="Looking to catch up">
         <p class="meet-count">${meetCountLine(meet.count)}</p>
         <div class="meet-mine">${meet.picked.length?`<span class="meet-faces">${meetFaces(meet.picked)}</span><span class="registry">You’ve picked ${meet.picked.length}</span>`:'<span class="meet-hint">Send a catch-up request to the WIMWIans you want to meet in Jaipur. They’ll be notified and can accept it.</span>'}
           <a class="cta cta-primary" href="/people/${me}#meet">${meet.picked.length?'Add more':'Choose who to catch up with'}</a></div>
       </section>`:''}
-      <section class="home-classmates"><div class="section-head"><h2>What are they up to?</h2>${link('/people','See all')}</div>
-        <div class="people-grid" role="region" aria-label="What are they up to? Scroll to browse classmates" data-classmate-strip tabindex="0">${people.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row)}</div></a>`).join('')}</div>
-      </section>
       <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add memory</a>${link('/memories','See all')}</div></div>${memoriesCompletionPrompt(collage(rows,next),unlock,me)}</section>
       ${page.composeDialog(key)}
     </div>`;
@@ -236,7 +328,7 @@ export const page={
     <a href="/compose" class="profile-primary share-memory" data-compose-open>Add memory</a></div>
     ${memoriesCompletionPrompt(collage(rows,next,true),checks,me)}
     ${page.composeDialog(key)}`;},
-  gallery(photos){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${images(photos)}`;},
+  gallery(photos,memories=[],person=null){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${memoryBatch(person===null?memories:profileMemoryRows(memories,person))}${memoryDialog()}${photos.length?`<section class="panel"><h2>Profile and yearbook photos</h2><p>These are profile photos rather than posted memories.</p>${images(photos)}</section>`:''}`;},
   memoryCards, memoryTags,
   reunion(member,tracker,saved,directory,showSaved){
     const values = reunionValues(tracker,saved);
@@ -307,10 +399,25 @@ export const page={
 
     </div>`;
   },
-  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section=''){return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}${reunion?'':select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}<button>Search</button></form>
-    ${rows.length?`<p class="registry directory-count">${rows.length} ${reunion?'attending':rows.length===1?'classmate':'classmates'}</p><div class="directory-grid">${rows.map(row=>`<a class="directory-card" href="/people/${row.id}">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}<div>${classmate(row,reunion||!row.section?[]:['Section '+row.section])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`).join('')}</div>`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;},
+  directory(rows,statuses,q,status,dorms,dorm,reunion=false,sections=[],section='',catchup='',next='/reunion#reunion-attendees',total=rows.length,more=''){
+    return `<div class="classmates-directory"><form class="directory-controls" data-directory-filters method="get" action="${reunion?'/reunion#reunion-attendees':'/people'}">
+      ${input('q','Name, nickname or dorm',q)}${reunion?'':select('status','Attendance',[['','All classmates'],...Object.entries(statuses).filter(([,label])=>label)],status)}
+      ${dorms.length?select('dorm','Dorm',[['','All dorms'],...dorms.map(({dorm})=>[dorm,/^\\d+$/.test(dorm)?'Dorm '+dorm:dorm])],dorm):''}
+      ${select('section','Section',[['','All sections'],...sections.map(({section})=>[section,section])],section)}
+      ${reunion?select('catchup','Catch up status',[['','Everyone attending'],['confirmed','Confirmed'],['requested','Requested · either direction'],['incoming','Awaiting your confirmation'],['outgoing','Awaiting their confirmation'],['none','No request']],catchup):''}<button>Search</button></form>
+      ${reunion?'<p class="registry">Awaiting your confirmation first, then confirmed catch-ups, then requests you’ve sent.</p>':''}
+      ${rows.length?`<p class="registry directory-count">${total} ${reunion?'attending':total===1?'classmate':'classmates'}</p><div class="directory-grid">${page.directoryCards(rows,statuses,reunion,next)}</div>${more?`<p class="directory-more"><a class="cta" href="${e(more)}" data-directory-more>Show more classmates</a></p>`:''}`:status==='attending'?'<p>No classmates are marked as attending for these filters.</p>':'<p>No classmates match.</p>'}</div>`;
+  },
+  directoryCards(rows,statuses,reunion=false,next='/reunion#reunion-attendees'){
+    const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
+    return `${rows.map(row=>{
+        const content=`<a class="directory-card" href="/people/${row.id}"><span style="display:block;position:relative">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}${reunion&&labels[row.catchup]?`<span style="position:absolute;bottom:.4rem;left:.35rem;right:.35rem;padding:.3rem .4rem;border-radius:.35rem;background:${row.catchup==='confirmed'?'#244e40':'#29221f'};color:#fff;font-size:.75rem;line-height:1.3;text-align:center;font-weight:600">${labels[row.catchup]}</span>`:''}</span><div>${classmate(row,row.section?['Section '+row.section]:[])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`;
+        return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
+      }).join('')}`;
+  },
   person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces='hidden'){
     const own = me === row.id;
+    stories=profileMemoryRows(stories,row.id);
     const received = stories.filter(post=>post.author!==row.id);
     const shared = stories.filter(post=>post.author===row.id);
     const facts = ['dorm','nickname','city','country','company','education','section','family'];
@@ -318,10 +425,10 @@ export const page={
     const inHero = ['dorm','nickname','section'];
     // Visitors see only what is filled in, without repeating the hero's dorm, nickname and section.
     // Owners see their filled fields in place and every empty one gathered under "Complete your page".
-    const factKeys = facts.filter(key=>hasValue(key)&&(own||!inHero.includes(key)));
+    const factKeys = facts.filter(key=>hasValue(key)&&!inHero.includes(key));
     const allEntryKeys = Object.keys(details).filter(key=>!facts.includes(key)&&key!=='displayName'&&(hasValue(key)||(own&&key!=='researchHighlight')));
     const entryKeys = allEntryKeys.filter(key=>hasValue(key)&&key!=='life');
-    const todoKeys = own ? [...facts,...allEntryKeys].filter(key=>!hasValue(key)) : [];
+    const todoKeys = [];
     const requirements=whatsappRequirements(details,profilePhotos),requiredKeys=new Set(['dorm','nickname','city','life','family']);
     const requiredTodo=todoKeys.filter(key=>requiredKeys.has(key)),optionalTodo=todoKeys.filter(key=>!requiredKeys.has(key));
     const requiredMark=key=>own&&requiredKeys.has(key)&&!hasValue(key)?'<span class="required-badge">Required to unlock</span>':'';
@@ -336,8 +443,7 @@ export const page={
           : [];
       } catch { return []; }
     });
-    const edit = (key,label,value,control=area('value',label,value,'maxlength="4000"')) => own ? `<details class="inline-edit"><summary aria-label="Edit ${e(label)}" title="Edit ${e(label)}">${iconGraphic('edit')}</summary>
-      ${form('/profile',field('field',key)+control,'Save','data-profile-edit')}</details>` : '';
+    const edit = () => '';
     const entry = key => {
       const label = ({dorm:'Dorm number',nickname:'Dorm name'})[key] || labelFor(key);
       return `<div ${own?`id="profile-field-${key}" data-required-field="${key}" ${requiredKeys.has(key)&&!hasValue(key)?'data-required-missing':''}`:''} class="editable-field${key==='moment'?' entry-moment':''}${own&&requiredKeys.has(key)&&!hasValue(key)?' profile-required-missing':''}"><dt>${e(key==='city'?'Current city':label)}${requiredMark(key)}</dt><dd class="field-display">${details[key]?e(details[key]):'<span class="field-empty">Not added yet</span>'}</dd>${edit(key,label,details[key])}</div>`;
@@ -347,9 +453,7 @@ export const page={
         <div class="profile-cover"></div>
         <div class="profile-identity">
           <div class="profile-portrait">${portrait(row,false,256)}
-            ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
-              ${field('field','portraitObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
-              ${icon('edit','Upload profile photo','data-upload')}</form>`:''}</div>
+</div>
           <div class="profile-name editable-field"><h1 class="field-display">${e(details.displayName||row.name)}</h1>
             ${hasValue('nickname')?`<p class="nickname">“${e(details.nickname)}”</p>`:''}
             ${(()=>{const reg=[hasValue('section')&&'Section '+details.section,hasValue('dorm')&&dormLabel(details.dorm.trim()),'PGP 2004–06'].filter(Boolean).join(' · ');return `<p class="registry profile-registry">${e(reg)}</p>`;})()}
@@ -369,16 +473,15 @@ export const page={
           </div>
         </div>
       </header>
-      ${own?whatsappUnlock(requirements,me,true):''}
+      ${own?whatsappUnlock(requirements,me,true,{...details,lifeGenerated:row.lifeGenerated}):''}
       ${pilot?'<p class="profile-pilot">Profiles are being checked during the pilot.</p>':''}
       <div class="profile-layout${factKeys.length||photos.length||todoKeys.length?'':' profile-layout-wide'}">
         ${factKeys.length||photos.length||todoKeys.length?`<aside class="profile-sidebar">
           ${factKeys.length?`<section class="profile-section"><h2>About</h2><dl class="profile-facts">${factKeys.map(entry).join('')}</dl></section>`:''}
-          ${todoKeys.length?`<section class="profile-section profile-todo${requiredTodo.length?' has-required':''}"><details${requiredTodo.length?' open':''}><summary><h2>${requiredTodo.length?'Required details':'Optional details'}</h2><span class="registry">${requiredTodo.length?requiredTodo.length+' to add':'Only if you’d like to share more'}</span></summary>
+          ${todoKeys.length?`<section class="profile-section profile-todo${requiredTodo.length?' has-required':''}"><details${requiredTodo.length?' open':''}><summary><h2>${requiredTodo.length?'The essentials':'More about you'}</h2><span class="registry">${requiredTodo.length?requiredTodo.length+' to add':'Only if you’d like to share more'}</span></summary>
             ${requiredTodo.length?`<dl class="profile-facts">${requiredTodo.map(entry).join('')}</dl>`:''}
-            ${optionalTodo.length?`<details class="optional-profile-fields"><summary>Optional details</summary><dl class="profile-facts">${optionalTodo.map(entry).join('')}</dl></details>`:''}</details></section>`:''}
-          ${photos.length?`<section class="profile-section profile-photos"><div class="profile-section-head"><h2>Photos</h2>
-            <a href="/gallery?person=${row.id}">View all</a></div>${images(photos.slice(0,4))}</section>`:''}
+            ${optionalTodo.length?`<details class="optional-profile-fields"><summary>More details to share</summary><dl class="profile-facts">${optionalTodo.filter(key=>!['outsideWork','moment','firstDayAdvice','anythingElse'].includes(key)).map(entry).join('')}</dl></details>`:''}</details></section>`:''}
+
         </aside>`:''}
         <div class="profile-main">
           ${own&&meet.available?`<section class="profile-section profile-meet" id="meet"><h2>Looking to catch up</h2>
@@ -394,19 +497,19 @@ export const page={
               <form method="post" action="/meet" data-meet-add hidden>${field('action','add')}<input type="hidden" name="target" value="">${field('next','/people/'+me+'#meet')}</form>
               <noscript><p class="meet-hint">Or open any WIMWIan’s profile and press “Ask to catch up”.</p></noscript>
             </div></section>`:''}
-          ${own||Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
+          ${Object.keys(profilePhotos).length?`<section class="profile-section profile-then-now"><h2>Then / Now</h2>
             <div class="then-now-grid">${['then','now'].map(slot=>{
               const photo=profilePhotos[slot], label=slot==='then'?'Then':'Now';
-              return `<div ${own?`id="profile-field-${slot}" data-required-field="${slot}" ${!photo?'data-required-missing':''}`:''} class="then-now-slot${own&&!photo?' profile-required-missing':''}"><h3>${label} <span>${slot==='then'?'2006':'2026'}</span></h3>${own&&!photo?'<p class="required-badge">Required to unlock</p>':''}
+              return `<div ${own?`id="profile-field-${slot}" data-required-field="${slot}" ${!photo?'data-required-missing':''}`:''} class="then-now-slot"><h3>${label} <span>${slot==='then'?'2006':'2026'}</span></h3>
                 ${photo?`<a href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" alt="${e(photo.caption||label+' photo of '+row.name)}" loading="lazy"></a>`:
-                 `<p>${own?'Add a '+label.toLowerCase()+' photo.':'No photo shared.'}</p>`}
-                ${own?`<form action="/profile" method="post" enctype="multipart/form-data" data-profile-edit>
-                  ${field('field',slot+'PhotoObject')}<input type="file" name="photo" accept="image/jpeg,image/png" hidden>
-                  <button type="button" data-upload class="required-photo-button" aria-label="Upload ${label} photo">${photo?'Change':'Add'} ${label} photo</button></form>`:''}</div>`;
-            }).join('')}</div>${own&&faces!=='hidden'?faceConsent(faces,'/people/'+me):''}</section>`:''}
+                 `<p>No photo shared.</p>`}
+</div>`;
+            }).join('')}</div></section>`:''}
+          ${own&&faces!=='hidden'?`<section class="profile-section profile-face-consent">${faceConsent(faces,'/people/'+me)}</section>`:''}
+
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
-          <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories from classmates</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
+          <section class="profile-section profile-memories"><div class="profile-section-head"><h2>Memories featuring ${own?'you':e((details.displayName||row.name).split(/\s+/)[0])}</h2>${own?'':`<a class="profile-primary" href="/compose?person=${row.id}" data-compose-open>Add a memory about this classmate</a>`}</div>
             ${received.length?memoryBatch(received):'<p class="profile-empty">No memories have been shared about this classmate yet.</p>'}
           </section>
           ${shared.length?`<section class="profile-section profile-memories"><h2>Memories shared</h2>${memoryBatch(shared)}</section>`:''}
@@ -417,12 +520,23 @@ export const page={
       ${own?'':`<div class="profile-report">${report('profile',row.id)}</div>`}
     </div>`;
   },
-  editProfile(fields,member,checks=[]){
+  editProfile(fields,member,checks=[],profilePhotos={}){
     const required=['dorm','nickname','city','life','family'],optional=['company','education'];
-    const rows=keys=>keys.map(k=>`<div class="${required.includes(k)&&!String(fields[k]||'').trim()?'profile-required-missing':''}">${area(k,labelFor(k)+(required.includes(k)?' (Required to unlock)':''),fields[k])}${checkbox('hide_'+k,'Hide '+labelFor(k),fields[k]==='')}</div>`).join('');
-    return `<p><a href="/people/${member.id}">Back to my profile</a></p><p>Unlock memories, WhatsApp Insights and incoming catch-up identities by completing the five details and both photos. Hiding a required detail keeps access locked.</p>`+
-      form('/profile','<fieldset><legend>5 required profile details</legend>'+rows(required)+'</fieldset><details class="optional-profile-fields"><summary>Optional career details</summary>'+rows(optional)+'</details>'+checkbox('attendance_private','Hide my attendance status',!!member.attendance_private),'Save profile')+
-      `<section class="panel"><h2>2 required photos</h2><p>Add these on your profile page. Your profile picture does not count as either photo.</p><ul class="unlock-checklist">${['then','now'].map(key=>`<li><a href="/people/${member.id}?complete=whatsapp#profile-field-${key}">${key==='then'?'Then photo (2006)':'Now photo (2026)'}</a><small>${checks.find(item=>item.key===key)?.complete?'Complete':'Required'}</small></li>`).join('')}</ul></section>`;
+    const missing=key=>!checks.find(item=>item.key===key)?.complete;
+    const rows=keys=>keys.map(key=>`<div id="profile-field-${key}" class="${required.includes(key)&&(missing(key)||(key==='life'&&fields._lifeGenerated))?'profile-required-missing':''}">${required.includes(key)?'<small>Required to unlock</small>':''}${key==='life'&&fields._lifeGenerated?generatedLifeNote:''}${profileControl(key,key,fields[key])}${required.includes(key)||optional.includes(key)?checkbox('hide_'+key,'Hide '+labelFor(key),fields[key]===''):''}</div>`).join('');
+    const photos=['then','now'].map(key=>`<div id="profile-field-${key}" class="${missing(key)?'profile-required-missing':''}"><h3>${key==='then'?'Then photo (2006)':'Now photo (2026)'}</h3><small>${missing(key)?'Required to unlock':'Photo added · choose a file to replace it'}</small>${profilePhotos[key]?`<figure style="margin:.65rem 0"><a href="/media/${e(profilePhotos[key].media)}" target="_blank" rel="noopener" aria-label="View current ${key} photo"><img src="${mediaSrc(profilePhotos[key].media,480)}" alt="Your current ${key==='then'?'Then (2006)':'Now (2026)'} photo" loading="lazy" style="width:auto;max-width:100%;height:auto;max-height:18rem;aspect-ratio:auto;object-fit:contain"></a><figcaption>Current photo · tap to view full size</figcaption></figure>`:''}<label>${profilePhotos[key]?'Replace photo':'Choose photo'}<input type="file" name="${key}Photo" accept="image/jpeg,image/png"></label></div>`).join('');
+    const more=Array.from(new Set(['country','professionalFocus',...Object.keys(fields)])).filter(key=>['country','professionalFocus','researchHighlight','interests','reunionStory','extra','prompt','printName'].includes(key));
+    return `<p><a href="/people/${member.id}">Back to my profile</a></p><p>Complete the essentials to unlock memories, WhatsApp Insights and incoming catch-up names. Write a few sentences for the story questions so your batchmates can catch up with you. Highlighted items are still needed; you can save your progress at any time.</p>`+
+      form('/profile',field('profile_form','all')+
+      '<fieldset><legend>The essentials · 5 required details</legend>'+rows(['dorm','nickname'])+`<div id="profile-field-section">${input('section','Section',fields.section||'','maxlength="20" placeholder="Your section"')}<small>Optional · shown on your profile</small></div>`+rows(['city','life','family'])+'</fieldset>'+
+      '<section class="panel"><h2>Then / Now · 2 required photos</h2><p>Choose a photo from your WIMWI days and one from your life today. Existing photos stay unless you choose replacements.</p>'+photos+'</section>'+
+      '<section class="panel"><h2>Your work and studies</h2><p>Add these if you’d like to share more.</p>'+rows(optional)+'</section>'+
+      `<section class="panel" id="a-little-more-you">${moreYouIntro}${rows(['outsideWork','moment','firstDayAdvice','anythingElse'])}</section>`+
+      `<details class="panel"><summary>More profile details and settings</summary><div id="profile-field-displayName">${input('displayName','Name',fields.displayName||member.name,'maxlength="120"')}</div>
+      <h3>Profile picture</h3><label>Choose photo<input type="file" name="portraitPhoto" accept="image/jpeg,image/png"></label>
+      ${select('attendance','Reunion attendance',[['unknown','Choose an option'],['attending','Attending'],['declined','Not attending']],fields.attendance||'unknown')}
+      ${rows(more)}${checkbox('attendance_private','Hide my attendance status',!!member.attendance_private)}</details>
+      <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data" data-profile-form');
   },
   images,
   topics(rows,q){return `<form method="get">${input('q','Find a memory topic',q)}<button>Search</button></form><p>${link('/compose','Create a topic and add a memory')}</p>`+list(rows.map(r=>link('/topics/'+r.id,r.title)+' '+badge(r.kind)),'No topics yet.');},
@@ -447,7 +561,7 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt=""><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
@@ -464,7 +578,7 @@ export const page={
     const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
     const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
     if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
-      <p>Not set up yet: run <code>migrations/0017_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
+      <p>Not set up yet: run <code>migrations/0019_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
     return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
       <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
       ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}

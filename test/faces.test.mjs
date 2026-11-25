@@ -430,7 +430,7 @@ test('scan-all queues everything unscanned', async()=>{
 import { consentState, publishShadow, writeMatches } from '../faces.mjs';
 
 test('C1: before migration 0017 the site works and hides face tagging', async()=>{
-  const w=fixture({skip:['0017_face_tagging.sql']}); w.env.FACE_TAGGING='shadow';
+  const w=fixture({skip:['0019_face_tagging.sql']}); w.env.FACE_TAGGING='shadow';
   const ck=await w.session(2,'bbbb'), admin=await w.session(1,'aaaa');
   w.sqlite.exec(`INSERT INTO posts(id,author,body,created) VALUES('p1',2,'x',1); INSERT INTO uploads VALUES('u1',2,'social/u1','image/jpeg','h','','p1',1)`);
   w.objects.set('social/u1',new Uint8Array([1]));
@@ -652,7 +652,7 @@ test('S5: a container that dies while starting is started again', async()=>{
 
 test('S6: migration 0017 can be run again after a failure part-way', ()=>{
   const w=fixture();
-  const sql=readFileSync(new URL('../migrations/0017_face_tagging.sql',import.meta.url),'utf8');
+  const sql=readFileSync(new URL('../migrations/0019_face_tagging.sql',import.meta.url),'utf8');
   assert.throws(()=>w.sqlite.exec(sql),/duplicate column/);   // a second run fails only at its last step
   assert.match(sql.trim(),/ADD COLUMN origin[^;]*;$/);
   w.sqlite.exec(`INSERT INTO posts(id,author,body,created) VALUES('p1',1,'x',1);

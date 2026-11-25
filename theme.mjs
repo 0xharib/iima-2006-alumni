@@ -25,6 +25,19 @@ export const tokens = `:root{color-scheme:light;
 --ink:#f3ece2;--muted:#b4aa9e;--night:#141110;--ochre:#c9993f}`;
 
 export const theme = `
+/* Shared album previews for Home, Memories and profile memory cards. */
+.collage-card .album-collage{display:grid;grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr;gap:3px;aspect-ratio:4/3;overflow:hidden;background:var(--paper)}
+.collage-card .album-collage-2{grid-template-columns:1fr 1fr;grid-template-rows:1fr}
+.album-preview-tile{position:relative;display:block;min-width:0;min-height:0;overflow:hidden}
+.album-collage-3 .album-preview-tile:first-child{grid-row:1 / 3}
+.collage-card .album-collage .album-preview-tile img{display:block;width:100%;height:100%;aspect-ratio:auto;object-fit:cover;border-radius:0}
+.album-more{position:absolute;inset:0;background:#17110e88;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;line-height:1.2;padding:.3rem}
+.album-more strong{font:650 clamp(1.35rem,5vw,2.2rem)/1.1 var(--sans)}
+.album-more span{font-size:.72rem;margin-top:.2rem}
+.album-open-link{display:inline-flex;align-items:center;gap:.4rem;min-height:44px;margin:.15rem 0 .35rem;font-weight:650;font-size:.9rem;text-decoration:none}
+.album-open-link:hover{text-decoration:underline}
+.album-cover:focus-visible{outline:3px solid var(--brick-fired);outline-offset:-3px}
+
 body{background:var(--lime)}a{color:inherit;text-decoration:none}a:hover{color:var(--brick)}a,button{transition:background-color .16s,color .16s,box-shadow .16s}
 .bar{background:var(--paper);border-bottom:1px solid var(--line)}.bar .mast,main,footer{max-width:1280px;padding-inline:clamp(16px,4vw,52px)}.mast{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px}.wordmark{display:flex;align-items:center;gap:10px;font:750 1rem var(--sans)}.wordmark img{width:39px;height:39px;aspect-ratio:1;object-fit:contain;background:white;padding:3px;border-radius:50%}
 nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .68rem;border-radius:8px}nav a:hover{background:var(--tint)}h1,h2,h3{letter-spacing:-.035em}article,fieldset,.panel{box-shadow:0 6px 24px #26201608;border-radius:16px}article a{font-weight:650}.plain li a:hover,figcaption a:hover{text-decoration:underline}
@@ -81,6 +94,18 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .home-classmates .person-tile>div{position:absolute;inset:auto 0 0;padding:.95rem .65rem .55rem;background:linear-gradient(transparent,#19120ff5)}
 .home-classmates .person-tile strong,.home-classmates .person-tile small{display:block;padding:0;color:#fff;overflow-wrap:anywhere}
 .home-classmates .person-tile small{font-size:.72rem;color:#f8e7d6}
+.home-fresh .section-head{align-items:center}
+.home-fresh .section-head h2{min-width:0;line-height:1.15}
+.home-fresh .section-head>a{flex-shrink:0;white-space:nowrap}
+.home-fresh .person-tile .completed-label{margin-top:.35rem;color:#e7d4a3;font-size:.67rem}
+.home-fresh .fresh-empty{color:#e6ded2;font-size:.9rem}
+.home-fresh .people-grid{grid-template-columns:none;scrollbar-width:thin;scrollbar-color:#f3c9b870 transparent}
+.home-fresh .people-grid::-webkit-scrollbar{display:block;height:3px}
+.home-fresh .people-grid::-webkit-scrollbar-thumb{background:#f3c9b870;border-radius:3px}
+.fresh-browse{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:.1rem 0 .5rem;font-size:.75rem;color:#e6ded2}
+.fresh-browse>div{display:flex;gap:.4rem}
+.fresh-browse button{display:grid;place-items:center;width:36px;min-height:32px;margin:0;padding:0;border:1px solid #ffffff40;border-radius:8px;background:#ffffff0c;color:#fff;font-size:1rem}
+.fresh-browse button:disabled{opacity:.3;cursor:default}
 .memory-collage{columns:3;column-gap:clamp(.65rem,2vw,1.25rem)}
 .memory-collage .collage-card,.memory-dialog .collage-card{break-inside:avoid;margin:0 0 1rem;padding:0;overflow:hidden;color:var(--ink);background:var(--paper);box-shadow:0 8px 24px #21181116}
 .collage-visual{position:relative}
@@ -944,4 +969,18 @@ label,.profile-facts dt,.profile-entry dt{font-weight:600}
 .reunion-agenda-panel[open]>summary{margin-bottom:1rem}
 #reunion-agenda{scroll-margin-top:80px}
 @media(max-width:650px){.reunion-agenda-panel>summary{flex-wrap:wrap;gap:.4rem}.reunion-agenda-panel>summary h2{font-size:1.2rem}.reunion-agenda-panel>summary>span{font-size:.8rem}}
+
+/* A quiet secondary action after posting a comment. */
+.collage-card button[data-comment-again]{
+  display:inline-flex;align-items:center;min-height:44px;width:auto;
+  margin:.2rem 0 0;padding:.4rem .2rem;background:transparent;
+  border:0;border-radius:var(--r-sm);box-shadow:none;
+  color:var(--brick);font:600 .85rem/1.4 var(--sans);text-align:left;
+}
+.collage-card button[data-comment-again]:hover{background:transparent;color:var(--brick-deep);text-decoration:underline;text-underline-offset:.2em}
+.collage-card button[data-comment-again]:focus-visible{outline:2px solid var(--brick-fired);outline-offset:2px}
+.collage-card button[data-comment-again][hidden]{display:none}
+.profile-save-status{margin:.6rem 0 0;font:500 .95rem/1.5 var(--sans)}
+.profile-save-status.is-saved{color:var(--ink,inherit)}
+.profile-save-status.is-error{color:var(--brick)}
 `;

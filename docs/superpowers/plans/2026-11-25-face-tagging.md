@@ -48,7 +48,7 @@ Python 3.12, onnxruntime, insightface, OpenCV, Pillow; `node --test` with `node:
 
 ## File Structure
 
-- Create `migrations/0017_face_tagging.sql` — new tables, `photo_tags.origin`, `notify_photo` trigger skipping auto rows.
+- Create `migrations/0019_face_tagging.sql` — new tables, `photo_tags.origin`, `notify_photo` trigger skipping auto rows.
 - Create `faces.mjs` — everything face-related on the Worker side: vector helpers, matching, face-service client,
   queue consumer, cron sweep, consent and "Not me" routes, admin page data. Exports `FaceContainer`.
 - Modify `worker.mjs` — export `queue`, `scheduled` and `FaceContainer`; call `faceRoute`; enqueue on compose and
@@ -66,7 +66,7 @@ Python 3.12, onnxruntime, insightface, OpenCV, Pillow; `node --test` with `node:
 ### Task 1: Schema, auto-tag origin and a shared test fixture
 
 **Files:**
-- Create: `migrations/0017_face_tagging.sql`, `test/fixture.mjs`, `test/faces.test.mjs`
+- Create: `migrations/0019_face_tagging.sql`, `test/fixture.mjs`, `test/faces.test.mjs`
 - Modify: `test/worker.test.mjs:1-58` (move `fixture` and `body` to `test/fixture.mjs`, import them), `worker.mjs:723,726,732,902`
 
 **Interfaces:**
@@ -102,7 +102,7 @@ test('face tables exist and photo_tags rejects an unknown origin', ()=>{
 ```
 
 - [ ] **Step 3: Run `node --test test/faces.test.mjs`** — expected FAIL (no `origin` column).
-- [ ] **Step 4: Write `migrations/0017_face_tagging.sql`.** Create the tables above; `ALTER TABLE photo_tags ADD COLUMN origin …`;
+- [ ] **Step 4: Write `migrations/0019_face_tagging.sql`.** Create the tables above; `ALTER TABLE photo_tags ADD COLUMN origin …`;
   `DROP TRIGGER IF EXISTS notify_photo;` then recreate it with the body from `0015_catchup_notifications.sql:81-90`
   copied verbatim, changing only the `WHEN` clause to `WHEN NEW.kind IN ('person','topic') AND NEW.origin='manual'`.
   Header comment: safe to run on its own, like 0014.
@@ -433,7 +433,7 @@ crons = ["17 * * * *"]
 ```
 
 - `docs/operations.md`: a "Face tagging" section with Arun's one-time steps (create both queues, back up D1, run
-  `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql`, set `FACE_TAGGING=shadow`
+  `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0019_face_tagging.sql`, set `FACE_TAGGING=shadow`
   in the dashboard), what each mode does, the shadow check, switching to `on` and pressing Publish, local development
   with `FACE_SERVICE_URL=http://localhost:8080`, the licence note, and that the first deploy may serve the Worker
   before the container is ready (jobs retry).

@@ -1,7 +1,7 @@
 -- Automatic face tagging. Creates tables and adds photo_tags.origin; it changes no existing rows.
 -- Run it only AFTER the Worker with face tagging is deployed: older Workers insert into photo_tags without column
 -- names and would fail once the new column exists. The new Worker works with or without this migration.
---   npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql
+--   npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0019_face_tagging.sql
 -- notify_photo is recreated unchanged except that it now ignores automatic tags, which send their own notification.
 -- Every step can be repeated except the final ALTER, which is last so that a run that failed part-way can simply be
 -- run again (a repeat after success fails only at that last step, harmlessly).

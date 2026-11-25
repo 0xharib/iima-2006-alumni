@@ -208,7 +208,7 @@ cron (hourly) ──► sweep: any media without a face_scans row, any failed jo
 - Hari: build on `hb` with tests (synthetic embeddings, no real faces in git). Run locally with `wrangler dev`
   (needs Docker for the container). Open a PR to Arun.
 - Arun, in this order: create the queues; merge (the Git integration deploys the Worker and builds the image);
-  back up D1 and run `migrations/0017_face_tagging.sql`; set `FACE_TAGGING=shadow`; after the shadow check, set
+  back up D1 and run `migrations/0019_face_tagging.sql`; set `FACE_TAGGING=shadow`; after the shadow check, set
   `on` and publish. The migration must follow the deploy, because older Workers insert into `photo_tags` without
   column names. The new Worker works without the migration and keeps face tagging hidden until it has run.
 

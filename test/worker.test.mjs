@@ -3,8 +3,188 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import worker from '../worker.mjs';
-import { fixture, body } from './fixture.mjs';
+import { profileMemoryRows } from '../views.mjs';
 
+test('portrait fallback prefers profile picture, Now, Then, then initials everywhere',async()=>{
+ const {call,session,sqlite}=fixture();const cookie=await session(2,'bbbb');
+ sqlite.prepare('UPDATE profile_seeds SET portrait_key=NULL WHERE roster_id=2').run();
+ const profileImage=async()=>{
+  const html=await body(await call('/people/2',cookie));
+  return html.match(/class="profile-portrait">([\s\S]*?)<\/div>/)[1];
+ };
+ assert.match(await profileImage(),/class="initials"/);
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'thenPhotoObject','then.jpg');
+ assert.match(await profileImage(),/\/media\/profile-photo\/2\/then\?w=256/);
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'nowPhotoObject','now.jpg');
+ assert.match(await profileImage(),/\/media\/profile-photo\/2\/now\?w=256/);
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'portraitObject','portrait.jpg');
+ assert.match(await profileImage(),/\/media\/portrait\/2\?w=256/);
+ sqlite.prepare("UPDATE profile_fields SET value=' ' WHERE member=2 AND field='portraitObject'").run();
+ assert.match(await profileImage(),/\/media\/profile-photo\/2\/now\?w=256/);
+ sqlite.prepare("UPDATE profile_seeds SET portrait_key='imported.jpg' WHERE roster_id=2").run();
+ assert.match(await profileImage(),/\/media\/seed\/2\?w=256/);
+ sqlite.prepare('UPDATE profile_seeds SET portrait_key=NULL WHERE roster_id=2').run();
+ sqlite.prepare("DELETE FROM profile_fields WHERE member=2 AND field IN ('nowPhotoObject','thenPhotoObject')").run();
+ sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
+ assert.match(await profileImage(),/\/media\/yearbook\/2\/0\?w=256/);
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'nowPhotoObject','now.jpg');
+ assert.match(await profileImage(),/\/media\/profile-photo\/2\/now\?w=256/);
+ const memory=await call('/compose',cookie,{id:crypto.randomUUID(),body:'Portrait fallback memory'});
+ assert.equal(memory.status,303);
+ for(const route of ['/','/people','/memories'])assert.match(await body(await call(route,cookie)),/\/media\/profile-photo\/2\/now\?w=/);
+});
+
+test('generated Life Lately invites owners to rewrite without adding an access requirement',async()=>{
+ const {call,session,sqlite}=fixture();const owner=await session(2,'bbbb'),viewer=await session(1,'aaaa');
+ let editor=await body(await call('/profile',owner));
+ assert.match(editor,/This Life, Lately introduction was auto-generated/);
+ let own=await body(await call('/people/2',owner));assert.match(own,/Rewrite my introduction/);
+ assert.doesNotMatch(await body(await call('/people/2',viewer)),/Rewrite my introduction|profile-generated-review/);
+ for(const [key,value]of Object.entries({city:'Mumbai',family:'Family',thenPhotoObject:'then.jpg',nowPhotoObject:'now.jpg'}))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,key,value);
+ own=await body(await call('/people/2',owner));assert.match(own,/7 \/ 7/);assert.match(own,/Rewrite my introduction/);
+ await call('/profile',owner,{field:'life',value:'My own introduction'});
+ editor=await body(await call('/profile',owner));assert.doesNotMatch(editor,/This Life, Lately introduction was auto-generated/);
+ assert.match(editor,/My own introduction/);
+ own=await body(await call('/people/2',owner));assert.doesNotMatch(own,/Rewrite my introduction/);
+});
+
+test('section is visible beside dorm, prefills and saves to profile and directory',async()=>{
+ const {call,session,sqlite}=fixture();const cookie=await session(2,'bbbb');
+ sqlite.prepare('INSERT INTO roster_sections VALUES(?,?)').run(2,'B');
+ let editor=await body(await call('/profile',cookie));
+ assert.match(editor,/name="section" value="B"/);
+ assert.ok(editor.indexOf('name="section"')<editor.indexOf('More profile details and settings'));
+ assert.equal((editor.match(/name="section"/g)||[]).length,1);
+ const response=await call('/profile',cookie,{profile_form:'all',section:'c'});
+ assert.equal(response.status,303);
+ assert.equal(sqlite.prepare('SELECT section FROM roster_sections WHERE member=2').get().section,'C');
+ editor=await body(await call('/profile',cookie));assert.match(editor,/name="section" value="C"/);
+ assert.match(await body(await call('/people/2',cookie)),/Section C/);
+ assert.match(await body(await call('/people?section=C',cookie)),/Test Classmate/);
+ assert.doesNotMatch(await body(await call('/people?section=B',cookie)),/>Test Classmate<\/strong>/);
+});
+
+test('profile editor previews imported photos and prioritizes uploaded replacements',async()=>{
+ const {call,session,sqlite}=fixture();const cookie=await session(2,'bbbb');
+ sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
+ let html=await body(await call('/profile',cookie));
+ assert.match(html,/src="\/media\/yearbook\/2\/0\?w=480"/);
+ assert.match(html,/alt="Your current Then \(2006\) photo"/);
+ assert.doesNotMatch(html,/alt="Your current Now/);
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'thenPhotoObject','replacement.jpg');
+ sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,'nowPhotoObject','now.jpg');
+ html=await body(await call('/profile',cookie));
+ assert.match(html,/src="\/media\/profile-photo\/2\/then\?w=480"/);
+ assert.match(html,/src="\/media\/profile-photo\/2\/now\?w=480"/);
+ assert.doesNotMatch(html,/src="\/media\/yearbook\/2\/0[^>]*alt="Your current Then/);
+ const editor=html.match(/<form method="post" action="\/profile"[\s\S]*?<\/form>/)[0];
+ assert.equal((editor.match(/type="submit"/g)||[]).length,1);
+ assert.match(html,/Current photo · tap to view full size/);
+});
+
+test('photo-tag projections deduplicate photos and preserve album associations',()=>{
+ const post={id:'album',author:1,profile_album_tag:0,album_cover:'b',album_title:'Trip',collage_photos:JSON.stringify(['post/a','post/b']),profile_photo_links:JSON.stringify([
+  {media:'post/b',kind:'person',href:'/people/2',label:'Tagged'},
+  {media:'post/b',kind:'person',href:'/people/2',label:'Tagged'},
+  {media:'post/a',kind:'person',href:'/people/3',label:'Other'},
+  {media:'post/missing',kind:'person',href:'/people/2',label:'Stale'}])};
+ const rows=profileMemoryRows([post],2);
+ assert.equal(rows.length,1);assert.equal(rows[0].photo_scope,'post/b');
+ assert.deepEqual(JSON.parse(rows[0].collage_photos),['post/b']);
+ assert.equal(rows[0].album_photo_total,2);
+ assert.equal(profileMemoryRows([post],1)[0],post);
+ const albumTagged={...post,profile_album_tag:1};
+ assert.equal(profileMemoryRows([albumTagged],2)[0],albumTagged);
+});
+
+test('photo-only tags show actionable photo memories on profiles and gallery',async()=>{
+ const {call,session,sqlite}=fixture();
+ const author=await session(1,'aaaa'),tagged=await session(2,'bbbb');
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
+ const ids=[crypto.randomUUID(),crypto.randomUUID(),crypto.randomUUID()];
+ const albumId=crypto.randomUUID();
+ for(const id of ids){const f=new FormData();f.set('photo',new File([png],'photo.png',{type:'image/png'}));assert.equal((await call('/compose/photo?id='+id,author,f)).status,200);}
+ const form=new FormData();form.set('id',albumId);form.set('title','Tagged photo journey');form.set('body','Album caption');
+ for(const id of ids)form.append('photoId',id);
+ assert.equal((await call('/compose',author,form)).status,303);
+ const url='/posts/'+albumId,media='post/'+ids[1];
+ assert.equal((await call(url,author,{action:'tag-add',tag:'person:2',photo:media})).status,303);
+ for(const route of ['/people/2','/gallery?person=2']){
+  const html=await body(await call(route,tagged));
+  assert.match(html,new RegExp('data-photo-scope="post/'+ids[1]+'"'));
+  assert.match(html,/Photo from Tagged photo journey/);
+  assert.match(html,/Tap to open album · 3 photos/);
+  assert.match(html,new RegExp('#photo-post-'+ids[1]));
+  assert.match(html,/data-like/);assert.match(html,/data-panel="comments"/);assert.match(html,/data-panel="tags"/);
+  assert.doesNotMatch(html,/profile-section profile-photos/);
+ }
+ assert.equal((await call(url,tagged,{action:'tag-add',tag:'topic:lkp',photo:media},{Accept:'application/json'})).status,200);
+ const own=await body(await call('/people/2',tagged));assert.match(own,/@Test Classmate/);assert.match(own,/#LKP/);
+ await call(url,tagged,{action:'comment',body:'Comment shared with the album'},{Accept:'application/json'});
+ const comments=await(await call(url+'?panel=comments',tagged)).json();assert.equal(comments[0].body,'Comment shared with the album');
+ await call(url,tagged,{action:'like',liked:'1'},{Accept:'application/json'});
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM likes WHERE post=?').get(albumId).n,1);
+ const authorProfile=await body(await call('/people/1',tagged));assert.match(authorProfile,/album-collage-3/);
+ assert.doesNotMatch(authorProfile,/data-photo-scope=/);
+ await call(url,author,{action:'tag-add',tag:'person:2'});
+ const wholeAlbum=await body(await call('/people/2',tagged));assert.match(wholeAlbum,/album-collage-3/);assert.doesNotMatch(wholeAlbum,/data-photo-scope=/);
+ sqlite.prepare('UPDATE posts SET hidden=1 WHERE id=?').run(albumId);
+ assert.doesNotMatch(await body(await call('/people/2',tagged)),/Tagged photo journey/);
+ assert.doesNotMatch(await body(await call('/gallery?person=2',tagged)),/Tagged photo journey/);
+});
+
+function fixture() {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(readFileSync(new URL('../migrations/0000_baseline.sql',import.meta.url),'utf8'));
+  sqlite.exec(`
+    INSERT INTO roster VALUES(1,'Test Admin','D1','Admin'),(2,'Test Classmate','D2','TC');
+    INSERT INTO reminder_contacts VALUES(1,'admin@example.test'),(2,'classmate@example.test');
+    INSERT INTO profile_seeds VALUES(2,'{"Life, Lately draft":"An imported bio"}','pending','portrait.jpg');
+    INSERT INTO submissions VALUES('self-2',2,2,'self','{"family":"Private family note","life":"Owner yearbook answer"}','2026-11-23');
+    INSERT INTO photos VALUES('self-2','legacy.jpg','then','Then');
+  `);
+  for (const filename of readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql')).sort()) {
+    if(filename==='0000_baseline.sql'||filename==='0002_publish_imports.sql') continue;
+    sqlite.exec(readFileSync(new URL('../migrations/'+filename,import.meta.url),'utf8'));
+  }
+  sqlite.exec("INSERT INTO members(id,role,invited) VALUES(1,'admin',1),(2,'member',1)");
+  const objects=new Map([['portrait.jpg',new Uint8Array([1])],['legacy.jpg',new Uint8Array([2])]]);
+  const DB={
+    prepare(query){
+      return {bind(...args){
+        const stmt=sqlite.prepare(query);
+        return {
+          first: async()=>stmt.get(...args) ?? null,
+          all: async()=>({results:stmt.all(...args)}),
+          run: async()=>stmt.run(...args),
+        };
+      }};
+    },
+    async batch(jobs){
+      sqlite.exec('BEGIN');
+      try { const results=[]; for (const job of jobs) results.push(await job.run()); sqlite.exec('COMMIT'); return results; }
+      catch(error){sqlite.exec('ROLLBACK');throw error;}
+    }
+  };
+  const env={DB,DIAGNOSTICS:'true',ACCESS_MODE:'pilot',MEDIA:{
+    put:async(key,bytes)=>objects.set(key,bytes),
+    delete:async key=>objects.delete(key),
+    get:async key=>objects.has(key)?{body:objects.get(key),httpMetadata:{contentType:'image/jpeg'}}:null
+  }};
+  async function session(member, token) {
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));
+    sqlite.prepare('INSERT INTO sessions VALUES(?,?,?)').run(Buffer.from(digest).toString('hex'),member,Date.now()+100000);
+    return '__Host-alumni='+token;
+  }
+  function call(path,cookie,fields,headers={}) {
+    if(cookie)headers.Cookie=cookie;
+    let options={headers};
+    if(fields){headers.Origin='https://test.example';options={headers,method:'POST',body:fields instanceof FormData?fields:new URLSearchParams(fields)};}
+    return worker.fetch(new Request('https://test.example'+path,options),env);
+  }
+  return {call,session,sqlite,env};
+}
+async function body(response) { const text=await response.text(); assert.equal(response.status,200,text); return text; }
 
 test('preview reuses a live admin session without sending a sign-in email',async()=>{
  const {call,session,sqlite,env}=fixture();
@@ -35,6 +215,70 @@ test('preview reuses a live admin session without sending a sign-in email',async
  assert.match(verified.headers.get('set-cookie'),/__Host-alumni=/);
  assert.equal(sqlite.prepare('SELECT count(*) n FROM login_links').get().n,0);
  assert.equal(sqlite.prepare("SELECT count(*) n FROM site_events WHERE event='email_accepted'").get().n,0);
+});
+
+test('fresh profiles require all seven items, record first completion and preserve ordering',async()=>{
+ const {call,session,sqlite}=fixture();
+ const ck=await session(2,'bbbb');
+ sqlite.exec(`
+   INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"Admin life","family":"Family"}','[]');
+   INSERT INTO profile_fields VALUES(1,'thenPhotoObject','admin-then.jpg'),(1,'nowPhotoObject','admin-now.jpg');
+   INSERT INTO profile_fields VALUES(2,'city','Bangalore'),(2,'life','A new chapter'),(2,'thenPhotoObject','then.jpg');
+   UPDATE profile_completion SET completed_at=NULL,basis='baseline' WHERE member=1;
+ `);
+ let html=await body(await call('/',ck));
+ let section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.match(section,/Test Admin/);assert.doesNotMatch(section,/Test Classmate|Completed today/);
+ assert.ok(html.indexOf('id="fresh-profiles-title"')<html.indexOf('class="meet-banner"'));
+ assert.equal((await call('/profile',ck,{field:'city',value:'Pune'})).status,303);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM profile_completion WHERE member=2").get().n,0);
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'nowPhotoObject','now.jpg')");
+ assert.equal((await call('/profile',ck,{field:'family',value:'Family'})).status,303);
+ const first=sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=2").get().completed_at;
+ html=await body(await call('/',ck));
+ section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.ok(section.indexOf('Test Classmate')<section.indexOf('Test Admin'));
+ assert.match(section,/Pune/);assert.match(section,/Completed today/);
+ const adminCookie=await session(1,'aaaa');
+ await call('/profile',adminCookie,{field:'city',value:'Mumbai'});
+ assert.equal(sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=1").get().completed_at,null);
+ await call('/profile',ck,{field:'family',value:''});
+ section=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.doesNotMatch(section,/Test Classmate/);
+ await call('/profile',ck,{field:'family',value:'Family again'});
+ assert.equal(sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=2").get().completed_at,first);
+ sqlite.exec('UPDATE members SET suspended=1 WHERE id=1');
+ section=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.doesNotMatch(section,/Test Admin/);
+});
+
+test('database tracking captures live writes before preview visits and preserves imported dates',async()=>{
+ const {call,session,sqlite}=fixture();
+ sqlite.exec(`
+  INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"An older entry","family":"Family"}','[]');
+  INSERT INTO profile_fields VALUES(1,'thenPhotoObject','old-then.jpg'),(1,'nowPhotoObject','old-now.jpg');
+  DELETE FROM profile_completion WHERE member=1;
+ `);
+ // Applying the migration to an existing completed entry must not invent its date.
+ sqlite.exec(readFileSync(new URL('../migrations/0017_profile_completion.sql',import.meta.url),'utf8'));
+ assert.equal(sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=1').get().completed_at,null);
+ sqlite.exec(`INSERT INTO profile_fields VALUES
+  (2,'city','Pune'),(2,'life','A new chapter'),(2,'thenPhotoObject','then.jpg'),(2,'nowPhotoObject','now.jpg');`);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion WHERE member=2').get().n,0);
+ // Simulate the existing production Worker, which knows nothing about preview tracking.
+ sqlite.exec("INSERT OR REPLACE INTO profile_fields VALUES(2,'family','Family')");
+ const first=sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=2').get().completed_at;
+ assert.ok(first>0);
+ sqlite.exec("INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Bangalore')");
+ assert.equal(sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=2').get().completed_at,first);
+ const ck=await session(1,'aaaa');
+ const html=await body(await call('/',ck));
+ const section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.ok(section.indexOf('Test Classmate')<section.indexOf('Test Admin'));
+ assert.match(section,/Completed today/);
+ sqlite.exec("UPDATE profile_completion SET completed_at=NULL,observed_at=1,observed_order=1,basis='observed' WHERE member=2");
+ const observed=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.match(observed,/Recently completed/);assert.doesNotMatch(observed,/Completed today/);
 });
 
 test('current interactions and feed',async()=>{
@@ -75,12 +319,43 @@ test('verification is one-time and redirects directly',async()=>{
  assert.match(await replay.text(),/Request a fresh link/);
  assert.equal(replay.headers.get('set-cookie'),null);
 });
+test('home and Memories show newest posts first with stable pagination and no photo boost',async()=>{
+ const {call,session,sqlite}=fixture();
+ const ck=await session(1,'aaaa');
+ sqlite.exec("INSERT INTO topics VALUES('hidden-topic','Hidden topic','event',1,NULL)");
+ for(let i=1;i<=18;i++){
+  const id='ordered-'+String(i).padStart(2,'0');
+  sqlite.prepare('INSERT INTO posts(id,author,body,created,hidden,topic) VALUES(?,?,?,?,?,?)')
+   .run(id,2,'Ordered memory '+i,100000+Math.floor(i/3),i===18?1:0,i===17?'hidden-topic':null);
+ }
+ sqlite.exec("INSERT INTO uploads VALUES('old-photo',2,'old.jpg','image/jpeg','old-digest','','ordered-01',100000)");
+ await call('/posts/ordered-01',ck,{action:'like',liked:'1'});
+ await call('/posts/ordered-01',ck,{action:'comment',body:'A new comment on an old memory'});
+ const posted=await call('/compose',ck,{id:crypto.randomUUID(),body:'A freshly posted memory',about:'person:2'});
+ const newId=posted.headers.get('location').split('/').at(-1);
+ const expected=[newId,...Array.from({length:16},(_,i)=>'ordered-'+String(16-i).padStart(2,'0'))];
+ const ids=html=>[...html.matchAll(/data-post="([^"]+)"/g)].map(m=>m[1]);
+ const next=html=>html.match(/data-feed-next href="([^"]+)"/)?.[1].replaceAll('&amp;','&');
+ const home=await body(await call('/',ck));
+ assert.deepEqual(ids(home),expected.slice(0,9));
+ assert.doesNotMatch(next(home),/featured|mix/);
+ const remaining=await (await call(next(home)+'&fragment=1',ck)).json();
+ assert.deepEqual([...ids(home),...ids(remaining.html)],expected);
+ for(const path of ['/memories','/memories?featured=1&mix=123','/memories?q=memory']){
+  const html=await body(await call(path,ck));
+  assert.deepEqual(ids(html),expected.slice(0,12));
+  const rest=await (await call(next(html)+'&fragment=1',ck)).json();
+  assert.deepEqual([...ids(html),...ids(rest.html)],expected);
+ }
+});
+
 test('featured cards and comment controls',async()=>{
  const {call,session}=fixture();
  const ck=await session(1,'aaaa');
  const home=await body(await call('/',ck));
- assert.match(home,/What are they up to\?/);
- assert.equal((home.match(/class="person-tile"/g)||[]).length,1);
+ assert.match(home,/Freshly completed profiles/);
+ assert.doesNotMatch(home,/What are they up to\?/);
+ assert.equal((home.match(/class="person-tile"/g)||[]).length,0);
  const profile=await body(await call('/people/2',ck));
  assert.match(profile,/Add a memory about this classmate/);
  const created=await call('/compose',ck,{id:crypto.randomUUID(),body:'Campus',about:'person:2'});
@@ -96,12 +371,14 @@ test('featured cards and comment controls',async()=>{
  await call(path,ck,{action:'delete-comment',comment:result[0].id});
  assert.equal((await (await call(path+'?panel=comments',ck)).json()).length,0);
 });
-test('directory and reunion resolve and home features up to twelve submitters',async()=>{
+test('directory and reunion resolve and home features up to twelve completed profiles',async()=>{
  const {call,session,sqlite}=fixture();
  const ck=await session(1,'aaaa');
  for(let id=3;id<=15;id++){
-  sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Classmate '+id,'D3','');
+  sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Classmate '+id,'D3','Nick');
   sqlite.prepare("INSERT INTO submissions(id,subject,contributor,kind,payload) VALUES(?,?,?,'self','{}')").run('self-'+id,id,id);
+  for(const [field,value] of Object.entries({city:'Pune',life:'My story',family:'Family',thenPhotoObject:'then.jpg',nowPhotoObject:'now.jpg'}))
+   sqlite.prepare('INSERT INTO profile_fields VALUES(?,?,?)').run(id,field,value);
  }
  const home=await body(await call('/',ck));
  assert.match(home,/<a href="\/people">Classmates<\/a>/);
@@ -477,14 +754,14 @@ test('WhatsApp Insights require all five details and both photos on pages and AP
  assert.match(prompt,/Complete your profile to unlock WhatsApp Insights/);
  for(const label of ['Dorm number','Dorm name','Current city','Life, Lately','Family','Then photo (2006)','Now photo (2026)'])assert.ok(prompt.includes(label),label);
  assert.match(await body(await call('/',ck)),/Complete your profile to access memories/);
- assert.match(await body(await call('/people/2',ck)),/data-unlock-edit/);
+ assert.match(await body(await call('/people/2',ck)),/href="\/profile#profile-field-/);
  for(const path of ['/wa/','/wa/batch','/wa/story.html'])assert.match(await body(await call(path,ck)),/Complete your profile to unlock WhatsApp Insights/);
  for(const path of ['/wa/api/me','/wa/api/group','/wa/api/me?person=P001']){
   const response=await call(path,ck);assert.equal(response.status,403);assert.equal((await response.json()).error,'profile_incomplete');
  }
  for(const [field,value] of Object.entries({city:'Mumbai',life:'My life',family:'My family',thenPhotoObject:'then.jpg',nowPhotoObject:'now.jpg'}))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,field,value);
  assert.match(await body(await call('/wa/',ck)),/isn’t up yet/);
- assert.match(await body(await call('/people/2',ck)),/Your WhatsApp Insights are unlocked/);
+ assert.match(await body(await call('/people/2',ck)),/Your essentials are all set/);
  // Explicit owner blanks must override imported data and relock access immediately.
  for(const field of ['dorm','nickname','city','life','family']){
   sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,field,'   ');
@@ -517,8 +794,7 @@ test('owner editing is visible and the full editor uses resolved profile values'
  const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');
  const own=await body(await call('/people/2',ck));
  assert.match(own,/<a class="edit-toggle" href="\/profile">Edit profile<\/a>/);
- assert.match(own,/aria-label="Upload profile photo"/);
- assert.match(own,/aria-label="Upload Then photo"/);
+ assert.doesNotMatch(own,/<button[^>]*data-upload|<form[^>]*action="\/profile"/);
  assert.doesNotMatch(own,/data-edit-toggle|data-editable/);
  const other=await body(await call('/people/1',ck));assert.doesNotMatch(other,/class="edit-toggle"|data-profile-edit/);
  let editor=await body(await call('/profile',ck));assert.match(editor,/An imported bio/);assert.match(editor,/>D2<\/textarea>/);
@@ -650,27 +926,27 @@ test('required profile checklist links identify and highlight exactly the missin
  const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');
  const html=await body(await call('/people/2',ck));
  assert.match(html,/class="panel profile-completion-summary"/);
- assert.match(html,/Only the five details and two photos below are required/);
+ assert.match(html,/Minimum requirements completion/);
+ const full=await body(await call('/profile',ck));
  for(const key of ['city','family','then','now']){
-  assert.ok(html.includes('href="#profile-field-'+key+'"'),key+' checklist link');
-  assert.ok(html.includes('id="profile-field-'+key+'"'),key+' target');
+  assert.ok(html.includes('href="/profile#profile-field-'+key+'"'),key+' checklist link');
+  assert.ok(full.includes('id="profile-field-'+key+'"'),key+' editor target');
  }
- assert.match(html,/data-required-jump="city"/);
- const full=await body(await call('/profile',ck));assert.match(full,/5 required profile details/);assert.match(full,/2 required photos/);assert.match(full,/Optional career details/);
- assert.match(html,/Required to unlock/);
- assert.match(html,/Optional details/);
- assert.match(html,/Add Then photo/);assert.match(html,/Add Now photo/);
+ assert.match(full,/The essentials · 5 required details/);assert.match(full,/2 required photos/);assert.match(full,/Your work and studies/);
+ assert.match(full,/Required to unlock/);
+ assert.match(full,/A little more you/);
+ for(const key of ['then','now'])assert.ok(full.includes('id="profile-field-'+key+'" class="profile-required-missing"'));
  const other=await body(await call('/people/1',ck));assert.doesNotMatch(other,/Required to unlock|data-required-jump/);
 });
 
 
-test('profile has one completion summary and footer omits duplicate navigation',async()=>{
+test('profile has two completion scores and footer omits duplicate navigation',async()=>{
  const {call,session}=fixture();const ck=await session(2,'bbbb');
  await call('/meet',ck,{action:'add',target:'1'});
  const recipient=await session(1,'aaaa');
  const html=await body(await call('/people/1',recipient));
- assert.equal((html.match(/class="panel profile-completion-summary"/g)||[]).length,1);
- assert.equal((html.match(/>Continue profile<\/a>/g)||[]).length,1);
+ assert.equal((html.match(/class="panel profile-completion-summary"/g)||[]).length,2);
+ assert.equal((html.match(/>Continue your profile<\/a>/g)||[]).length,1);
  assert.doesNotMatch(html,/>Complete my profile<\/a>/);
  const footer=html.match(/<footer class="site-footer">[\s\S]*?<\/footer>/)[0];
  assert.doesNotMatch(footer,/<nav|href="\/memories"/);
@@ -721,4 +997,452 @@ test('reunion details collapse when complete and stay open when incomplete or ju
  assert.match(html,/data-reunion-details-open/);
  html=await body(await call('/reunion?saved=1',ck));assert.match(html,/<details class="reunion-details-panel" open>/);
  assert.match(html,/srcset="[^"]*w=480/);
+});
+
+// ---- Performance work: per-member completion summary (migration 0018) ----
+import { completedProfilesCTE } from '../completion.mjs';
+function completionOracle(sqlite){
+ const out={};
+ for(const pilot of [0,1])for(const row of sqlite.prepare(`${completedProfilesCTE} SELECT id,city,life FROM completed_profiles`).all(pilot))
+  (out[row.id] ||= {})[pilot?'pilot':'public']={city:row.city,life:row.life};
+ return out;
+}
+function summaryState(sqlite){
+ const out={};
+ for(const row of sqlite.prepare('SELECT * FROM profile_completion_state').all()){
+  if(row.complete_public)(out[row.member] ||= {}).public={city:row.city_public,life:row.life_public};
+  if(row.complete_pilot)(out[row.member] ||= {}).pilot={city:row.city_pilot,life:row.life_pilot};
+ }
+ return out;
+}
+
+test('completion summary matches the full-roster rule through overrides, deletes, enrichment and photos',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO roster VALUES(3,'Third','D3','Three'),(4,'Fourth','D4','Four'),(5,'Fifth','','Five');
+  INSERT INTO profile_seeds VALUES(3,'{"Life, Lately draft":"Seed life 3","Tracker city":"Seed city 3"}','approved',NULL);
+  INSERT INTO profile_seeds VALUES(4,'{"Life, Lately draft":"Seed life 4","Tracker city":"Seed city 4"}','pending',NULL);
+  INSERT INTO submissions VALUES('self-3',3,3,'self','{}','2026-01-01'),('self-4',4,4,'self','{}','2026-01-01');`);
+ let seed=7;const rand=n=>Math.floor((seed=(seed*48271)%2147483647)/2147483647*n);
+ const fields=['dorm','nickname','city','life','family','thenPhotoObject','nowPhotoObject','company','portraitObject'];
+ const values=['','  ','Value','Another value'];
+ const fill=m=>{for(const key of ['city','life','family','thenPhotoObject','nowPhotoObject'])
+  if(rand(4))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,key,'Filled '+key);
+  else sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,key);};
+ // Relies on enrichment for city and Life, Lately, so approved and pending seeds differ.
+ const fillFromSeed=m=>{fill(m);sqlite.prepare("DELETE FROM profile_fields WHERE member=? AND field IN ('city','life')").run(m);
+  sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m);};
+ const operations=[fill,fill,fillFromSeed,fillFromSeed,
+  m=>sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('INSERT INTO profile_fields VALUES(?,?,?) ON CONFLICT(member,field) DO UPDATE SET value=excluded.value').run(m,fields[rand(fields.length)],values[rand(values.length)]),
+  m=>sqlite.prepare('DELETE FROM profile_fields WHERE member=? AND field=?').run(m,fields[rand(fields.length)]),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(m,JSON.stringify({city:'Yearbook city',life:'Yearbook life',family:rand(2)?'Yearbook family':''}),
+    JSON.stringify(rand(2)?[{submission:'self-'+m,key:'legacy-'+m+'.jpg'}]:[])),
+  m=>sqlite.prepare('DELETE FROM yearbook_public WHERE member=?').run(m),
+  m=>sqlite.prepare('UPDATE profile_seeds SET review_status=? WHERE roster_id=?').run(['approved','pending','rejected'][rand(3)],m),
+  m=>sqlite.prepare('INSERT OR REPLACE INTO photos VALUES(?,?,?,?)').run('self-'+m,'legacy-'+m+'.jpg',['then','now','other'][rand(3)],''),
+  m=>sqlite.prepare('DELETE FROM photos WHERE submission=?').run('self-'+m),
+  m=>sqlite.prepare('UPDATE roster SET dorm=? WHERE id=?').run(values[rand(values.length)],m),
+ ];
+ let completeSteps=0,pilotOnlySteps=0;
+ for(let step=0;step<600;step++){
+  operations[rand(operations.length)](1+rand(5));
+  const state=summaryState(sqlite);
+  assert.deepEqual(state,completionOracle(sqlite),'mismatch after step '+step);
+  if(Object.values(state).some(item=>item.public))completeSteps++;
+  if(Object.values(state).some(item=>item.pilot&&!item.public))pilotOnlySteps++;
+ }
+ // The random walk must actually reach complete and pilot-only states for the comparison to mean anything.
+ assert.ok(completeSteps>50,'complete states reached: '+completeSteps);
+ assert.ok(pilotOnlySteps>10,'pilot-only states reached: '+pilotOnlySteps);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_refresh').get().n,0);
+});
+
+test('completion summary keeps first completion through replacement writes and incomplete cycles',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'city','Pune'),(2,'life','Life'),(2,'family','Family'),(2,'thenPhotoObject','t.jpg')`);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion WHERE member=2').get().n,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'nowPhotoObject','n.jpg')`);
+ const first=sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get();
+ assert.ok(first.completed_at>0);assert.equal(first.basis,'recorded');
+ sqlite.exec(`UPDATE profile_completion SET completed_at=1000 WHERE member=2`);
+ // Owner edits, blank overrides and recompletion never move or replace the first record.
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Bangalore')`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','')`);
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=2').get().complete_public,0);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'family','Family again')`);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=2').get()},{completed_at:1000,basis:'recorded'});
+ assert.equal(sqlite.prepare("SELECT city_public FROM profile_completion_state WHERE member=2").get().city_public,'Bangalore');
+});
+
+test('edits unrelated to completion do no completion work',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`UPDATE profile_completion_state SET refreshed_at=1 WHERE member=2`);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'company','Acme'),(2,'portraitObject','p.jpg'),(2,'education','School')`);
+ sqlite.exec(`INSERT INTO profile_fields VALUES(2,'company','Other') ON CONFLICT(member,field) DO UPDATE SET value=excluded.value`);
+ sqlite.exec(`DELETE FROM profile_fields WHERE member=2 AND field='company'`);
+ sqlite.exec(`UPDATE roster SET name='Renamed' WHERE id=2`);
+ assert.equal(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at,1);
+ sqlite.exec(`INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Chennai')`);
+ assert.ok(sqlite.prepare('SELECT refreshed_at FROM profile_completion_state WHERE member=2').get().refreshed_at>1);
+});
+
+test('summary backfill is rerunnable and never labels older profiles as newly completed',()=>{
+ const {sqlite}=fixture();
+ sqlite.exec(`INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"Older life","family":"Family"}','[]');
+  INSERT INTO profile_fields VALUES(1,'thenPhotoObject','t.jpg'),(1,'nowPhotoObject','n.jpg');
+  UPDATE profile_completion SET completed_at=NULL,basis='baseline' WHERE member=1;
+  DELETE FROM profile_completion_state;`);
+ // Simulate a profile that is complete but has no history row (for example, completed before 0017).
+ sqlite.exec(`DELETE FROM profile_completion WHERE member=1`);
+ const migration=readFileSync(new URL('../migrations/0018_completion_summary.sql',import.meta.url),'utf8');
+ sqlite.exec(migration);sqlite.exec(migration);
+ assert.deepEqual({...sqlite.prepare('SELECT completed_at,basis FROM profile_completion WHERE member=1').get()},{completed_at:null,basis:'baseline'});
+ assert.equal(sqlite.prepare('SELECT complete_public FROM profile_completion_state WHERE member=1').get().complete_public,1);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion_state').get().n,2);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'completion_%' AND name NOT LIKE 'completion_summary_%'").get().n,0);
+});
+
+test('Home fresh-profile query reads the summary, not the roster’s profile sources',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ await body(await call('/',ck));
+ const fresh=seen.find(query=>query.includes('profile_completion_state'));
+ assert.ok(fresh,'Home uses the completion summary');
+ assert.ok(!seen.some(query=>query.includes('ranked_profile')),'Home does not rank every member’s fields');
+ const plan=sqlite.prepare('EXPLAIN QUERY PLAN '+fresh).all(0).map(row=>row.detail).join('\n');
+ assert.doesNotMatch(plan,/SCAN (profile_fields|yearbook_public|profile_seeds)\b/);
+});
+
+// ---- Performance work: action-specific routes and page chrome ----
+function recordQueries(env){
+ const seen=[];const prepare=env.DB.prepare;env.DB.prepare=query=>{seen.push(query);return prepare(query);};
+ return {seen,reset(){seen.length=0;}};
+}
+const chromeQuery=query=>/n\.is_read=0/.test(query);
+const fullPostQuery=query=>/collage_photos/.test(query);
+
+test('likes and comment panels do only the necessary work and keep permissions',async()=>{
+ const {call,session,sqlite,env}=fixture();const author=await session(2,'bbbb'),viewer=await session(1,'aaaa');
+ const created=await call('/compose',author,{id:'11111111-1111-4111-8111-111111111111',body:'A lightweight memory'});
+ assert.equal(created.status,303);
+ const key='11111111-1111-4111-8111-111111111111',json={Accept:'application/json'};
+ const queries=recordQueries(env);
+ let response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.ok(!queries.seen.some(chromeQuery),'like does not load page chrome');
+ assert.ok(!queries.seen.some(fullPostQuery),'like does not hydrate the full memory card');
+ // Repeating a like is idempotent and creates one notification.
+ response=await call('/posts/'+key,viewer,{action:'like',liked:'1'},{...json});
+ assert.deepEqual(await response.json(),{liked:true,likes:1});
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM notifications WHERE kind='like' AND post=?").get(key).n,1);
+ queries.reset();
+ response=await call('/posts/'+key,viewer,{action:'comment',body:'Lovely'},{...json});
+ assert.equal((await response.json()).comment.body,'Lovely');
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)));
+ queries.reset();
+ const panel=await (await call('/posts/'+key+'?panel=comments',viewer)).json();
+ assert.deepEqual(panel.map(({name,body,canDelete})=>({name,body,canDelete})),[{name:'Test Admin',body:'Lovely',canDelete:true}]);
+ assert.ok(!queries.seen.some(query=>chromeQuery(query)||fullPostQuery(query)||/uploads|photo_tags|FROM tags/.test(query)),
+  'comments panel reads no chrome, images or tags:\n'+queries.seen.join('\n---\n'));
+ // Another member cannot edit or delete the author's memory.
+ assert.equal((await call('/posts/'+key,viewer,{action:'edit',body:'Changed'})).status,400);
+ assert.equal((await call('/posts/'+key,viewer,{action:'delete'})).status,400);
+ assert.equal(sqlite.prepare('SELECT body,hidden FROM posts WHERE id=?').get(key).body,'A lightweight memory');
+ // Hidden memories stay unavailable to likes, comments and panels.
+ sqlite.prepare('UPDATE posts SET hidden=1 WHERE id=?').run(key);
+ assert.equal((await call('/posts/'+key,viewer,{action:'like',liked:'0'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key,viewer,{action:'comment',body:'Hidden'},{...json})).status,404);
+ assert.equal((await call('/posts/'+key+'?panel=comments',viewer)).status,404);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM likes WHERE post=?').get(key).n,1);
+});
+
+test('JSON endpoints skip page chrome while pages still show the unread count',async()=>{
+ const {call,session,sqlite,env}=fixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key,created,is_read,sample) VALUES(2,1,'mention',NULL,'s1','bench-sample',1,0,1)");
+ const queries=recordQueries(env);
+ for(const path of ['/memories?fragment=1','/memory-targets?q=Test','/tag-search?q=Test']){
+  queries.reset();
+  assert.equal((await call(path,ck)).status,200);
+  assert.ok(!queries.seen.some(chromeQuery),path+' loads no page chrome');
+ }
+ queries.reset();
+ const html=await body(await call('/memories',ck,undefined,{Accept:'text/html'}));
+ assert.match(html,/Notifications \(1 unread\)/);
+ assert.equal(queries.seen.filter(chromeQuery).length,1,'chrome loads once per page');
+ assert.match(await body(await call('/people/2',ck)),/Notifications \(1 unread\)/);
+});
+
+// ---- Performance work: profile editor saves in place ----
+test('profile editor saves return compact state for JavaScript and keep redirects without it',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');const json={Accept:'application/json'};
+ sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
+ const editor=await body(await call('/profile',ck));
+ assert.match(editor,/<form method="post" action="\/profile" enctype="multipart\/form-data" data-profile-form>/);
+ // Without JavaScript the form still redirects to the profile.
+ assert.equal((await call('/profile',ck,{profile_form:'all',city:'Pune'})).status,303);
+ let response=await call('/profile',ck,{profile_form:'all',city:'Pune',family:'Family',life:'Mine'},{...json});
+ assert.equal(response.status,200);
+ let state=await response.json();
+ assert.equal(state.saved,true);assert.equal(state.profile,'/people/2');
+ assert.deepEqual(state.missing,['now']);assert.equal(state.complete,false);
+ assert.equal(state.photos.then.href,'/media/yearbook/2/0');assert.equal(state.lifeGenerated,false);
+ // An explicitly hidden owner value stays blank instead of falling back to imported content.
+ sqlite.prepare("UPDATE profile_seeds SET source_data=?,review_status='approved' WHERE roster_id=2").run(JSON.stringify({'Tracker city':'Seed city','Life, Lately draft':'Seed life'}));
+ state=await (await call('/profile',ck,{profile_form:'all',hide_city:'on',city:'ignored'},{...json})).json();
+ assert.ok(state.missing.includes('city'));
+ assert.equal(sqlite.prepare("SELECT value FROM profile_fields WHERE member=2 AND field='city'").get().value,'');
+ // Photo uploads return a versioned preview URL and unlock the profile in the same response.
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xdb,0,4,0,0,0xff,0xda,0,2,1,0xff,0xd9]);
+ const upload=new FormData();upload.set('profile_form','all');upload.set('city','Pune');
+ upload.set('nowPhoto',new File([jpeg],'now.jpg',{type:'image/jpeg'}));
+ state=await (await call('/profile',ck,upload,{...json})).json();
+ assert.equal(state.complete,true);assert.match(state.photos.now.src,/^\/media\/profile-photo\/2\/now\?w=480&v=[\w-]{12}$/);
+ const replacement=new FormData();replacement.set('field','nowPhotoObject');replacement.set('photo',new File([jpeg],'again.jpg',{type:'image/jpeg'}));
+ const next=await (await call('/profile',ck,replacement,{...json})).json();
+ assert.notEqual(next.photos.now.src,state.photos.now.src);
+ // Attendance and single-field saves answer with JSON too, without redirecting.
+ response=await call('/profile',ck,{field:'attendance',value:'attending'},{...json});
+ assert.equal(response.status,200);assert.equal((await response.json()).attendance,'Attending');
+ assert.equal((await (await call('/profile',ck,{field:'displayName',value:'Tee Cee'},{...json})).json()).name,'Tee Cee');
+ // Invalid photos fail without a false success.
+ const bad=new FormData();bad.set('profile_form','all');bad.set('nowPhoto',new File([new Uint8Array([1,2,3])],'x.jpg',{type:'image/jpeg'}));
+ response=await call('/profile',ck,bad,{...json});
+ assert.equal(response.status,400);assert.match(await response.text(),/have not been saved/);
+});
+
+// ---- Performance work: shared stylesheet ----
+test('pages share one content-versioned stylesheet instead of inlining the theme',async()=>{
+ const {call,session}=fixture();const ck=await session(2,'bbbb');
+ const {siteCSS,siteCSSVersion,siteStylesheet}=await import('../views.mjs');
+ for(const path of ['/','/memories','/people','/people/2','/profile']){
+  const response=await call(path,ck);const html=await body(response);
+  assert.ok(html.includes(`<link rel="stylesheet" href="${siteStylesheet}">`),path);
+  assert.doesNotMatch(html,/<style>[\s\S]*--brick-fired/,path+' does not inline the shared theme');
+  assert.match(response.headers.get('Content-Security-Policy'),/style-src 'self' 'unsafe-inline'/);
+  assert.equal(response.headers.get('Cache-Control'),'private, no-store');
+ }
+ const css=await call(siteStylesheet);
+ assert.equal(css.status,200);assert.equal(css.headers.get('Content-Type'),'text/css; charset=utf-8');
+ assert.equal(css.headers.get('Cache-Control'),'public, max-age=31536000, immutable');
+ const text=await css.text();assert.equal(text,siteCSS);
+ for(const rule of ['@font-face','--brick-fired','.app-bottom-nav','.profile-save-status','.directory-grid'])assert.ok(text.includes(rule),rule);
+ // A page rendered before a deploy still gets current styles, but they are not cached for long.
+ const stale=await call('/styles/site-oldversion1.css');
+ assert.equal(stale.status,200);assert.equal(stale.headers.get('Cache-Control'),'public, max-age=300');
+ assert.equal((await call('/styles/site-'+siteCSSVersion+'.css/x')).status!==200,true);
+ // Light theme still flips the document attribute; the stylesheet carries both themes.
+ const light=await body(await call('/',ck+'; theme=light'));
+ assert.match(light,/<html lang="en" data-theme="light"/);
+ assert.match(text,/data-theme=dark|data-theme="dark"/);
+});
+
+// ---- Performance work: bounded, cheaper directory ----
+test('directory pages 30 classmates at a time in the original ranking with no gaps or duplicates',async()=>{
+ const {call,session,sqlite}=fixture();const ck=await session(2,'bbbb');
+ const insertRoster=sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)');
+ for(let id=3;id<=75;id++)insertRoster.run(id,'Classmate '+String(id%9)+' '+id,String(id%5),'N'+id);
+ // Ranking inputs: yearbook entries, memories by others (subject or tagged), muted/hidden/self memories, portraits.
+ const post=sqlite.prepare('INSERT INTO posts(id,author,subject,body,created,hidden) VALUES(?,?,?,?,?,?)');
+ const about=sqlite.prepare("INSERT INTO memory_about VALUES(?,'person',?)");
+ for(let id=3;id<=75;id++){
+  if(id%4===0)sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(id,'{"moment":"x"}','[]');
+  if(id%3===0)post.run('s'+id,1,id,'About',id,0);
+  if(id%5===0){post.run('a'+id,2,null,'Tagged',id,0);about.run('a'+id,String(id));}
+  if(id%7===0){post.run('self'+id,id,id,'Own',id,0);about.run('self'+id,String(id));}
+  if(id%11===0)post.run('h'+id,1,id,'Hidden',id,1);
+  if(id%13===0){post.run('m'+id,1,id,'Muted',id,0);sqlite.prepare('INSERT INTO muted_subjects VALUES(?)').run('m'+id);}
+  if(id%6===0)sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(id,'nowPhotoObject','now'+id);
+ }
+ const featuredOld=sqlite.prepare(`SELECT EXISTS(SELECT 1 FROM posts p WHERE (p.subject=? OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)))
+   AND p.author<>? AND p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))
+   AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)) AS f`);
+ const cards=html=>[...html.matchAll(/class="directory-card" href="\/people\/(\d+)">([\s\S]*?)<\/a>/g)].map(match=>({id:Number(match[1]),portrait:!/class="initials"/.test(match[2])}));
+ const ids=html=>cards(html).map(card=>card.id);
+ let html=await body(await call('/people',ck));
+ assert.match(html,/<p class="registry directory-count">75 classmates<\/p>/);
+ const seen=cards(html);assert.equal(seen.length,30);
+ let next=html.match(/href="([^"]+)" data-directory-more/)?.[1].replaceAll('&amp;','&');
+ while(next){
+  const page=await (await call(next+'&fragment=1',ck)).json();
+  seen.push(...cards(page.html));next=page.next;
+ }
+ assert.equal(seen.length,75);assert.equal(new Set(seen.map(card=>card.id)).size,75);
+ // Same order as the original per-classmate ranking: yearbook 2, memories by others 2, portrait 1, then name.
+ const name=id=>sqlite.prepare('SELECT name FROM roster WHERE id=?').get(id).name;
+ const yearbook=new Set(sqlite.prepare("SELECT member FROM yearbook_public WHERE fields<>'{}' OR images<>'[]'").all().map(r=>r.member));
+ const expected=seen.map(card=>({...card,name:name(card.id),rank:2*yearbook.has(card.id)+2*featuredOld.get(BigInt(card.id),BigInt(card.id),BigInt(card.id)).f+card.portrait}))
+  .sort((a,b)=>b.rank-a.rank||(a.name<b.name?-1:a.name>b.name?1:a.id-b.id)).map(card=>card.id);
+ assert.deepEqual(seen.map(card=>card.id),expected);
+ assert.ok(new Set(expected.map(id=>featuredOld.get(BigInt(id),BigInt(id),BigInt(id)).f)).size===2,'ranking inputs vary');
+ // Filters carry into the next page; reunion attendees stay a single sorted list.
+ html=await body(await call('/people?dorm=1',ck));
+ assert.doesNotMatch(html,/data-directory-more/);
+ assert.ok(ids(html).every(id=>sqlite.prepare('SELECT dorm FROM roster WHERE id=?').get(id).dorm==='1'));
+ html=await body(await call('/people?q=Classmate',ck));
+ assert.match(html,/href="\/people\?q=Classmate&amp;after=\d+-\d+" data-directory-more/);
+ // Fragment requests skip filter lists and page chrome.
+ const fragment=await call('/people?after=0-1&fragment=1',ck);
+ assert.equal(fragment.headers.get('Content-Type'),'application/json');
+});
+
+// ---- Performance work (P2): memory card tag labels ----
+test('memory card tag labels match the original per-roster rule',async()=>{
+ const {sqlite}=fixture();
+ const original=`(SELECT json_group_array(json_object('href',href,'label',label,'kind',kind)) FROM (
+      SELECT '/people/'||rr.id AS href,rr.name AS label,'person' AS kind FROM roster rr
+      WHERE (rr.id=p.subject OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(rr.id AS TEXT))
+        OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=rr.id AND t.status='accepted'))
+        AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+      UNION SELECT '/topics/'||tt.id,tt.title,'topic' FROM topics tt WHERE tt.hidden=0 AND tt.redirect IS NULL
+        AND (tt.id=p.topic OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=tt.id))
+      ORDER BY kind,label))`;
+ const source=readFileSync(new URL('../worker.mjs',import.meta.url),'utf8');
+ const current=source.match(/(\(SELECT json_group_array\(json_object\('href',href,'label',label,'kind',kind\)\) FROM \([\s\S]*?ORDER BY kind,label\s*\)\)) AS linked_tags/)[1];
+ assert.notEqual(current.replace(/\s+/g,' '),original.replace(/\s+/g,' '),'the rewritten query is under test');
+ for(let id=3;id<=30;id++)sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Person '+(id%7)+' '+id,'1','N');
+ for(const [id,title,hidden,redirect] of [['t1','Perf topic A',0,null],['t2','Perf topic hidden',1,null],['t3','Perf topic moved',0,'t1'],['t4','Perf topic D',0,null]])
+  sqlite.prepare('INSERT INTO topics(id,title,kind,hidden,redirect) VALUES(?,?,?,?,?)').run(id,title,'Other',hidden,redirect);
+ let seed=11;const rand=n=>Math.floor((seed=(seed*48271)%2147483647)/2147483647*n);
+ const targets=['3','4','012','12','99','30',' 5','abc'];
+ for(let i=0;i<120;i++){
+  const id='p'+i;
+  sqlite.prepare('INSERT INTO posts(id,author,subject,topic,body,created) VALUES(?,?,?,?,?,?)').run(id,1,rand(3)?null:1+rand(32),rand(3)?null:['t1','t2','t3','t4','t9'][rand(5)],'b',i);
+  for(let j=rand(4);j>0;j--)sqlite.prepare("INSERT OR IGNORE INTO memory_about VALUES(?,'person',?)").run(id,targets[rand(targets.length)]);
+  for(let j=rand(3);j>0;j--)sqlite.prepare("INSERT OR IGNORE INTO memory_about VALUES(?,'topic',?)").run(id,['t1','t2','t3','t4','zz'][rand(5)]);
+  for(let j=rand(3);j>0;j--)sqlite.prepare('INSERT OR IGNORE INTO tags VALUES(?,?,?)').run(id,1+rand(32),['accepted','pending','declined'][rand(3)]);
+  if(!rand(8))sqlite.prepare('INSERT OR IGNORE INTO muted_subjects VALUES(?)').run(id);
+ }
+ const read=expr=>sqlite.prepare(`SELECT p.id,${expr} AS tags FROM posts p ORDER BY p.id`).all().map(row=>row.id+' '+row.tags);
+ const before=read(original),after=read(current);
+ assert.deepEqual(after,before);
+ assert.ok(before.filter(row=>row.includes('/people/')).length>30&&before.filter(row=>row.includes('/topics/')).length>20,'links are exercised');
+});
+
+// ---- Performance work (P2): photo variants ----
+function photoFixture(){
+ const fx=fixture();
+ // Keep R2-style metadata and sizes, which the shared in-memory store does not model.
+ const get=fx.env.MEDIA.get,put=fx.env.MEDIA.put,meta=new Map();
+ fx.env.MEDIA.put=async(key,bytes,options={})=>{meta.set(key,options);return put(key,bytes instanceof ArrayBuffer?new Uint8Array(bytes):bytes);};
+ fx.env.MEDIA.get=async key=>{const object=await get(key);if(!object)return null;const options=meta.get(key)||{};
+  return {...object,size:object.body.byteLength,customMetadata:options.customMetadata||{},httpMetadata:options.httpMetadata||object.httpMetadata};};
+ const background=[];fx.ctx={waitUntil:promise=>background.push(promise)};fx.background=background;
+ fx.fetch=(path,cookie,init={})=>worker.fetch(new Request('https://test.example'+path,{...init,headers:{Cookie:cookie,Origin:'https://test.example',...(init.headers||{})}}),fx.env,fx.ctx);
+ return fx;
+}
+test('photo variants are returned before they are stored and generated once per size',async()=>{
+ const {session,sqlite,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','original.jpg')");
+ await env.MEDIA.put('original.jpg',new Uint8Array(100));
+ let transforms=0,release;const gate=new Promise(resolve=>{release=resolve;});
+ env.IMAGES={input:()=>({transform(){transforms++;return {async output(){await gate;return {response:()=>new Response(new Uint8Array(12))};}};}})};
+ const put=env.MEDIA.put;let storeRelease;const storeGate=new Promise(resolve=>{storeRelease=resolve;});
+ env.MEDIA.put=async(key,bytes,options)=>{if(key.startsWith('variants/'))await storeGate;return put(key,bytes,options);};
+ // Two viewers ask for the same new size at once: one transformation serves both.
+ const first=fetch('/media/portrait/2?w=256',ck),second=fetch('/media/portrait/2?w=256',ck);
+ release();
+ const responses=await Promise.all([first,second]);
+ assert.equal(transforms,1);
+ for(const response of responses){assert.equal(response.headers.get('content-type'),'image/webp');assert.equal((await response.arrayBuffer()).byteLength,12);}
+ // The responses did not wait for storage; the write finishes in the background.
+ assert.ok(background.length>=1);
+ storeRelease();await Promise.all(background);
+ assert.equal((await env.MEDIA.get('variants/webp-v1/256/original.jpg')).size,12);
+ const cached=await fetch('/media/portrait/2?w=256',ck);
+ assert.equal((await cached.arrayBuffer()).byteLength,12);assert.equal(transforms,1);
+ // Authorization still applies.
+ assert.equal((await worker.fetch(new Request('https://test.example/media/portrait/2?w=256'),env)).status,303);
+});
+
+test('a size that would not be smaller than the original is never re-attempted',async()=>{
+ const {session,sqlite,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','tiny.png')");
+ await env.MEDIA.put('tiny.png',new Uint8Array(10),{httpMetadata:{contentType:'image/png'}});
+ let transforms=0;
+ env.IMAGES={input:()=>({transform(){transforms++;return {async output(){return {response:()=>new Response(new Uint8Array(40))};}};}})};
+ for(let i=0;i<3;i++){
+  const response=await fetch('/media/portrait/2?w=480',ck);
+  assert.equal(response.headers.get('content-type'),'image/png');
+  assert.equal((await response.arrayBuffer()).byteLength,10);
+  await Promise.all(background);
+ }
+ assert.equal(transforms,1);
+ // The marker lives outside the variant prefix, so an older Worker never serves it as an image.
+ assert.equal(await env.MEDIA.get('variants/webp-v1/480/tiny.png'),null);
+ assert.equal((await env.MEDIA.get('variants/webp-v1-original/480/tiny.png')).size,0);
+});
+
+test('uploads generate their display sizes after the response',async()=>{
+ const {session,env,fetch,background}=photoFixture();const ck=await session(2,'bbbb');
+ const widths=[];
+ env.IMAGES={input:()=>({transform(options){widths.push(options.width);return {async output(){return {response:()=>new Response(new Uint8Array(4))};}};}})};
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xdb,0,4,0,0,0xff,0xda,0,2,1,0xff,0xd9]);
+ const form=new FormData();form.set('photo',new File([jpeg],'a.jpg',{type:'image/jpeg'}));
+ const id='22222222-2222-4222-8222-222222222222';
+ const response=await fetch('/compose/photo?id='+id,ck,{method:'POST',body:form});
+ assert.equal(response.status,200);
+ assert.deepEqual(widths,[],'nothing is generated before the response');
+ await Promise.all(background);await Promise.all(background);
+ assert.deepEqual(widths.sort((a,b)=>a-b),[480,1200]);
+ const profile=new FormData();profile.set('profile_form','all');profile.set('nowPhoto',new File([jpeg],'n.jpg',{type:'image/jpeg'}));
+ widths.length=0;
+ assert.equal((await fetch('/profile',ck,{method:'POST',body:profile})).status,303);
+ await Promise.all(background);await Promise.all(background);
+ assert.deepEqual(widths.sort((a,b)=>a-b),[96,256,480]);
+});
+
+// ---- Performance work (P2): shared browser request helper ----
+test('browser request helper applies deadlines, session checks and readable errors without retrying',async()=>{
+ const {socialScript}=await import('../social.mjs');const {runInNewContext}=await import('node:vm');
+ const start=socialScript.indexOf('  class RequestError'),end=socialScript.indexOf('  // "Looking to catch up"');
+ assert.ok(start>0&&end>start);
+ let timers=[],calls=0,reply;
+ const context={AbortController,setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},
+  fetch:(url,options)=>{calls++;return reply(url,options);}};
+ const request=runInNewContext(socialScript.slice(start,end)+';request',context);
+ const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+ reply=async()=>json({ok:true});
+ assert.deepEqual(await request('/x'),{ok:true});
+ reply=async()=>new Response('<!doctype html><p>Sign in</p>',{headers:{'Content-Type':'text/html'}});
+ await assert.rejects(request('/x',{method:'POST'}),/session may have ended/);
+ reply=async()=>new Response('Please wait before commenting again.',{status:429});
+ await assert.rejects(request('/x',{method:'POST'}),/wait a moment/);
+ reply=async()=>new Response('Choose a classmate or topic.',{status:400});
+ await assert.rejects(request('/x',{method:'POST'}),/Choose a classmate or topic\./);
+ reply=async()=>new Response('<html>error</html>',{status:500});
+ await assert.rejects(request('/x',{method:'POST'}),/Could not save/);
+ // A stalled request ends at its deadline with a recoverable message; it is not retried.
+ calls=0;timers=[];
+ reply=(_,options)=>new Promise((_,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))));
+ const stalled=request('/x',{method:'POST',timeout:20000});
+ assert.equal(timers.at(-1).ms,20000);timers.at(-1).fn();
+ await assert.rejects(stalled,/couldn’t confirm this was saved/);
+ assert.equal(calls,1);
+ // A caller's own cancellation (newer search input) passes through as an AbortError.
+ const controller=new AbortController();const cancelled=request('/x',{signal:controller.signal});controller.abort();
+ await assert.rejects(cancelled,error=>error.name==='AbortError');
+});
+
+
+test('compose person associations survive D1 numeric binding for text and photo memories',async()=>{
+ const {call,session,sqlite}=fixture();
+ const author=await session(1,'aaaa'),tagged=await session(2,'bbbb');
+ const textId=crypto.randomUUID(),photoId=crypto.randomUUID();
+ assert.equal((await call('/compose',author,{id:textId,body:'Text-only tagged recollection',about:'person:2'})).status,303);
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
+ const uploadId=crypto.randomUUID(),upload=new FormData();upload.set('photo',new File([png],'photo.png',{type:'image/png'}));
+ assert.equal((await call('/compose/photo?id='+uploadId,author,upload)).status,200);
+ const form=new FormData();form.set('id',photoId);form.set('body','Photo tagged recollection');form.set('about','person:2');form.append('photoId',uploadId);
+ assert.equal((await call('/compose',author,form)).status,303);
+ for(const cookie of [author,tagged])for(const route of ['/people/2','/gallery?person=2']){
+  const html=await body(await call(route,cookie));
+  assert.ok(html.includes('data-post="'+textId+'"'));
+  assert.ok(html.includes('data-post="'+photoId+'"'));
+  assert.match(html,/Text-only tagged recollection/);
+  assert.match(html,/text-memory/);
+ }
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM memory_about WHERE kind='person' AND target='2'").get().n,2);
+ const removed=await call('/posts/'+textId,tagged,{action:'unassociate'});assert.equal(removed.status,303);
+ assert.ok(!(await body(await call('/people/2',tagged))).includes('data-post="'+textId+'"'));
+ assert.ok((await body(await call('/people/2',tagged))).includes('data-post="'+photoId+'"'));
 });
