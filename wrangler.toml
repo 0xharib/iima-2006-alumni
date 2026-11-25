@@ -31,12 +31,13 @@ queue = "face-jobs"
 queue = "face-jobs"
 max_batch_size = 4
 max_retries = 5
+max_concurrency = 2
 dead_letter_queue = "face-jobs-dlq"
 
 [[containers]]
 class_name = "FaceContainer"
 image = "./face-service/Dockerfile"
-instance_type = "standard-1"
+instance_type = "standard-2"
 max_instances = 2
 
 [[durable_objects.bindings]]

@@ -463,6 +463,8 @@ export const page={
   adminFaces(data,queued=0,published=NaN){
     const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
     const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
+    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+      <p>Not set up yet: run <code>migrations/0017_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
     return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
       <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
       ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}

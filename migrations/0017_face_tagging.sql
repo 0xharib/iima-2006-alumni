@@ -1,5 +1,6 @@
--- Automatic face tagging. Creates tables and adds photo_tags.origin; it changes no existing rows, so it is safe
--- to run on its own against production:
+-- Automatic face tagging. Creates tables and adds photo_tags.origin; it changes no existing rows.
+-- Run it only AFTER the Worker with face tagging is deployed: older Workers insert into photo_tags without column
+-- names and would fail once the new column exists. The new Worker works with or without this migration.
 --   npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql
 -- notify_photo is recreated unchanged except that it now ignores automatic tags, which send their own notification.
 
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS face_matches (
  score REAL NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('shadow','auto','removed')),
  created INTEGER NOT NULL,
+ notified INTEGER NOT NULL DEFAULT 1,  -- 0: an automatic tag the member has not been told about yet (hourly summary)
  PRIMARY KEY(media,member)
 );
 CREATE INDEX IF NOT EXISTS face_matches_member ON face_matches(member,state);

@@ -131,6 +131,34 @@ class TestAnalyse(unittest.TestCase):
             server.shutdown()
 
 
+class TestConcurrency(unittest.TestCase):
+    def test_one_analysis_at_a_time(self):
+        import time
+        active, peak = [0], [0]
+        real = app.analyse
+
+        def slow(data, mode):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            time.sleep(0.2)
+            active[0] -= 1
+            return {"model": app.MODEL, "width": 1, "height": 1, "faces": []}
+
+        app.analyse = slow
+        server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{server.server_port}/faces?mode=photo"
+        try:
+            calls = [threading.Thread(target=lambda: urllib.request.urlopen(urllib.request.Request(url, data=b"x", method="POST")).read())
+                     for _ in range(3)]
+            for c in calls: c.start()
+            for c in calls: c.join()
+        finally:
+            app.analyse = real
+            server.shutdown()
+        self.assertEqual(peak[0], 1)
+
+
 @unittest.skipUnless(os.path.isdir(os.environ.get("FACE_MODELS", "/models")), "model files not present")
 class TestRealModels(unittest.TestCase):
     def test_blank_image_has_no_faces(self):

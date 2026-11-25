@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readdirSync, readFileSync } from 'node:fs';
 import worker from '../worker.mjs';
 
-export function fixture() {
+export function fixture({skip=[]}={}) {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0000_baseline.sql',import.meta.url),'utf8'));
   sqlite.exec(`
@@ -14,7 +14,7 @@ export function fixture() {
     INSERT INTO photos VALUES('self-2','legacy.jpg','then','Then');
   `);
   for (const filename of readdirSync(new URL('../migrations/',import.meta.url)).filter(name=>name.endsWith('.sql')).sort()) {
-    if(filename==='0000_baseline.sql'||filename==='0002_publish_imports.sql') continue;
+    if(filename==='0000_baseline.sql'||filename==='0002_publish_imports.sql'||skip.includes(filename)) continue;
     sqlite.exec(readFileSync(new URL('../migrations/'+filename,import.meta.url),'utf8'));
   }
   sqlite.exec("INSERT INTO members(id,role,invited) VALUES(1,'admin',1),(2,'member',1)");

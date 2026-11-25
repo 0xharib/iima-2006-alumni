@@ -80,7 +80,7 @@ test('FaceContainer stops the container after five idle minutes', async()=>{
 });
 
 const serviceReply=(faces,status=200)=>({idFromName:n=>n,get:id=>({fetch:async(url,init)=>{
-  assert.equal(id,'matcher'); assert.match(url,/^https:\/\/faces\/faces\?mode=(photo|portrait)$/);
+  assert.match(id,/^matcher-[01]$/); assert.match(url,/^https:\/\/faces\/faces\?mode=(photo|portrait)$/);
   return new Response(JSON.stringify({model:'buffalo_l/w600k_r50',width:100,height:80,faces}),{status});}})});
 const b64=vec=>Buffer.from(new Uint8Array(new Float32Array(vec).buffer)).toString('base64');
 
@@ -159,7 +159,7 @@ test('non-consenting members are never matched', async()=>{
 test('one notification per person per memory', async()=>{
   const w=faceWorld(); w.consent(2,0);
   const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
-  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p1',b);  // separate jobs; the in-memory fixture cannot nest transactions
+  await scanPhoto(w.env,'p1',a,'post'); await scanPhoto(w.env,'p1',b,'post');  // jobs from a new memory; the in-memory fixture cannot nest transactions
   const rows=w.sqlite.prepare("SELECT actor,kind,post,event_key FROM notifications WHERE recipient=2").all().map(r=>({...r}));
   assert.deepEqual(rows,[{actor:1,kind:'mention',post:'p1',event_key:'found:p1'}]);
   assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2'").get().n,2);
@@ -172,7 +172,7 @@ test('uploader is tagged without notifying themselves', async()=>{
 });
 test('Not me is respected on rescan', async()=>{
   const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
-  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,2,'p1',NULL,0.9,'removed',1)").run(m);
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,2,'p1',NULL,0.9,'removed',1,1)").run(m);
   assert.deepEqual((await scanPhoto(w.env,'p1',m)).tagged,[]);
   assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE media=?").get(m).state,'removed');
 });
@@ -244,6 +244,7 @@ test('yes builds refs from own photos and the yearbook portrait', async()=>{
   const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
   w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
   w.objects.set('profile/p2',new Uint8Array([5])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
+  w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
   w.photoFaces[5]=[0]; w.photoFaces[1]=[0];   // portrait.jpg (the fixture's yearbook portrait) starts with byte 1
   assert.equal((await w.call('/faces/consent',ck,{choice:'yes',next:'/people/2'})).status,303);
   assert.deepEqual(sent,[{type:'ref',member:2}]);
@@ -272,7 +273,7 @@ test('rematch tags earlier photos and sends one summary', async()=>{
 test('rematch leaves a face that already belongs to someone else', async()=>{
   const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1);
   const face=storedFace(w,a,'p1',0);
-  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,3,'p1',?,0.95,'auto',1)").run(a,face);
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,3,'p1',?,0.95,'auto',1,1)").run(a,face);
   assert.equal(await rematchMember(w.env,2),0);
 });
 test('withdrawing removes auto tags but keeps manual tags', async()=>{
@@ -319,7 +320,7 @@ const apostrophe="(?:'|&#39;|&#x27;|’)";
 test('found notification reads You are in 2 photos and opens the photo', async()=>{
   const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
   const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
-  await scanPhoto(w.env,'p1',a); await scanPhoto(w.env,'p1',b);
+  await scanPhoto(w.env,'p1',a,'post'); await scanPhoto(w.env,'p1',b,'post');
   const page=await (await w.call('/notifications',ck)).text();
   assert.match(page,new RegExp(`You${apostrophe}re in 2 photos`));
   const id=w.sqlite.prepare("SELECT id FROM notifications WHERE recipient=2").get().id;
@@ -423,4 +424,143 @@ test('scan-all queues everything unscanned', async()=>{
   w.photo('p1','u1',1); w.photo('p2','u2',2);
   const res=await w.call('/admin/faces',await w.session(1,'aaaa'),{action:'scan-all'});
   assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/admin/faces?queued=2'); assert.equal(sent.length,2);
+});
+
+// ---------- final review fixes ----------
+import { consentState, publishShadow, writeMatches } from '../faces.mjs';
+
+test('C1: before migration 0017 the site works and hides face tagging', async()=>{
+  const w=fixture({skip:['0017_face_tagging.sql']}); w.env.FACE_TAGGING='shadow';
+  const ck=await w.session(2,'bbbb'), admin=await w.session(1,'aaaa');
+  w.sqlite.exec(`INSERT INTO posts(id,author,body,created) VALUES('p1',2,'x',1); INSERT INTO uploads VALUES('u1',2,'social/u1','image/jpeg','h','','p1',1)`);
+  w.objects.set('social/u1',new Uint8Array([1]));
+  const home=await w.call('/',ck); assert.equal(home.status,200); assert.doesNotMatch(await home.text(),/Find me in batch photos/);
+  assert.equal((await w.call('/posts/p1',ck)).status,200);
+  assert.equal((await w.call('/notifications',ck)).status,200);
+  assert.equal((await w.call('/people/2',ck)).status,200);
+  assert.equal((await w.call('/posts/p1',ck,{action:'tag-add',photo:'post/u1',tag:'1'})).status<500,true);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags").get().n,1);
+  assert.equal((await w.call('/faces/consent',ck,{choice:'yes'})).status,404);
+  assert.equal((await w.call('/posts/p1',ck,{action:'delete'})).status,303);
+  assert.equal((await w.call('/admin/faces',admin)).status,200);
+});
+
+test('I2: the sweep re-queues reference jobs for members who said yes but have no references', async()=>{
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}};
+  w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1),(3,0,1)'); w.consent(4,0);
+  await sweep(w.env);
+  assert.deepEqual(sent.filter(m=>m.body.type==='ref').map(m=>m.body.member),[2]);
+  const msg=message({type:'ref',member:2}); msg.attempts=5; w.serviceDown=true;
+  w.objects.set('profile/p2',new Uint8Array([5])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'portraitObject','profile/p2')");
+  await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);   // given up on; the sweep retries it
+});
+
+test('I3/I4: re-matching many photos stays within D1 limits and summarises only new tags, once', async()=>{
+  const w=faceWorld(); w.consent(2,0);
+  let queries=0; const prepare=w.env.DB.prepare.bind(w.env.DB);
+  w.env.DB={...w.env.DB,prepare(sql){ if((sql.match(/\?/g)||[]).length>100) throw new Error('too many SQL variables'); queries++; return prepare(sql); },batch:w.env.DB.batch.bind(w.env.DB)};
+  for(let i=0;i<150;i++){ const m=w.photo('p'+i,'u'+i,1); storedFace(w,m,'p'+i,0); }
+  assert.equal(await rematchMember(w.env,2),150);
+  assert.ok(queries<400,'queries '+queries);
+  const notes=()=>w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all().map(r=>r.event_key);
+  assert.equal(notes().length,1); assert.match(notes()[0],/^found-all:150:/);
+  assert.equal(await rematchMember(w.env,2),0);         // a profile photo change: nothing new, no new summary
+  assert.equal(notes().length,1);
+});
+
+test('I3: publishing hundreds of shadow matches converts them all with one summary each', async()=>{
+  const w=faceWorld('shadow'); w.consent(2,0); w.consent(3,1);
+  for(let i=0;i<300;i++){ const m=w.photo('p'+i,'u'+i,1);
+    w.sqlite.prepare("INSERT INTO face_matches VALUES(?,?,?,NULL,0.6,'shadow',1,1)").run(m,2+(i%2),'p'+i); }
+  w.env.FACE_TAGGING='on';
+  assert.equal(await publishShadow(w.env),300);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE origin='auto'").get().n,300);
+  assert.deepEqual(w.sqlite.prepare("SELECT recipient,event_key FROM notifications ORDER BY recipient").all().map(r=>[r.recipient,r.event_key.split(':')[1]]),[[2,'150'],[3,'150']]);
+});
+
+test('I10/M6: photos found by the sweep wait for one summary, which leaves out your own uploads', async()=>{
+  const w=faceWorld(); w.consent(2,0);
+  const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2), own=w.photo('p3','u3',3,2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0]; w.photoFaces[3]=[0];
+  for (const [m,p] of [[a,'p1'],[b,'p2'],[own,'p3']]) await handleQueue({messages:[message({type:'media',post:p,media:m})]},w.env);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,0);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2'").get().n,3);
+  await workerModule.default.scheduled({},w.env);
+  const notes=w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all();
+  assert.equal(notes.length,1); assert.match(notes[0].event_key,/^found-all:2:/);
+  await workerModule.default.scheduled({},w.env);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
+});
+test('I10: a photo job from a new memory still notifies per memory', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await handleQueue({messages:[message({type:'media',post:'p1',media:a,notify:'post'})]},w.env);
+  assert.equal(w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").get().event_key,'found:p1');
+  await workerModule.default.scheduled({},w.env);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
+});
+
+test('I5: a family Then photo uses the face that matches the yearbook, or none', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)');
+  w.objects.set('profile/t2',new Uint8Array([6])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'thenPhotoObject','profile/t2')");
+  w.photoFaces[1]=[0]; w.photoFaces[6]=[3,0];          // partner (dim 3) first, the batchmate (dim 0) second
+  assert.equal(await refreshRefs(w.env,2),2);
+  const then=w.sqlite.prepare("SELECT embedding FROM face_refs WHERE member=2 AND source='then'").get();
+  assert.equal(toVector(then.embedding)[0],1);
+  w.photoFaces[1]=[];                                   // no yearbook face to compare with: drop the family photo
+  assert.equal(await refreshRefs(w.env,2),0);
+});
+test('I6: only an approved seed portrait is used', async()=>{
+  const w=faceWorld(); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)'); w.photoFaces[1]=[0];
+  assert.equal(await refreshRefs(w.env,2),0);           // the fixture's seed is pending review
+  w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
+  assert.equal(await refreshRefs(w.env,2),1);
+});
+test('M10: one unreadable reference photo does not stop the others', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)');
+  w.photoFaces[1]=[0];
+  w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'nowPhotoObject','profile/missing')");
+  const real=w.env.FACES; w.env.FACES={idFromName:n=>n,get:id=>({fetch:async(u,init)=>new Uint8Array(init.body)[0]===9?new Response('bad',{status:400}):real.get(id).fetch(u,init)})};
+  w.objects.set('profile/missing',new Uint8Array([9]));
+  assert.equal(await refreshRefs(w.env,2),1);
+});
+
+test('I7: withdrawal works while face tagging is off', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  w.env.FACE_TAGGING='off';
+  assert.equal(await consentState(w.env,2),'on');
+  assert.match(await (await w.call('/people/2',ck)).text(),/Turn off/);
+  assert.equal((await w.call('/faces/consent',ck,{choice:'no'})).status,303);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n,0);
+  assert.equal((await w.call('/faces/consent',ck,{choice:'yes'})).status,404);
+  assert.equal(await consentState(w.env,2),'hidden');
+});
+
+test('I8: a reference job that runs after withdrawal writes nothing', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[1]=[0];
+  w.sqlite.exec('INSERT INTO face_prefs VALUES(2,0,1)');
+  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n,0);
+  const a=w.photo('p1','u1',1);
+  assert.deepEqual(await writeMatches(w.env,[{media:a,post:'p1',member:2,face:null,score:0.9}],'post'),[]);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM photo_tags').get().n,0);
+});
+
+test('M1: a face someone rejected can go to the next-best person', async()=>{
+  const w=faceWorld(); w.consent(2,0); w.consent(3,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,2,'p1',NULL,0.9,'removed',1,1)").run(a);
+  w.sqlite.prepare("UPDATE face_refs SET embedding=? WHERE member=2").run(vectorBytes(mixVec(0,1,0.99)));
+  assert.deepEqual((await scanPhoto(w.env,'p1',a)).tagged,[3]);
+});
+
+test('I9: jobs are spread over two containers', async()=>{
+  const names=new Set(); const env={FACES:{idFromName:n=>{names.add(n);return n;},get:()=>({fetch:async()=>Response.json({model:'m',width:1,height:1,faces:[]})})}};
+  for (const key of ['post/a','post/b','post/c','post/d','post/e','post/f']) await analyseImage(env,new Uint8Array([1]),'photo',key);
+  assert.deepEqual([...names].sort(),['matcher-0','matcher-1']);
+});
+
+test('M5: tagging someone by hand over an automatic tag makes it manual', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(1,'aaaa'); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  w.sqlite.exec(`INSERT INTO memory_albums VALUES('p1','Album','u1','["u1"]')`);
+  await scanPhoto(w.env,'p1',a);
+  await w.call('/posts/p1',ck,{action:'tag-add',photo:a,tag:'2'});
+  assert.equal(w.sqlite.prepare("SELECT origin FROM photo_tags WHERE target='2'").get().origin,'manual');
 });

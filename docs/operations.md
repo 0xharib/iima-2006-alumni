@@ -104,23 +104,30 @@ more (`FACE_BAR` in `faces.mjs`) becomes a photo tag with `origin='auto'`. Desig
 be changed on their own profile. Turning it off deletes their reference faces and their automatic tags (manual tags
 stay). "Not me" on a photo removes that tag for good. Only members who said yes are ever matched.
 
-**One-time setup (Arun).**
+**One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
+`photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or
+without the migration; until it has run, face tagging stays hidden.
 1. Create the queues: `npx wrangler queues create face-jobs` and `npx wrangler queues create face-jobs-dlq`.
-2. Back up D1, then add the tables (safe on its own; it changes no existing rows):
+2. Merge. The Git integration runs `npx wrangler deploy`, which also builds `face-service/Dockerfile` (pip install
+   plus a ~190 MB model download) and rolls out the container. Check the build log for the image step.
+3. Back up D1, then add the tables:
    `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql`.
-3. Set `FACE_TAGGING=shadow` in the dashboard.
-4. Merge. The Git integration runs `npx wrangler deploy`, which also builds `face-service/Dockerfile` and rolls out the
-   container. The Worker goes live first; until the container is ready, photo jobs fail and are retried (posting is
-   never affected). If the build cannot build the image, run `npx wrangler deploy` once from a machine with Docker.
+4. Set `FACE_TAGGING=shadow` in the dashboard. Members now see "Find me in batch photos?".
 5. At `/admin/faces`, press **Scan all photos now** (the hourly sweep would get there too, 200 photos an hour).
    Check a sample of the shadow matches.
-6. Set `FACE_TAGGING=on`, then press **Publish shadow matches as tags**.
+6. Set `FACE_TAGGING=on`, then press **Publish shadow matches as tags**. Each member gets one "We found you in N
+   photos". From then on, photos in new memories notify once per memory; older photos found by the hourly sweep are
+   gathered into the next hourly summary, so nobody gets a burst.
+
+If a face job fails (for example while the container is still starting) it is retried; after five tries photos are
+marked failed and members still without reference faces are re-queued by the hourly sweep. Posting is never affected.
 
 **Staging.** Workers that contain a Durable Object get no preview URLs from `wrangler versions upload`. If the staging
 Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.
 
-**Running costs.** The container (`standard-1`, at most 2 instances) starts on demand and stops after five idle
-minutes. InsightFace takes about 2 seconds per photo, well within the usage included in Workers Paid.
+**Running costs.** The container (`standard-2`, one vCPU; at most 2 instances, at most 2 jobs at a time) starts on
+demand and stops after five idle minutes. Each container analyses one photo at a time, a few seconds each, which is
+within the usage included in Workers Paid for a few thousand photos a month.
 
 **Licence.** The InsightFace `buffalo_l` models are licensed for non-commercial research use; Hari has taken
 responsibility for that question. The models are downloaded when the image is built and are never committed.

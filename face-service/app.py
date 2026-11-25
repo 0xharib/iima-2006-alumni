@@ -9,7 +9,7 @@ Lessons from the test bench, kept here on purpose:
   every input shape it has seen);
 - SCRFD misses a face that fills the frame, so retry once with a black border round the image.
 """
-import base64, io, json, os
+import base64, io, json, os, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -22,6 +22,8 @@ SIDES = (320, 512, 768, 1024)
 BORDER = 0.4
 
 models = None   # (detector, recogniser)
+# One analysis at a time: the container has one vCPU, and parallel inference only slows every request and risks memory.
+INFERENCE = threading.Lock()
 
 
 def load_models(folder):
@@ -122,8 +124,11 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if not 0 < length <= 20 * 1024 * 1024:
             return self._send(400, {"error": "unreadable image"})
+        data = self.rfile.read(length)
         try:
-            return self._send(200, analyse(self.rfile.read(length), mode))
+            with INFERENCE:
+                result = analyse(data, mode)
+            return self._send(200, result)
         except ValueError:
             return self._send(400, {"error": "unreadable image"})
 

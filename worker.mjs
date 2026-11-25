@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceRoute, forgetPostFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
+import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -37,7 +37,7 @@ function photosForTags(links) {
 
 export default {
   queue: (batch, env) => handleQueue(batch, env),
-  scheduled: (event, env) => sweep(env),
+  scheduled: (event, env) => faceCron(env),
   async fetch(request, env, ctx) {
     try {
       const path=new URL(request.url).pathname;
@@ -530,7 +530,7 @@ async function route(req, env, record, setViewer) {
     return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me?await consentState(env,me):'hidden'),member,{home:true,active:'/people'});
   }
 
-  if (path==='/photos-of-you' && !post) return show('Photos of you',page.photosOfYou(await photosOfYou(db,me)));
+  if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me))):missing();
   if (path==='/profile') {
     if (!post) {
       const [roster,fields]=await Promise.all([
@@ -696,9 +696,10 @@ async function route(req, env, record, setViewer) {
     const key = postMatch[1];
     const item = (await posts('p.id=?',[key],1))[0];
     if (!item) return missing();
-    const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label,pt.origin,r.id AS member
+    const origin=await faceSchema(db)?'pt.origin':"'manual'";
+    const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label,${origin} AS origin,r.id AS member
       FROM photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.kind='person'
-      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title,pt.origin,NULL FROM photo_tags pt
+      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title,${origin},NULL FROM photo_tags pt
       JOIN topics t ON t.id=pt.target WHERE pt.post=? AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       ORDER BY kind,label`,key,key);
     if (!post) {
@@ -733,7 +734,9 @@ async function route(req, env, record, setViewer) {
       if (!await limit('tag:'+me,10,20)) return new Response('Please wait before tagging again.',{status:429});
       const tagJobs=[sql('INSERT INTO notification_tag_actor VALUES(?,?)',key,me)];
       if (kind==='person' && /^\d+$/.test(target) && await one('SELECT id FROM roster WHERE id=?',Number(target))) {
-        if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?)",key,photoScope,target));
+        if (photoScope) tagJobs.push(await faceSchema(db)
+          ? sql("INSERT INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?) ON CONFLICT(post,media,kind,target) DO UPDATE SET origin='manual'",key,photoScope,target)
+          : sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?)",key,photoScope,target));
         else tagJobs.push(sql("INSERT INTO tags VALUES(?,?,'accepted') ON CONFLICT(post,member) DO UPDATE SET status='accepted' WHERE tags.status='pending'",key,Number(target)));
       } else if (kind==='topic' && await one('SELECT 1 FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',target)) {
         if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'topic',?)",key,photoScope,target));
@@ -758,7 +761,7 @@ async function route(req, env, record, setViewer) {
     } else if (action==='unassociate' && item.is_about_me) {
       await run("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,String(me));
     } else if (action==='delete' && item.author===me) {
-      await db.batch([sql('UPDATE posts SET hidden=1 WHERE id=?',key),...forgetPostFaces(db,key)]);
+      await db.batch([sql('UPDATE posts SET hidden=1 WHERE id=?',key),...await forgetPostFaces(db,key)]);
       return redirect('/');
     } else if (action==='edit' && item.author===me) {
       const body = str(f,'body');
@@ -807,7 +810,7 @@ async function route(req, env, record, setViewer) {
     const rows=await all(`SELECT n.*,r.name AS actor_name,${portrait} AS actor_portrait,
       w.request_id AS meet_request,w.accepted_at AS meet_accepted,
       p.body AS memory_text,a.title AS album_title,c.body AS comment_text,
-      (SELECT count(*) FROM photo_tags ft WHERE ft.post=n.post AND ft.kind='person' AND ft.target=CAST(n.recipient AS TEXT) AND ft.origin='auto') AS found_count,
+      ${await faceSchema(db)?`(SELECT count(*) FROM photo_tags ft WHERE ft.post=n.post AND ft.kind='person' AND ft.target=CAST(n.recipient AS TEXT) AND ft.origin='auto')`:'0'} AS found_count,
       CASE
         WHEN n.anchor LIKE 'photo-post-%' THEN 'post/'||substr(n.anchor,12)
         WHEN n.anchor LIKE 'photo-legacy-%' THEN 'legacy/'||p.id||'/'||substr(n.anchor,length(p.id)+15)
@@ -931,7 +934,7 @@ async function route(req, env, record, setViewer) {
       return redirect(path);
     }
     if (!update || !reason) return invalid('Choose an action and provide a reason.');
-    await db.batch([update,...(action==='hide-post'?forgetPostFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
+    await db.batch([update,...(action==='hide-post'?await forgetPostFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
     return redirect(path);
   }
   return missing();

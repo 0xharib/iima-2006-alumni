@@ -123,7 +123,8 @@ profile created / photo saved / consent given ──► "ref" job ──► face
 cron (hourly) ──► sweep: any media without a face_scans row, any failed job; this is also the backlog run
 ```
 
-- **Container:** Python + onnxruntime + OpenCV, stateless, `standard-1` (4 GiB). The two model files (about
+- **Container:** Python + onnxruntime + OpenCV, stateless, `standard-2` (1 vCPU), one analysis at a time; jobs are
+  spread over two containers and the queue runs at most two at once. The two model files (about
   190 MB) are downloaded from InsightFace's GitHub release when the image is built, not committed to git. One
   endpoint takes image bytes and a mode (`photo` or `portrait`) and returns faces: box, detector score, five
   landmarks, normalised 512-d embedding, face size. `max_instances` 2. It sleeps when idle.
@@ -141,8 +142,9 @@ cron (hourly) ──► sweep: any media without a face_scans row, any failed jo
 - `faces(id, media, post, box_json, det_score, size, embedding BLOB)`: every face found, whoever it is. Kept so
   that a batchmate who joins later is matched against every past photo without re-scanning.
 - `face_refs(member, source, object_key, embedding BLOB, model, PRIMARY KEY(member, source))`: reference faces.
-  `source` is `portrait`, `then`, `now` or `yearbook`. The yearbook portrait (from `profile_seeds` or
-  `yearbook_public`) is added only for members who have created a profile and consented. In testing it was what
+  `source` is `portrait`, `then`, `now` or `yearbook`. The yearbook portrait (an approved `profile_seeds` portrait,
+  else `yearbook_public`) is added only for members who have consented. In a portrait/Then/Now photo with several
+  faces (family photos), only a face matching the yearbook portrait is used; otherwise that photo is skipped. In testing it was what
   made the 2004–06 photos work.
 - `face_matches(face_id, member, score, state)`: `state` is `auto`, `removed` or `shadow`. A removed pair is never
   re-tagged.
@@ -168,8 +170,11 @@ cron (hourly) ──► sweep: any media without a face_scans row, any failed jo
   `mention` kind with their own `event_key`, and the page shows their own wording:
   - One notification per person per memory (`event_key 'found:<post>'`): "You're in a photo" / "You're in 3 photos",
     from the uploader, opening the photo.
-  - Backlog and new-profile matches are collapsed into a single "We found you in 23 photos" notification
-    (`event_key 'found-all:<n>:<time>'`, byline "Batch photos") that opens "Photos of you".
+  - Only photos in a new memory notify straight away. Everything else (the backlog, re-matching after a new profile
+    photo or consent, publishing shadow results) is gathered into one "We found you in 23 photos" notification
+    (`event_key 'found-all:<n>:<time>'`, byline "Batch photos") sent straight after re-matching or publishing, or by
+    the hourly cron. Only tags the member hasn't been told about are counted (`face_matches.notified`), and their own
+    uploads are left out of the count.
   - Uploaders get nothing for automatic tags, and nobody is notified about their own upload.
 - `notify_photo` ignores `origin='auto'` rows; face notifications are written by the consumer.
 
@@ -202,12 +207,10 @@ cron (hourly) ──► sweep: any media without a face_scans row, any failed jo
 
 - Hari: build on `hb` with tests (synthetic embeddings, no real faces in git). Run locally with `wrangler dev`
   (needs Docker for the container). Open a PR to Arun.
-- Arun, once: create the queues (`npx wrangler queues create face-jobs`, `npx wrangler queues create
-  face-jobs-dlq`); back up D1 and run the new migration with `npx wrangler d1 execute iima-2006-alumni --remote
-  --file migrations/0017_face_tagging.sql`; set `FACE_TAGGING=shadow` in the dashboard.
-- Arun: merge. The Git integration deploys the Worker and builds the container image. If the build can't build
-  the image, run `npx wrangler deploy` once from a machine with Docker.
-- Arun: after the shadow check, set `FACE_TAGGING=on`.
+- Arun, in this order: create the queues; merge (the Git integration deploys the Worker and builds the image);
+  back up D1 and run `migrations/0017_face_tagging.sql`; set `FACE_TAGGING=shadow`; after the shadow check, set
+  `on` and publish. The migration must follow the deploy, because older Workers insert into `photo_tags` without
+  column names. The new Worker works without the migration and keeps face tagging hidden until it has run.
 
 ## Open for Hari
 
