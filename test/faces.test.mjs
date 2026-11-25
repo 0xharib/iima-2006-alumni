@@ -746,3 +746,12 @@ test('B8: the finish job reads the stored faces once for everyone it re-matches'
   await finishRun(w.env);
   assert.ok(pages<=4,'pages '+pages);
 });
+test('B9: a new member whose reference job keeps failing waits a day before the next try', async()=>{
+  const w=faceWorld(); const sent=recorder(w); picture(w,2);
+  const db=w.env.DB, prepare=db.prepare.bind(db);
+  w.env.DB={...db,batch:db.batch.bind(db),prepare(sql){ if(/FROM profile_seeds/.test(sql)) throw new Error('D1 busy'); return prepare(sql); }};
+  const msg=message({type:'ref',member:2}); msg.attempts=5;
+  await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);
+  w.env.DB=db; await sweep(w.env);
+  assert.deepEqual(sent.filter(m=>m.body.type==='ref'),[]);
+});

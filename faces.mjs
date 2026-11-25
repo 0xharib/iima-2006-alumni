@@ -304,7 +304,8 @@ export async function handleQueue(batch, env) {
         if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned,tries) VALUES(?,?,'failed',0,?,?,1)
           ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned,tries=face_scans.tries+1`,
           job.media, job.post, FACE_MODEL, Date.now()).run().catch(() => {});
-        if (job.type === 'ref') await q(env.DB, 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?', Date.now(), job.member).run().catch(() => {});
+        if (job.type === 'ref') await q(env.DB, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?1,1,?2,1,?2)
+          ON CONFLICT(member) DO UPDATE SET ref_tries=face_prefs.ref_tries+1,ref_tried=?2`, job.member, Date.now()).run().catch(() => {});
         msg.ack();
       } else msg.retry({delaySeconds: Math.min(300, 30 * (msg.attempts || 1))});
     }
