@@ -331,7 +331,7 @@ async function route(req, env, record, setViewer, ctx) {
     const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render:renderPage,author});
     if (response) return response;
   }
-  const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT)))`;
+  const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(${key} AS INTEGER) AS TEXT)))`;
   const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
   const postQuery = `SELECT p.*,r.name AS author_name,${portrait} AS author_portrait,(SELECT title FROM memory_albums WHERE post=p.id) AS album_title,(SELECT cover FROM memory_albums WHERE post=p.id) AS album_cover,t.title AS topic_title,subject.name AS subject_name,
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
@@ -356,7 +356,7 @@ async function route(req, env, record, setViewer, ctx) {
     )) AS collage_photos,
     (SELECT count(*) FROM likes l WHERE l.post=p.id) AS likes,
     (SELECT count(*) FROM likes l WHERE l.post=p.id AND l.member=?) AS liked,
-    EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)) AS is_about_me
+    EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(? AS INTEGER) AS TEXT)) AS is_about_me
     FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic LEFT JOIN roster subject ON subject.id=p.subject ${seedJoin}`;
   async function posts(where = '1', args = [], size = 25, order='p.created DESC,p.id DESC', profilePerson=null) {
     let query=postQuery;
@@ -364,7 +364,7 @@ async function route(req, env, record, setViewer, ctx) {
       const key=Number(profilePerson);
       if(!Number.isSafeInteger(key))throw new Error('Invalid profile');
       const projection=`(
-        p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(${key} AS TEXT))
+        p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(${key} AS INTEGER) AS TEXT))
         OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=${key} AND t.status='accepted')
       ) AS profile_album_tag,
       (SELECT json_group_array(json_object('media',media,'kind',kind,'href',href,'label',label)) FROM (
@@ -858,7 +858,7 @@ async function route(req, env, record, setViewer, ctx) {
     const light = panel || ['like','comment','edit-comment','delete-comment','tag-accept','tag-remove','unassociate','delete','edit'].includes(action);
     const item = light
       ? await one(`SELECT p.id,p.author,p.subject,p.origin,
-          EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(? AS TEXT)) AS is_about_me
+          EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(? AS INTEGER) AS TEXT)) AS is_about_me
           FROM posts p JOIN roster r ON r.id=p.author LEFT JOIN topics t ON t.id=p.topic WHERE p.id=? AND ${postVisible}`,me,key)
       : (await posts('p.id=?',[key],1))[0];
     if (!item) return missing();

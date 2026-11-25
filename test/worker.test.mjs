@@ -1422,3 +1422,27 @@ test('browser request helper applies deadlines, session checks and readable erro
  const controller=new AbortController();const cancelled=request('/x',{signal:controller.signal});controller.abort();
  await assert.rejects(cancelled,error=>error.name==='AbortError');
 });
+
+
+test('compose person associations survive D1 numeric binding for text and photo memories',async()=>{
+ const {call,session,sqlite}=fixture();
+ const author=await session(1,'aaaa'),tagged=await session(2,'bbbb');
+ const textId=crypto.randomUUID(),photoId=crypto.randomUUID();
+ assert.equal((await call('/compose',author,{id:textId,body:'Text-only tagged recollection',about:'person:2'})).status,303);
+ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
+ const uploadId=crypto.randomUUID(),upload=new FormData();upload.set('photo',new File([png],'photo.png',{type:'image/png'}));
+ assert.equal((await call('/compose/photo?id='+uploadId,author,upload)).status,200);
+ const form=new FormData();form.set('id',photoId);form.set('body','Photo tagged recollection');form.set('about','person:2');form.append('photoId',uploadId);
+ assert.equal((await call('/compose',author,form)).status,303);
+ for(const cookie of [author,tagged])for(const route of ['/people/2','/gallery?person=2']){
+  const html=await body(await call(route,cookie));
+  assert.ok(html.includes('data-post="'+textId+'"'));
+  assert.ok(html.includes('data-post="'+photoId+'"'));
+  assert.match(html,/Text-only tagged recollection/);
+  assert.match(html,/text-memory/);
+ }
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM memory_about WHERE kind='person' AND target='2'").get().n,2);
+ const removed=await call('/posts/'+textId,tagged,{action:'unassociate'});assert.equal(removed.status,303);
+ assert.ok(!(await body(await call('/people/2',tagged))).includes('data-post="'+textId+'"'));
+ assert.ok((await body(await call('/people/2',tagged))).includes('data-post="'+photoId+'"'));
+});
