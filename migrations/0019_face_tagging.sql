@@ -9,7 +9,9 @@
 CREATE TABLE IF NOT EXISTS face_prefs (
  member INTEGER PRIMARY KEY REFERENCES roster(id),
  recognise INTEGER NOT NULL CHECK(recognise IN (0,1)),
- decided INTEGER NOT NULL
+ decided INTEGER NOT NULL,
+ ref_tries INTEGER NOT NULL DEFAULT 0,   -- reference jobs that found no usable photo or failed; retried daily, 3 at most
+ ref_tried INTEGER
 );
 CREATE TABLE IF NOT EXISTS face_refs (
  member INTEGER NOT NULL REFERENCES roster(id),
@@ -27,7 +29,8 @@ CREATE TABLE IF NOT EXISTS face_scans (
  width INTEGER,   -- size of the image the face boxes refer to (EXIF-rotated, at most 1600 px)
  height INTEGER,
  model TEXT NOT NULL,
- scanned INTEGER NOT NULL
+ scanned INTEGER NOT NULL,
+ tries INTEGER NOT NULL DEFAULT 0   -- failed scans; retried daily, 3 at most
 );
 CREATE INDEX IF NOT EXISTS face_scans_post ON face_scans(post);
 CREATE TABLE IF NOT EXISTS faces (

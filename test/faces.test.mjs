@@ -63,7 +63,7 @@ test('FaceContainer starts the container once and retries until it answers', asy
   const res=await box.fetch(new Request('https://faces/faces?mode=photo',{method:'POST',body:new Uint8Array([1,2,3])}));
   assert.equal(res.status,200); assert.equal(log.started,1); assert.equal(log.calls,3);
   assert.equal(log.url,'http://container/faces?mode=photo'); assert.deepEqual([...log.body],[1,2,3]);
-  assert.equal(log.alarm,1000+5*60*1000);
+  assert.equal(log.alarm,1000+60*1000);
 });
 test('FaceContainer gives up with 503 when the container never answers', async()=>{
   const {state}=fakeState(1e9);
@@ -71,12 +71,12 @@ test('FaceContainer gives up with 503 when the container never answers', async()
   const res=await box.fetch(new Request('https://faces/health'));
   assert.equal(res.status,503);
 });
-test('FaceContainer stops the container after five idle minutes', async()=>{
+test('FaceContainer stops the container after one idle minute', async()=>{
   const {state,log}=fakeState(0);
   const box=new FaceContainer(state,{}); let t=0; box.clock=()=>t; box.sleep=async()=>{};
   await box.fetch(new Request('https://faces/health'));
-  t=2*60*1000; await box.alarm(); assert.equal(log.destroyed,0); assert.equal(log.alarm,5*60*1000);
-  t=6*60*1000; await box.alarm(); assert.equal(log.destroyed,1);
+  t=30*1000; await box.alarm(); assert.equal(log.destroyed,0); assert.equal(log.alarm,60*1000);
+  t=61*1000; await box.alarm(); assert.equal(log.destroyed,1);
 });
 
 const serviceReply=(faces,status=200)=>({idFromName:n=>n,get:id=>({fetch:async(url,init)=>{
@@ -118,7 +118,7 @@ function faceWorld(mode='on'){
       embedding:Buffer.from(vectorBytes(unitVec(d))).toString('base64')}))});
   }})};
   fx.consent=(member,dim,recognise=1)=>{
-    sqlite.prepare('INSERT OR REPLACE INTO face_prefs VALUES(?,?,1)').run(member,recognise);
+    sqlite.prepare('INSERT OR REPLACE INTO face_prefs(member,recognise,decided) VALUES(?,?,1)').run(member,recognise);
     sqlite.prepare("INSERT OR REPLACE INTO face_refs VALUES(?,'portrait','k',?,'buffalo_l/w600k_r50')").run(member,vectorBytes(unitVec(dim)));
   };
   fx.photo=(post,id,byte,author=1)=>{
@@ -302,7 +302,7 @@ test('saving a new Then photo queues a ref job only for consenting members', asy
   for (const recognise of [1,0]) {
     const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
     w.env.FACE_JOBS={send:async body=>{sent.push(body);},sendBatch:async()=>{}};
-    w.sqlite.prepare('INSERT INTO face_prefs VALUES(2,?,1)').run(recognise);
+    w.sqlite.prepare('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,?,1)').run(recognise);
     const f=new FormData(); f.set('field','thenPhotoObject'); f.set('photo',new File([pngBytes],'t.png',{type:'image/png'}));
     assert.equal((await w.call('/profile',ck,f)).status,303);
     assert.deepEqual(sent,recognise?[{type:'ref',member:2}]:[]);
@@ -447,7 +447,7 @@ test('C1: before migration 0017 the site works and hides face tagging', async()=
 
 test('I2: the sweep re-queues reference jobs for members who said yes but have no references', async()=>{
   const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}};
-  w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1),(3,0,1)'); w.consent(4,0);
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1),(3,0,1)'); w.consent(4,0);
   await sweep(w.env);
   assert.deepEqual(sent.filter(m=>m.body.type==='ref').map(m=>m.body.member),[2]);
   const msg=message({type:'ref',member:2}); msg.attempts=5; w.serviceDown=true;
@@ -499,7 +499,7 @@ test('I10: a photo job from a new memory still notifies per memory', async()=>{
 });
 
 test('I5: a family Then photo uses the face that matches the yearbook, or none', async()=>{
-  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)');
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
   w.objects.set('profile/t2',new Uint8Array([6])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'thenPhotoObject','profile/t2')");
   w.photoFaces[1]=[0]; w.photoFaces[6]=[3,0];          // partner (dim 3) first, the batchmate (dim 0) second
   assert.equal(await refreshRefs(w.env,2),2);
@@ -509,13 +509,13 @@ test('I5: a family Then photo uses the face that matches the yearbook, or none',
   assert.equal(await refreshRefs(w.env,2),0);
 });
 test('I6: only an approved seed portrait is used', async()=>{
-  const w=faceWorld(); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)'); w.photoFaces[1]=[0];
+  const w=faceWorld(); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)'); w.photoFaces[1]=[0];
   assert.equal(await refreshRefs(w.env,2),0);           // the fixture's seed is pending review
   w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'");
   assert.equal(await refreshRefs(w.env,2),1);
 });
 test('M10: one unreadable reference photo does not stop the others', async()=>{
-  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs VALUES(2,1,1)');
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
   w.photoFaces[1]=[0];
   w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'nowPhotoObject','profile/missing')");
   const real=w.env.FACES; w.env.FACES={idFromName:n=>n,get:id=>({fetch:async(u,init)=>new Uint8Array(init.body)[0]===9?new Response('bad',{status:400}):real.get(id).fetch(u,init)})};
@@ -536,7 +536,7 @@ test('I7: withdrawal works while face tagging is off', async()=>{
 
 test('I8: a reference job that runs after withdrawal writes nothing', async()=>{
   const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[1]=[0];
-  w.sqlite.exec('INSERT INTO face_prefs VALUES(2,0,1)');
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,0,1)');
   await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
   assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n,0);
   const a=w.photo('p1','u1',1);
@@ -666,4 +666,42 @@ test('S6: hiding a topic forgets the faces of its memories', async()=>{
   await scanPhoto(w.env,'p1',a);
   assert.equal((await w.call('/admin',ck,{action:'hide-topic',target:'t1',reason:'test'})).status,303);
   for (const t of ['faces','face_scans']) assert.equal(w.sqlite.prepare(`SELECT count(*) n FROM ${t}`).get().n,0,t);
+});
+
+
+// ---------- cost: retry what keeps failing once a day, three times at most ----------
+const DAY=24*60*60*1000;
+test('C: a failed photo is retried once a day, three times at most', async()=>{
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const a=w.photo('p1','u1',1);
+  const fail=(tries,ago)=>w.sqlite.prepare("INSERT OR REPLACE INTO face_scans(media,post,status,faces,model,scanned,tries) VALUES(?,'p1','failed',0,'m',?,?)").run(a,Date.now()-ago,tries);
+  fail(1,60*60*1000); assert.equal(await sweep(w.env),0);      // failed an hour ago: wait
+  fail(1,DAY+1000);   assert.equal(await sweep(w.env),1);      // a day later: try again
+  fail(3,DAY+1000);   assert.equal(await sweep(w.env),0);      // three failures: given up
+});
+test('C: each failure of a photo job counts one try', async()=>{
+  const w=faceWorld(); const a=w.photo('p1','u1',1); w.serviceDown=true;
+  for (let i=0;i<2;i++){ const msg=message({type:'media',post:'p1',media:a}); msg.attempts=5; await handleQueue({messages:[msg]},w.env); }
+  assert.equal(w.sqlite.prepare("SELECT tries FROM face_scans WHERE media=?").get(a).tries,2);
+});
+test('C: a member without usable photos is retried once a day, three times at most; saying yes again resets it', async()=>{
+  const w=faceWorld(); const ck=await w.session(2,'bbbb');
+  const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}};
+  const refs=()=>sent.filter(m=>m.body.type==='ref').length;
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(2,1,1)');
+  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);          // no usable photo: one try used
+  assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,1);
+  await sweep(w.env); assert.equal(refs(),0);                                      // tried just now: wait a day
+  w.sqlite.prepare('UPDATE face_prefs SET ref_tried=? WHERE member=2').run(Date.now()-DAY-1000);
+  await sweep(w.env); assert.equal(refs(),1);
+  w.sqlite.prepare('UPDATE face_prefs SET ref_tries=3,ref_tried=? WHERE member=2').run(Date.now()-DAY-1000);
+  await sweep(w.env); assert.equal(refs(),1);                                      // given up
+  await w.call('/faces/consent',ck,{choice:'yes'});                                // a fresh yes starts again
+  assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,0);
+});
+test('C: finding a usable photo resets the member\'s tries', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[1]=[0];
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(2,1,1,2,1)');
+  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
+  assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,0);
 });

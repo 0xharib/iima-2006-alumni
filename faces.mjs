@@ -50,7 +50,8 @@ export function assign(faces, refs) {
 
 // ---------- the container that runs face-service/app.py ----------
 
-const IDLE_MS = 5 * 60 * 1000;
+// Memory is billed while the container runs, so it stops after one idle minute (the next photo waits for a cold start).
+const IDLE_MS = 60 * 1000;
 const START_TIMEOUT_MS = 60 * 1000;
 
 // A plain Durable Object class (no `cloudflare:workers` import, so tests can load this module).
@@ -305,8 +306,10 @@ export async function handleQueue(batch, env) {
         msg.ack();
       } else if (msg.attempts >= 5) {
         // Give up for now; the hourly sweep picks up failed photos and members still without references.
-        if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,?,'failed',0,?,?) ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned`,
+        if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned,tries) VALUES(?,?,'failed',0,?,?,1)
+          ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned,tries=face_scans.tries+1`,
           job.media, job.post, FACE_MODEL, Date.now()).run().catch(() => {});
+        if (job.type === 'ref') await q(env.DB, 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?', Date.now(), job.member).run().catch(() => {});
         msg.ack();
       } else msg.retry({delaySeconds: Math.min(300, 30 * (msg.attempts || 1))});
     }
@@ -359,7 +362,10 @@ export async function enqueueRefs(env, member) {
   try {
     if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return;
     const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', member);
-    if (row?.recognise) await sendJob(env, {type: 'ref', member});
+    if (row?.recognise) {
+      await q(env.DB, 'UPDATE face_prefs SET ref_tries=0,ref_tried=NULL WHERE member=?', member).run();   // a new photo is a fresh chance
+      await sendJob(env, {type: 'ref', member});
+    }
   } catch (error) { console.error('face refs', error?.message); }
 }
 
@@ -413,6 +419,9 @@ export async function refreshRefs(env, member) {
   }
   const keep = [...kept, ...unreadable];
   await q(db, `DELETE FROM face_refs WHERE member=? AND source NOT IN (${keep.map(() => '?').join(',') || "''"})`, member, ...keep).run();
+  // No usable photo counts as a try: the sweep retries once a day, three times at most, until something changes.
+  await q(db, kept.length ? 'UPDATE face_prefs SET ref_tries=0,ref_tried=? WHERE member=?' : 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?',
+    Date.now(), member).run();
   return kept.length;
 }
 
@@ -468,7 +477,8 @@ export async function faceRoute({req, env, me, path, post}) {
   if (!['yes', 'no'].includes(choice)) return new Response('Choose yes or no.', {status: 400});
   if (choice === 'yes' && faceMode(env) === 'off') return missingPage();   // withdrawing always works
   const db = env.DB;
-  const pref = q(db, 'INSERT INTO face_prefs VALUES(?,?,?) ON CONFLICT(member) DO UPDATE SET recognise=excluded.recognise,decided=excluded.decided',
+  const pref = q(db, `INSERT INTO face_prefs(member,recognise,decided) VALUES(?,?,?)
+    ON CONFLICT(member) DO UPDATE SET recognise=excluded.recognise,decided=excluded.decided,ref_tries=0,ref_tried=NULL`,
     me, +(choice === 'yes'), Date.now());
   if (choice === 'yes') {
     await pref.run();
@@ -490,16 +500,20 @@ const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a 
     UNION ALL
     SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,p.id AS post
       FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${POST_VISIBLE}`;
+// Never scanned, or failed more than a day ago and fewer than three times (?1 = a day ago).
 const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
-  WHERE NOT EXISTS(SELECT 1 FROM face_scans s WHERE s.media=shown.media AND s.status IN ('done','skipped'))`;
+  WHERE NOT EXISTS(SELECT 1 FROM face_scans s WHERE s.media=shown.media
+    AND (s.status IN ('done','skipped') OR (s.status='failed' AND (s.tries>=3 OR s.scanned>?1))))`;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Queue photos never scanned (or whose scan failed), and members who said yes but have no references yet
 // (their job may have failed while the container was starting). Runs hourly; also the backlog run.
 export async function sweep(env, limit = 200) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
-  const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?', limit);
-  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE recognise=1
-    AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY decided LIMIT 50`);
+  const dayAgo = Date.now() - DAY_MS;
+  const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
+  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE recognise=1 AND ref_tries<3
+    AND (ref_tried IS NULL OR ref_tried<?) AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY decided LIMIT 50`, dayAgo);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
     ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));

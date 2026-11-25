@@ -170,7 +170,8 @@ without the migration; until it has run, face tagging stays hidden.
    gathered into the next hourly summary, so nobody gets a burst.
 
 If a face job fails (for example while the container is still starting) it is retried; after five tries photos are
-marked failed and members still without reference faces are re-queued by the hourly sweep. Posting is never affected.
+marked failed. The hourly sweep retries a failed photo, and a member who said yes but has no usable reference photo,
+once a day and three times at most, so nothing keeps waking the container. Posting is never affected.
 Photos over 15 MB are shrunk to 1600 px with Cloudflare Images before matching. A photo the face service cannot read is
 marked skipped and is not retried.
 
@@ -178,7 +179,8 @@ marked skipped and is not retried.
 Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.
 
 **Running costs.** The container (`standard-2`, one vCPU; at most 2 instances, at most 2 jobs at a time) starts on
-demand and stops after five idle minutes. Each container analyses one photo at a time, a few seconds each, which is
+demand and stops after one idle minute (memory is billed while it runs; the cost is a 10–30 s cold start for the
+first photo after a quiet spell). Each container analyses one photo at a time, a few seconds each, which is
 within the usage included in Workers Paid for a few thousand photos a month.
 
 **Licence.** The InsightFace `buffalo_l` models are licensed for non-commercial research use; Hari has taken
