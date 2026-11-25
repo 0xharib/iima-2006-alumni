@@ -267,7 +267,8 @@ async function route(req, env, record, setViewer) {
       return render('WhatsApp Insights',whatsappUnlock(checks,me),member);
     }
 
-    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render});
+    const author=path==='/wa/'?await one(`SELECT ${portrait} AS portrait FROM roster r ${seedJoin} WHERE r.id=88`,+pilot):null;
+    const response = await whatsappRoute({path,u,req,env,member,admin,all,one,render,author});
     if (response) return response;
   }
   const postVisible = 'p.hidden=0 AND (p.topic IS NULL OR EXISTS(SELECT 1 FROM topics t WHERE t.id=p.topic AND t.hidden=0))';
@@ -537,14 +538,14 @@ async function route(req, env, record, setViewer) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return render(row.name,page.person({...row,linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true,active:'/people'});
+    return render(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet),member,{home:true,active:'/people'});
   }
 
   if (path==='/profile') {
     if (!post) {
       const [roster,fields,photos,checks]=await Promise.all([
-        one('SELECT r.dorm,r.nickname,a.status AS attendance FROM roster r LEFT JOIN attendance a ON a.member=r.id WHERE r.id=?',me),
-        all('SELECT field,value FROM selected_profile_fields WHERE member=? AND pilot_only<=? ORDER BY priority',me,+pilot),
+        one('SELECT r.dorm,r.nickname,rs.section,a.status AS attendance FROM roster r LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id WHERE r.id=?',me),
+        all('SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=? ORDER BY priority',me,+pilot),
         all(`SELECT ph.slot,'yearbook/'||y.member||'/'||j.key AS media,ph.caption
           FROM yearbook_public y,json_each(y.images) j
           JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
@@ -553,7 +554,11 @@ async function route(req, env, record, setViewer) {
           FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,me,me),
         whatsappCompletion()
       ]);
-      const values={...roster};for(const item of fields)values[item.field]=item.value;
+      const values={...roster};for(const item of fields){
+        if(item.field==='section'&&item.source==='selected_enrichment'&&roster.section)continue;
+        values[item.field]=item.value;
+      }
+      values._lifeGenerated=!!String(values.life||'').trim()&&fields.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment';
       return show('Edit profile',page.editProfile(values,member,checks,Object.fromEntries(photos.map(photo=>[photo.slot,photo]))));
     }
     const f = await data();
@@ -591,6 +596,12 @@ async function route(req, env, record, setViewer) {
       const value = str(f,key,key==='displayName'?120:4000);
       return value ? sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,key,value) : sql('DELETE FROM profile_fields WHERE member=? AND field=?',me,key);
     });
+    if(f.has('section')){
+      const section=str(f,'section',20).trim().toUpperCase();
+      // Keep profile display and section directory filters in sync.
+      jobs.push(section?sql('INSERT INTO roster_sections(member,section) VALUES(?,?) ON CONFLICT(member) DO UPDATE SET section=excluded.section',me,section):sql('DELETE FROM roster_sections WHERE member=?',me));
+      jobs.push(sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,'section',section));
+    }
     const uploads=[];
     // Validate every selected photo before writing any profile data.
     for(const [name,key] of [['portraitPhoto','portraitObject'],['thenPhoto','thenPhotoObject'],['nowPhoto','nowPhotoObject']]){

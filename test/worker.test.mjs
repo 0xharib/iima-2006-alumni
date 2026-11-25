@@ -5,6 +5,36 @@ import { readdirSync, readFileSync } from 'node:fs';
 import worker from '../worker.mjs';
 import { profileMemoryRows } from '../views.mjs';
 
+test('generated Life Lately invites owners to rewrite without adding an access requirement',async()=>{
+ const {call,session,sqlite}=fixture();const owner=await session(2,'bbbb'),viewer=await session(1,'aaaa');
+ let editor=await body(await call('/profile',owner));
+ assert.match(editor,/This Life, Lately introduction was auto-generated/);
+ let own=await body(await call('/people/2',owner));assert.match(own,/Rewrite my introduction/);
+ assert.doesNotMatch(await body(await call('/people/2',viewer)),/Rewrite my introduction|profile-generated-review/);
+ for(const [key,value]of Object.entries({city:'Mumbai',family:'Family',thenPhotoObject:'then.jpg',nowPhotoObject:'now.jpg'}))sqlite.prepare('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)').run(2,key,value);
+ own=await body(await call('/people/2',owner));assert.match(own,/7 \/ 7/);assert.match(own,/Rewrite my introduction/);
+ await call('/profile',owner,{field:'life',value:'My own introduction'});
+ editor=await body(await call('/profile',owner));assert.doesNotMatch(editor,/This Life, Lately introduction was auto-generated/);
+ assert.match(editor,/My own introduction/);
+ own=await body(await call('/people/2',owner));assert.doesNotMatch(own,/Rewrite my introduction/);
+});
+
+test('section is visible beside dorm, prefills and saves to profile and directory',async()=>{
+ const {call,session,sqlite}=fixture();const cookie=await session(2,'bbbb');
+ sqlite.prepare('INSERT INTO roster_sections VALUES(?,?)').run(2,'B');
+ let editor=await body(await call('/profile',cookie));
+ assert.match(editor,/name="section" value="B"/);
+ assert.ok(editor.indexOf('name="section"')<editor.indexOf('More profile details and settings'));
+ assert.equal((editor.match(/name="section"/g)||[]).length,1);
+ const response=await call('/profile',cookie,{profile_form:'all',section:'c'});
+ assert.equal(response.status,303);
+ assert.equal(sqlite.prepare('SELECT section FROM roster_sections WHERE member=2').get().section,'C');
+ editor=await body(await call('/profile',cookie));assert.match(editor,/name="section" value="C"/);
+ assert.match(await body(await call('/people/2',cookie)),/Section C/);
+ assert.match(await body(await call('/people?section=C',cookie)),/Test Classmate/);
+ assert.doesNotMatch(await body(await call('/people?section=B',cookie)),/>Test Classmate<\/strong>/);
+});
+
 test('profile editor previews imported photos and prioritizes uploaded replacements',async()=>{
  const {call,session,sqlite}=fixture();const cookie=await session(2,'bbbb');
  sqlite.prepare('INSERT OR REPLACE INTO yearbook_public VALUES(?,?,?)').run(2,'{}',JSON.stringify([{submission:'self-2',key:'legacy.jpg'}]));
