@@ -705,3 +705,12 @@ test('C: finding a usable photo resets the member\'s tries', async()=>{
   await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
   assert.equal(w.sqlite.prepare('SELECT ref_tries FROM face_prefs WHERE member=2').get().ref_tries,0);
 });
+test('face pages show their title once and no publish notice unless asked', async()=>{
+  const w=faceWorld('shadow'); const h1=page=>(page.match(/<h1[\s>]/g)||[]).length;
+  const mine=await (await w.call('/photos-of-you',await w.session(2,'bbbb'))).text();
+  assert.equal(h1(mine),1);
+  const ck=await w.session(1,'aaaa'); const admin=await (await w.call('/admin/faces',ck)).text();
+  assert.equal(h1(admin),1);
+  assert.doesNotMatch(admin,/Published \d+ tags/);
+  assert.match(await (await w.call('/admin/faces?published=3',ck)).text(),/Published 3 tags/);
+});

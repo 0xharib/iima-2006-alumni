@@ -1052,7 +1052,7 @@ async function route(req, env, record, setViewer, ctx) {
     }))));
   }
   if (path==='/admin/faces' && admin) {
-    if (!post) return show('Face tagging',page.adminFaces(await faceAdminData(env),Number(u.searchParams.get('queued'))||0,Number(u.searchParams.get('published'))));
+    if (!post) return show('Face tagging',page.adminFaces(await faceAdminData(env),Number(u.searchParams.get('queued'))||0,u.searchParams.has('published')?Number(u.searchParams.get('published')):NaN));
     const action=str(await data(),'action',20);
     if (action==='scan-all') return redirect('/admin/faces?queued='+await sweep(env,5000));
     if (action==='publish') {

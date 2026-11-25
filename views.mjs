@@ -577,9 +577,9 @@ export const page={
   adminFaces(data,queued=0,published=NaN){
     const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
     const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
-    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p>
       <p>Not set up yet: run <code>migrations/0019_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
-    return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+    return `<p>${link('/admin?view=tools','Admin tools')}</p>
       <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
       ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}
       <dl class="face-stats">${stat('Photos on the site',c.photos)}${stat('Scanned',c.scanned)}${stat('Failed scans',c.failed)}${stat('Faces found',c.faces)}
@@ -591,7 +591,7 @@ export const page={
         <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span></figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}`;
   },
   photosOfYou(list){
-    return `<h1>Photos of you</h1><p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
+    return `<p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
       ${list.length?`<section class="photos-of-you">${list.map(p=>`<figure><a href="/posts/${e(p.post)}#photo-${e(p.media.replaceAll('/','-'))}"><img src="${mediaSrc(p.media,480)}" alt="Photo you're tagged in" loading="lazy"></a>
         ${p.origin==='auto'?`<figcaption>Found automatically ${form('/faces/not-me',field('media',p.media)+field('next','/photos-of-you'),'Not me')}</figcaption>`:''}</figure>`).join('')}</section>`
         :'<p>No photos of you yet. When batchmates share photos you’re in, they’ll appear here.</p>'}`;
