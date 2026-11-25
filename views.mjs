@@ -1,4 +1,3 @@
-import { FACE_COPY } from './faces.mjs';
 import {navigationLinks,mobileNavigation,mobileNavCSS} from './navigation.mjs';
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
@@ -13,19 +12,10 @@ const input=(name,label,value='',extra='')=>`<label>${e(label)}<input name="${e(
 const area=(name,label,value='',extra='')=>`<label>${e(label)}<textarea name="${e(name)}" ${extra}>${e(value)}</textarea></label>`;
 export const field=(name,value)=>`<input type="hidden" name="${e(name)}" value="${e(value)}">`;
 export const form=(action,body,label,extra='')=>`<form method="post" action="${e(action)}" ${extra}>${body}<button type="submit">${e(label)}</button></form>`;
-const faceCopy=FACE_COPY;
-// Consent for automatic face tagging: a card on Home while unanswered, a switch on the owner's profile afterwards.
-// "Not me" on the viewer's own automatic tag on a photo.
+// "Not me" on the viewer's own automatic tag on a photo: the only control over automatic face tagging.
 function notMe(photo,me){
   const mine=JSON.parse(photo.linked_tags||'[]').some(tag=>tag.kind==='person'&&tag.member===me&&tag.origin==='auto');
   return mine?`<div class="face-not-me"><span>You were found in this photo automatically.</span>${form('/faces/not-me',field('media',photo.media)+field('next','/posts/'+String(photo.source||'').split('/').pop()+'#photo-'+photo.media.replaceAll('/','-')),'Not me')}</div>`:'';
-}
-function faceConsent(state,next){
-  const choice=(value,label,extra='')=>form('/faces/consent',field('choice',value)+field('next',next),label,extra);
-  if(state==='ask') return `<section class="meet-banner face-consent" aria-label="Find me in batch photos"><h2>Find me in batch photos?</h2>
-    <p>${faceCopy}</p><div class="face-consent-actions">${choice('yes','Yes, find me','class="cta-form"')}${choice('no','Not now')}</div></section>`;
-  return `<div class="face-consent face-consent-switch"><p><strong>Find me in batch photos: ${state==='on'?'On':'Off'}</strong> ${faceCopy}</p>
-    ${choice(state==='on'?'no':'yes',state==='on'?'Turn off':'Turn on')}<a href="/photos-of-you">Photos of you</a></div>`;
 }
 const action=(url,name,label,values={})=>form(url,field('action',name)+Object.entries(values).map(([key,val])=>field(key,val)).join(''),label,'class="inline"');
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
@@ -304,13 +294,13 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],faces='hidden'){
+  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],nudge=false){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
       </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
-      ${faces==='ask'?faceConsent('ask','/'):''}
+      ${nudge?`<p class="face-nudge"><a href="/people/${me}">Add a profile picture to be found in batch photos</a></p>`:''}
       <section class="home-classmates home-fresh" aria-labelledby="fresh-profiles-title"><div class="section-head"><h2 id="fresh-profiles-title">Freshly completed profiles</h2>${link('/people','See all')}</div>
         ${fresh.length?`<div class="fresh-browse"><span>Latest first · ${fresh.length} profiles</span><div><button type="button" data-fresh-step="-1" aria-label="Previous completed profiles" disabled>←</button><button type="button" data-fresh-step="1" aria-label="Next completed profiles">→</button></div></div><div class="people-grid" role="region" aria-label="Freshly completed profiles, newest first. Swipe or use the arrows to browse" data-fresh-strip tabindex="0">${fresh.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,row.city?[row.city]:[])}${row.completed_at||row.completion_basis==='observed'?`<small class="completed-label">${row.completed_at?completionLabel(row.completed_at):'Recently completed'}</small>`:''}</div></a>`).join('')}</div>`:'<p class="fresh-empty">Completed profiles will appear here. Be one of the first to share your story.</p>'}
       </section>
@@ -415,7 +405,7 @@ export const page={
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
       }).join('')}`;
   },
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces='hidden'){
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces=false){
     const own = me === row.id;
     stories=profileMemoryRows(stories,row.id);
     const received = stories.filter(post=>post.author!==row.id);
@@ -505,7 +495,7 @@ export const page={
                  `<p>No photo shared.</p>`}
 </div>`;
             }).join('')}</div></section>`:''}
-          ${own&&faces!=='hidden'?`<section class="profile-section profile-face-consent">${faceConsent(faces,'/people/'+me)}</section>`:''}
+          ${own&&faces?`<p class="profile-section face-photos-link"><a href="/photos-of-you">Photos of you</a></p>`:''}
 
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
@@ -577,13 +567,13 @@ export const page={
   adminFaces(data,queued=0,published=NaN){
     const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
     const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
-    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p>
       <p>Not set up yet: run <code>migrations/0019_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
-    return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+    return `<p>${link('/admin?view=tools','Admin tools')}</p>
       <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
       ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}
       <dl class="face-stats">${stat('Photos on the site',c.photos)}${stat('Scanned',c.scanned)}${stat('Failed scans',c.failed)}${stat('Faces found',c.faces)}
-        ${stat('Members who said yes',c.consenting)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
+        ${stat('Members with a profile picture',c.eligible)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
       <div class="face-admin-actions">${form('/admin/faces',field('action','scan-all'),'Scan all photos now')}
         ${data.mode==='on'&&c.shadow?form('/admin/faces',field('action','publish'),'Publish shadow matches as tags'):''}</div>
       <h2>Shadow matches, lowest scores first</h2>
@@ -591,7 +581,7 @@ export const page={
         <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span></figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}`;
   },
   photosOfYou(list){
-    return `<h1>Photos of you</h1><p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
+    return `<p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
       ${list.length?`<section class="photos-of-you">${list.map(p=>`<figure><a href="/posts/${e(p.post)}#photo-${e(p.media.replaceAll('/','-'))}"><img src="${mediaSrc(p.media,480)}" alt="Photo you're tagged in" loading="lazy"></a>
         ${p.origin==='auto'?`<figcaption>Found automatically ${form('/faces/not-me',field('media',p.media)+field('next','/photos-of-you'),'Not me')}</figcaption>`:''}</figure>`).join('')}</section>`
         :'<p>No photos of you yet. When batchmates share photos you’re in, they’ll appear here.</p>'}`;

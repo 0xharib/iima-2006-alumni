@@ -140,19 +140,29 @@ Batchmates who say yes are found in memory photos and tagged automatically. Each
 (`face-service/`, InsightFace in a Cloudflare Container), every face's embedding is kept in D1, and faces are compared
 with the member's own profile photos (portrait, Then, Now) and their 2006 yearbook portrait. A match scoring 0.35 or
 more (`FACE_BAR` in `faces.mjs`) becomes a photo tag with `origin='auto'`. Design and test results:
-`docs/superpowers/specs/2026-11-25-face-tagging-design.md`.
+`docs/superpowers/specs/2026-11-25-face-tagging-design.md`, changed by `2026-11-26-face-tagging-batch-design.md`.
 
 **Modes.** `FACE_TAGGING` is set as a variable on the Worker in the Cloudflare dashboard, not in
 `wrangler.toml`; `keep_vars = true` keeps it across deploys, and unset means `off`.
-- `off`: nothing is scanned, queued or shown. The consent prompt is hidden.
-- `shadow`: photos are scanned and matched against members who said yes, but nobody is tagged or notified. Admins see
-  the would-be tags at `/admin/faces`, lowest scores first.
-- `on`: matches become tags. Each person gets one notification per memory ("You're in 3 photos"); matches found later
-  (a new member, a new profile photo, publishing) arrive as one "We found you in N photos" notification.
+- `off`: nothing is scanned, queued or shown.
+- `shadow`: photos are scanned and matched, but nobody is tagged or notified. Admins see the would-be tags at
+  `/admin/faces`, lowest scores first.
+- `on`: matches become tags, and each person gets one "We found you in N photos" notification per batch.
 
-**Consent.** Signed-in members see "Find me in batch photos?" on Home once. "Not now" is remembered; either answer can
-be changed on their own profile. Turning it off deletes their reference faces and their automatic tags (manual tags
-stay). "Not me" on a photo removes that tag for good. Only members who said yes are ever matched.
+**Who is matched.** Every member who has uploaded their own profile picture; nobody is asked. Their Then/Now photos
+and their approved yearbook portrait are used as extra reference faces, but the yearbook alone never makes anyone
+eligible. Members without a profile picture see "Add a profile picture to be found in batch photos" on Home. "Not me"
+on a photo removes that tag for good and is the only control. Someone who no longer has a profile picture loses their
+automatic tags at the next batch (manual tags stay).
+
+**The batch.** Nothing happens when a memory is posted or a profile photo is saved (saving only marks the member's
+references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 11:47 … 02:47 IST) the Worker:
+1. removes the references and automatic tags of anyone without a profile picture;
+2. queues photos not yet scanned (and failed ones; see below), up to 500;
+3. queues reference rebuilds for members with a profile picture who are new or changed a profile photo, up to 100;
+4. queues one finish job, delayed 40 minutes: it matches everyone rebuilt in the last 6 hours against every stored
+   face, then sends each person one summary notification. Your own uploads are tagged but not counted.
+**Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos.
 
 **One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
 `photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or
@@ -162,24 +172,23 @@ without the migration; until it has run, face tagging stays hidden.
    plus a ~190 MB model download) and rolls out the container. Check the build log for the image step.
 3. Back up D1, then add the tables:
    `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0019_face_tagging.sql`.
-4. Set `FACE_TAGGING=shadow` in the dashboard. Members now see "Find me in batch photos?".
-5. At `/admin/faces`, press **Scan all photos now** (the hourly sweep would get there too, 200 photos an hour).
-   Check a sample of the shadow matches.
-6. Set `FACE_TAGGING=on`, then press **Publish shadow matches as tags**. Each member gets one "We found you in N
-   photos". From then on, photos in new memories notify once per memory; older photos found by the hourly sweep are
-   gathered into the next hourly summary, so nobody gets a burst.
+4. Set `FACE_TAGGING=shadow` in the dashboard.
+5. At `/admin/faces`, press **Scan all photos now** (the next batch would get there too). Check a sample of the
+   shadow matches after the finish job has run (40 minutes).
+6. Set `FACE_TAGGING=on`, then press **Publish**. Each member gets one "We found you in N photos". From then on the
+   3-hour batch does the rest.
 
 If a face job fails (for example while the container is still starting) it is retried; after five tries photos are
-marked failed. The hourly sweep retries a failed photo, and a member who said yes but has no usable reference photo,
-once a day and three times at most, so nothing keeps waking the container. Posting is never affected.
+marked failed. The batch retries a failed photo, and a member with a profile picture but no usable reference face,
+once a day and three times at most (until a profile photo changes), so nothing keeps waking the container. Posting is never affected.
 Photos over 15 MB are shrunk to 1600 px with Cloudflare Images before matching. A photo the face service cannot read is
 marked skipped and is not retried.
 
 **Staging.** Workers that contain a Durable Object get no preview URLs from `wrangler versions upload`. If the staging
 Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.
 
-**Running costs.** The container (`standard-2`, one vCPU; at most 2 instances, at most 2 jobs at a time) starts on
-demand and stops after one idle minute (memory is billed while it runs; the cost is a 10–30 s cold start for the
+**Running costs.** The container (`standard-2`, one vCPU; at most 2 instances, at most 2 jobs at a time) starts when
+a batch has work and stops after one idle minute (memory is billed while it runs; the cost is a 10–30 s cold start for the
 first photo after a quiet spell). Each container analyses one photo at a time, a few seconds each, which is
 within the usage included in Workers Paid for a few thousand photos a month.
 

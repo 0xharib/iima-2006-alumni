@@ -1,5 +1,5 @@
-// Automatic face tagging: matching, the face-service client, queue jobs, consent and admin.
-// Design: docs/superpowers/specs/2026-11-25-face-tagging-design.md
+// Automatic face tagging: matching, the face-service client, queue jobs, eligibility and admin.
+// Design: docs/superpowers/specs/2026-11-25-face-tagging-design.md, changed by 2026-11-26-face-tagging-batch-design.md
 
 export const FACE_BAR = 0.35;
 export const FACE_MODEL = 'buffalo_l/w600k_r50';
@@ -130,6 +130,9 @@ const anchorFor = media => 'photo-' + media.replace(/\//g, '-');
 const changes = result => result?.meta?.changes ?? result?.changes ?? 0;
 const CHUNK = 30;   // matches per db.batch: three statements each, well inside D1's limits
 
+// Who can be matched: members who uploaded their own profile picture. Nobody is asked; Not me is the only control.
+export const ELIGIBLE = member => `EXISTS(SELECT 1 FROM profile_fields pf WHERE pf.member=${member} AND pf.field='portraitObject' AND trim(pf.value)<>'')`;
+
 // Migration 0019 may not have run yet (it must follow the deploy). Until it has, face tagging stays hidden and
 // nothing touches its tables or columns. Only a positive answer is cached, per database binding.
 const schemaReady = new WeakSet();
@@ -141,16 +144,6 @@ export async function faceSchema(db) {
   } catch { return false; }
   schemaReady.add(db);
   return true;
-}
-
-// Queue every photo of a new memory. Never throws: posting must not fail because of face tagging.
-export async function enqueuePhotos(env, post, media) {
-  if (faceMode(env) === 'off' || !env.FACE_JOBS || !media.length) return;
-  try {
-    if (!await faceSchema(env.DB)) return;
-    for (let i = 0; i < media.length; i += 100)
-      await env.FACE_JOBS.sendBatch(media.slice(i, i + 100).map(m => ({body: {type: 'media', post, media: m, notify: 'post'}})));
-  } catch (error) { console.error('face queue', error?.message); }
 }
 
 // R2 key of a photo shown in a visible memory, or null.
@@ -181,9 +174,9 @@ async function readObject(env, key) {
   return object.body instanceof Uint8Array ? object.body : new Uint8Array(await new Response(object.body).arrayBuffer());
 }
 
-async function consentingRefs(db, except = new Set()) {
+async function eligibleRefs(db, except = new Set()) {
   const refs = new Map();
-  for (const ref of await rows(db, `SELECT r.member,r.embedding FROM face_refs r JOIN face_prefs f ON f.member=r.member AND f.recognise=1`)) {
+  for (const ref of await rows(db, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member')}`)) {
     if (except.has(ref.member)) continue;
     if (!refs.has(ref.member)) refs.set(ref.member, []);
     refs.get(ref.member).push(toVector(ref.embedding));
@@ -191,11 +184,11 @@ async function consentingRefs(db, except = new Set()) {
   return refs;
 }
 
-// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still says
-// yes, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
+// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still has a
+// profile picture, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
 const ALLOWED = `NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
   AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND member=?4 AND state='removed')
-  AND EXISTS(SELECT 1 FROM face_prefs WHERE member=?4 AND recognise=1)
+  AND ${ELIGIBLE('?4')}
   AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND face=?5 AND member<>?4 AND state IN ('shadow','auto'))`;
 
 // Write matches the same way for every path. notify 'post': one notification per member per memory now (new
@@ -236,7 +229,7 @@ export async function writeMatches(env, matches, notify = 'later') {
 }
 
 // One "We found you in N photos" per member for automatic tags they haven't been told about. Your own uploads are
-// tagged but not counted. Runs hourly and straight after re-matching or publishing.
+// tagged but not counted. Runs at the end of each batch and after publishing.
 export async function summarise(env, member = null) {
   const db = env.DB;
   if (faceMode(env) !== 'on' || !await faceSchema(db)) return 0;
@@ -278,7 +271,7 @@ export async function scanPhoto(env, post, media, notify = 'later') {
   // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
   const skip = new Set((await rows(db, `SELECT member FROM face_matches WHERE media=? AND state='removed'
     UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
-  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await consentingRefs(db, skip));
+  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(db, skip));
   const kept = pairs.map(p => p.member);
   const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
   const stale = (await rows(db, `SELECT member FROM face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
@@ -294,8 +287,10 @@ export async function handleQueue(batch, env) {
   for (const msg of batch.messages) {
     const job = msg.body || {};
     try {
-      if (job.type === 'media') await scanPhoto(env, job.post, job.media, job.notify === 'post' ? 'post' : 'later');
-      else if (job.type === 'ref' && faceMode(env) !== 'off') { await refreshRefs(env, job.member); await rematchMember(env, job.member); }
+      // Notifications wait for the run's finish job: one summary per person per run.
+      if (job.type === 'media') await scanPhoto(env, job.post, job.media);
+      else if (job.type === 'ref' && faceMode(env) !== 'off') await refreshRefs(env, job.member);
+      else if (job.type === 'finish') await finishRun(env);
       msg.ack();
     } catch (error) {
       console.error('face job', job.type, error?.message);
@@ -309,7 +304,8 @@ export async function handleQueue(batch, env) {
         if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned,tries) VALUES(?,?,'failed',0,?,?,1)
           ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned,tries=face_scans.tries+1`,
           job.media, job.post, FACE_MODEL, Date.now()).run().catch(() => {});
-        if (job.type === 'ref') await q(env.DB, 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?', Date.now(), job.member).run().catch(() => {});
+        if (job.type === 'ref') await q(env.DB, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?1,1,?2,1,?2)
+          ON CONFLICT(member) DO UPDATE SET ref_tries=face_prefs.ref_tries+1,ref_tried=?2`, job.member, Date.now()).run().catch(() => {});
         msg.ack();
       } else msg.retry({delaySeconds: Math.min(300, 30 * (msg.attempts || 1))});
     }
@@ -337,35 +333,25 @@ export async function forgetTopicFaces(db, topic) {
   ];
 }
 
-// ---------- consent and reference faces ----------
+// ---------- reference faces ----------
 
-export const FACE_COPY = 'We use your profile photos and your 2006 yearbook photo to find you in batch photos. You can turn this off any time.';
 const safeNext = value => /^\/(?![\/\\])[^\r\n\\]*$/.test(String(value || '')) ? String(value) : '/';
 const see = url => new Response(null, {status: 303, headers: {Location: url}});
 const missingPage = () => new Response('Page unavailable', {status: 404});
+const eligible = async (db, member) => !!await first(db, `SELECT 1 AS ok WHERE ${ELIGIBLE('?')}`, member);
 
-// 'hidden' before the migration, or while off unless the member said yes (they must always be able to withdraw);
-// 'ask' until the member has answered; then 'on' or 'off'.
-export async function consentState(env, me) {
-  if (!await faceSchema(env.DB)) return 'hidden';
-  const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', me);
-  if (faceMode(env) === 'off') return row?.recognise ? 'on' : 'hidden';
-  return !row ? 'ask' : row.recognise ? 'on' : 'off';
+// Home nudges members without a profile picture, while face tagging runs.
+export async function faceNudge(env, me) {
+  if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return false;
+  return !await eligible(env.DB, me);
 }
 
-async function sendJob(env, body) {
-  try { if (env.FACE_JOBS) await env.FACE_JOBS.send(body); } catch (error) { console.error('face queue', error?.message); }
-}
-
-// After a profile photo changes: rebuild that member's references, if they have said yes. Never throws.
-export async function enqueueRefs(env, member) {
+// After a profile photo changes: mark the member's references for a rebuild by the next batch. Never throws.
+export async function markRefs(env, member) {
   try {
-    if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return;
-    const row = await first(env.DB, 'SELECT recognise FROM face_prefs WHERE member=?', member);
-    if (row?.recognise) {
-      await q(env.DB, 'UPDATE face_prefs SET ref_tries=0,ref_tried=NULL WHERE member=?', member).run();   // a new photo is a fresh chance
-      await sendJob(env, {type: 'ref', member});
-    }
+    if (!await faceSchema(env.DB)) return;
+    await q(env.DB, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?,1,?,0,NULL)
+      ON CONFLICT(member) DO UPDATE SET ref_tries=0,ref_tried=NULL`, member, Date.now()).run();
   } catch (error) { console.error('face refs', error?.message); }
 }
 
@@ -401,7 +387,7 @@ function pickFace(source, faces, chosen) {
 
 export async function refreshRefs(env, member) {
   const db = env.DB;
-  if (!(await first(db, 'SELECT recognise FROM face_prefs WHERE member=?', member))?.recognise) return 0;
+  if (!await eligible(db, member)) return 0;
   const kept = [], unreadable = [], chosen = [];
   for (const [source, key] of await refSources(db, member)) {
     try {
@@ -409,7 +395,7 @@ export async function refreshRefs(env, member) {
       if (!bytes) continue;
       const face = pickFace(source, (await analyseImage(env, bytes, 'photo', 'ref-' + member)).faces, chosen);
       if (!face) continue;
-      const saved = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM face_prefs WHERE member=? AND recognise=1)`,
+      const saved = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?,?,?,?,? WHERE ${ELIGIBLE('?')}`,
         member, source, key, face.bytes, FACE_MODEL, member).run();
       if (changes(saved) > 0) { kept.push(source); chosen.push(face.vector); }
     } catch (error) {
@@ -419,34 +405,42 @@ export async function refreshRefs(env, member) {
   }
   const keep = [...kept, ...unreadable];
   await q(db, `DELETE FROM face_refs WHERE member=? AND source NOT IN (${keep.map(() => '?').join(',') || "''"})`, member, ...keep).run();
-  // No usable photo counts as a try: the sweep retries once a day, three times at most, until something changes.
-  await q(db, kept.length ? 'UPDATE face_prefs SET ref_tries=0,ref_tried=? WHERE member=?' : 'UPDATE face_prefs SET ref_tries=ref_tries+1,ref_tried=? WHERE member=?',
-    Date.now(), member).run();
+  // No usable photo counts as a try: the batch retries once a day, three times at most, until a profile photo changes.
+  await q(db, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?1,1,?2,?3,?2)
+    ON CONFLICT(member) DO UPDATE SET ref_tries=${kept.length ? '0' : 'face_prefs.ref_tries+1'},ref_tried=?2`,
+    member, Date.now(), kept.length ? 0 : 1).run();
   return kept.length;
 }
 
-// Match one member against every face already stored (photos shared before they joined or said yes).
-export async function rematchMember(env, member) {
-  const db = env.DB;
-  if (!(await first(db, 'SELECT recognise FROM face_prefs WHERE member=?', member))?.recognise) return 0;
-  const refs = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
-  if (!refs.length) return 0;
-  const best = new Map();
+// Match members against every face already stored (photos shared before their references were built), reading the
+// stored faces once for all of them. Each member's best face per photo is offered; writeMatches applies the rules.
+export async function rematchMembers(env, members) {
+  const db = env.DB, refs = new Map();
+  for (const member of members) {
+    if (!await eligible(db, member)) continue;
+    const vectors = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
+    if (vectors.length) refs.set(member, vectors);
+  }
+  if (!refs.size) return 0;
+  const best = new Map();   // member/media -> match
   for (let after = 0; ;) {
     const page = await rows(db, 'SELECT id,media,post,embedding FROM faces WHERE id>? ORDER BY id LIMIT 500', after);
     if (!page.length) break;
     for (const face of page) {
       const vector = toVector(face.embedding);
-      let score = -1;
-      for (const ref of refs) score = Math.max(score, similarity(vector, ref));
-      if (score >= FACE_BAR && !(best.get(face.media)?.score >= score)) best.set(face.media, {media: face.media, post: face.post, member, face: face.id, score});
+      for (const [member, vectors] of refs) {
+        let score = -1;
+        for (const ref of vectors) score = Math.max(score, similarity(vector, ref));
+        const key = member + '/' + face.media;
+        if (score >= FACE_BAR && !(best.get(key)?.score >= score)) best.set(key, {media: face.media, post: face.post, member, face: face.id, score});
+      }
     }
     after = page[page.length - 1].id;
   }
-  const written = await writeMatches(env, [...best.values()], 'later');
-  await summarise(env, member);
-  return written.length;
+  return (await writeMatches(env, [...best.values()], 'later')).length;
 }
+
+export const rematchMember = (env, member) => rematchMembers(env, [member]);
 
 // Every photo the member is tagged in, newest memory first.
 export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM photo_tags pt JOIN posts p ON p.id=pt.post
@@ -469,31 +463,12 @@ async function notMe(req, env, me) {
 }
 
 export async function faceRoute({req, env, me, path, post}) {
-  if (!post || !['/faces/not-me', '/faces/consent'].includes(path)) return null;
+  if (!post || path !== '/faces/not-me') return null;
   if (!await faceSchema(env.DB)) return missingPage();
-  if (path === '/faces/not-me') return notMe(req, env, me);
-  const form = await req.formData();
-  const choice = String(form.get('choice') || '');
-  if (!['yes', 'no'].includes(choice)) return new Response('Choose yes or no.', {status: 400});
-  if (choice === 'yes' && faceMode(env) === 'off') return missingPage();   // withdrawing always works
-  const db = env.DB;
-  const pref = q(db, `INSERT INTO face_prefs(member,recognise,decided) VALUES(?,?,?)
-    ON CONFLICT(member) DO UPDATE SET recognise=excluded.recognise,decided=excluded.decided,ref_tries=0,ref_tried=NULL`,
-    me, +(choice === 'yes'), Date.now());
-  if (choice === 'yes') {
-    await pref.run();
-    await sendJob(env, {type: 'ref', member: me});
-  } else {
-    await db.batch([pref,
-      q(db, 'DELETE FROM face_refs WHERE member=?', me),
-      q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(me)),
-      q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", me),
-      q(db, "DELETE FROM notifications WHERE recipient=? AND (event_key LIKE 'found:%' OR event_key LIKE 'found-all:%')", me)]);
-  }
-  return see(safeNext(form.get('next')));
+  return notMe(req, env, me);
 }
 
-// ---------- hourly sweep and the admin page ----------
+// ---------- the 3-hour batch and the admin page ----------
 
 // Every photo shown in a visible memory, with the media id the site uses for it.
 const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
@@ -506,22 +481,58 @@ const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
     AND (s.status IN ('done','skipped') OR (s.status='failed' AND (s.tries>=3 OR s.scanned>?1))))`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Queue photos never scanned (or whose scan failed), and members who said yes but have no references yet
-// (their job may have failed while the container was starting). Runs hourly; also the backlog run.
-export async function sweep(env, limit = 200) {
+const HOUR_MS = 60 * 60 * 1000;
+const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
+const REMATCH_WINDOW_MS = 6 * HOUR_MS;   // two runs: a rebuild finished after one run's finish is caught by the next
+
+// Members to (re)build references for: eligible and new, marked after a profile photo changed, or without usable
+// references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
+const NEEDS_REFS = `SELECT pf.member FROM profile_fields pf LEFT JOIN face_prefs f ON f.member=pf.member
+  WHERE pf.field='portraitObject' AND trim(pf.value)<>'' AND (f.member IS NULL OR (f.ref_tries<3 AND (f.ref_tried IS NULL
+    OR (f.ref_tried<?1 AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=pf.member)))))
+  ORDER BY pf.member LIMIT ?2`;
+
+// Anyone who no longer has a profile picture loses their references and automatic tags (Not me and manual tags stay).
+async function dropIneligible(db) {
+  const gone = await rows(db, `SELECT member FROM (SELECT member FROM face_refs UNION SELECT member FROM face_matches
+    WHERE state<>'removed') x WHERE NOT ${ELIGIBLE('x.member')} LIMIT 100`);
+  for (const {member} of gone) await db.batch([
+    q(db, 'DELETE FROM face_refs WHERE member=?', member),
+    q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(member)),
+    q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", member),
+    q(db, "DELETE FROM notifications WHERE recipient=? AND (event_key LIKE 'found:%' OR event_key LIKE 'found-all:%')", member),
+  ]);
+  return gone.length;
+}
+
+// The batch, every 3 hours (and the admin's "Scan all photos now"): queue new or failed photos and reference
+// rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
+export async function sweep(env, limit = 500) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
+  await dropIneligible(env.DB);
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE recognise=1 AND ref_tries<3
-    AND (ref_tried IS NULL OR ref_tried<?) AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY decided LIMIT 50`, dayAgo);
+  const people = await rows(env.DB, NEEDS_REFS, dayAgo, 100);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
     ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));
+  await env.FACE_JOBS.send({type: 'finish'}, {delaySeconds: FINISH_DELAY_S});
   return todo.length;
 }
 
-export async function faceCron(env) {
+// End of a run: match everyone whose references were rebuilt recently against every stored face (this also catches
+// a photo scanned while their references were being built), then send each person one summary.
+export async function finishRun(env) {
+  const db = env.DB;
+  if (faceMode(env) === 'off' || !await faceSchema(db)) return;
+  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member')}
+    AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
+  await rematchMembers(env, recent.map(r => r.member));
   await summarise(env);
+}
+
+export async function faceCron(env) {
+  await summarise(env);   // anything left over from the previous run
   await sweep(env);
 }
 
@@ -536,7 +547,7 @@ export async function faceAdminData(env) {
       scanned: await count(`SELECT count(*) n FROM face_scans WHERE status='done'`),
       failed: await count(`SELECT count(*) n FROM face_scans WHERE status='failed'`),
       faces: await count('SELECT count(*) n FROM faces'),
-      consenting: await count('SELECT count(*) n FROM face_prefs WHERE recognise=1'),
+      eligible: await count(`SELECT count(*) n FROM members m WHERE ${ELIGIBLE('m.id')}`),
       shadow: await count(`SELECT count(*) n FROM face_matches WHERE state='shadow'`),
       auto: await count(`SELECT count(*) n FROM face_matches WHERE state='auto'`),
       removed: await count(`SELECT count(*) n FROM face_matches WHERE state='removed'`),
