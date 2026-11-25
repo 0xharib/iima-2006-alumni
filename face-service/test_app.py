@@ -113,6 +113,32 @@ class TestAnalyse(unittest.TestCase):
         self.assertEqual(len(out["faces"]), 1)
         self.assertEqual(out["faces"][0]["box"], [100.0, 50.0, 180.0, 150.0])
 
+    def test_unexpected_error_is_a_500(self):
+        real = app.analyse
+        def broken(data, mode):
+            raise RuntimeError("boom")
+        app.analyse = broken
+        server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/faces", data=b"x", method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(req)
+            self.assertEqual(caught.exception.code, 500)
+            self.assertEqual(json.loads(caught.exception.read()), {"error": "analysis failed"})
+        finally:
+            app.analyse = real
+            server.shutdown()
+
+    def test_huge_image_is_unreadable_not_a_crash(self):
+        limit = app.Image.MAX_IMAGE_PIXELS
+        app.Image.MAX_IMAGE_PIXELS = 1000          # stand-in for a decompression bomb, without allocating one
+        try:
+            with self.assertRaises(ValueError):
+                app.prepare(jpeg(100, 100))
+        finally:
+            app.Image.MAX_IMAGE_PIXELS = limit
+
     def test_http_handler(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()

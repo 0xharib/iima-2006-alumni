@@ -3,6 +3,8 @@
 -- names and would fail once the new column exists. The new Worker works with or without this migration.
 --   npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0017_face_tagging.sql
 -- notify_photo is recreated unchanged except that it now ignores automatic tags, which send their own notification.
+-- Every step can be repeated except the final ALTER, which is last so that a run that failed part-way can simply be
+-- run again (a repeat after success fails only at that last step, harmlessly).
 
 CREATE TABLE IF NOT EXISTS face_prefs (
  member INTEGER PRIMARY KEY REFERENCES roster(id),
@@ -20,8 +22,10 @@ CREATE TABLE IF NOT EXISTS face_refs (
 CREATE TABLE IF NOT EXISTS face_scans (
  media TEXT PRIMARY KEY,
  post TEXT NOT NULL,
- status TEXT NOT NULL CHECK(status IN ('done','failed')),
+ status TEXT NOT NULL CHECK(status IN ('done','failed','skipped')),  -- skipped: the image cannot be read
  faces INTEGER NOT NULL DEFAULT 0,
+ width INTEGER,   -- size of the image the face boxes refer to (EXIF-rotated, at most 1600 px)
+ height INTEGER,
  model TEXT NOT NULL,
  scanned INTEGER NOT NULL
 );
@@ -52,7 +56,6 @@ CREATE TABLE IF NOT EXISTS face_matches (
 CREATE INDEX IF NOT EXISTS face_matches_member ON face_matches(member,state);
 CREATE INDEX IF NOT EXISTS face_matches_post ON face_matches(post);
 
-ALTER TABLE photo_tags ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual' CHECK(origin IN ('manual','auto'));
 
 DROP TRIGGER IF EXISTS notify_photo;
 CREATE TRIGGER notify_photo AFTER INSERT ON photo_tags
@@ -65,3 +68,5 @@ BEGIN
  SELECT p.author,coalesce((SELECT actor FROM notification_tag_actor WHERE post=NEW.post),(SELECT author FROM posts WHERE id=NEW.post)),'tag',p.id,'photo-'||replace(NEW.media,'/','-'),'photo:'||NEW.post||':'||'photo-'||replace(NEW.media,'/','-')||':'||NEW.kind||':'||NEW.target
  FROM posts p WHERE p.id=NEW.post AND p.author<>coalesce((SELECT actor FROM notification_tag_actor WHERE post=NEW.post),(SELECT author FROM posts WHERE id=NEW.post));
 END;
+
+ALTER TABLE photo_tags ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual' CHECK(origin IN ('manual','auto'));

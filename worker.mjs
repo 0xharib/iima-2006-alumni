@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
+import { consentState, enqueuePhotos, enqueueRefs, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, handleQueue, photosOfYou, publishShadow, sweep } from './faces.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -934,7 +934,7 @@ async function route(req, env, record, setViewer) {
       return redirect(path);
     }
     if (!update || !reason) return invalid('Choose an action and provide a reason.');
-    await db.batch([update,...(action==='hide-post'?await forgetPostFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
+    await db.batch([update,...(action==='hide-post'?await forgetPostFaces(db,target):action==='hide-topic'?await forgetTopicFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
     return redirect(path);
   }
   return missing();

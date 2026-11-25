@@ -121,6 +121,8 @@ without the migration; until it has run, face tagging stays hidden.
 
 If a face job fails (for example while the container is still starting) it is retried; after five tries photos are
 marked failed and members still without reference faces are re-queued by the hourly sweep. Posting is never affected.
+Photos over 15 MB are shrunk to 1600 px with Cloudflare Images before matching. A photo the face service cannot read is
+marked skipped and is not retried.
 
 **Staging.** Workers that contain a Durable Object get no preview URLs from `wrangler versions upload`. If the staging
 Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.

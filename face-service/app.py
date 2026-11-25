@@ -131,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, result)
         except ValueError:
             return self._send(400, {"error": "unreadable image"})
+        except Exception:
+            return self._send(500, {"error": "analysis failed"})
 
     def log_message(self, *args):
         pass

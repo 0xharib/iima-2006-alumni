@@ -64,21 +64,31 @@ export class FaceContainer {
   async fetch(request) {
     const url = new URL(request.url);
     const body = request.method === 'POST' ? await request.arrayBuffer() : undefined;
-    const container = this.state.container;
-    if (!container.running) container.start({enableInternet: false});
+    this.ensureStarted();
     await this.state.storage.put('lastUsed', this.clock());
     await this.state.storage.setAlarm(this.clock() + IDLE_MS);
     const deadline = this.clock() + START_TIMEOUT_MS;
     // The container takes a few seconds to load the models after a cold start.
     for (;;) {
       try {
-        return await container.getTcpPort(8080).fetch('http://container' + url.pathname + url.search,
+        return await this.state.container.getTcpPort(8080).fetch('http://container' + url.pathname + url.search,
           {method: request.method, body, headers: {'Content-Type': 'application/octet-stream'}});
       } catch (error) {
         if (this.clock() >= deadline) return new Response('face service unavailable', {status: 503});
         await this.sleep(500);
+        this.ensureStarted();   // starts it again if it exited while we waited
       }
     }
+  }
+
+  // Start the container unless it is running or already starting (two requests can arrive together on a cold start).
+  ensureStarted() {
+    const container = this.state.container;
+    if (container.running || this.starting) return;
+    container.start({enableInternet: false});
+    this.starting = true;
+    const done = () => { this.starting = false; };
+    container.monitor?.().then(done, done);
   }
 
   async alarm() {
@@ -101,7 +111,7 @@ export async function analyseImage(env, bytes, mode, key = '') {
   const response = env.FACE_SERVICE_URL
     ? await fetch(env.FACE_SERVICE_URL.replace(/\/$/, '') + path, init)
     : await env.FACES.get(env.FACES.idFromName(shard(key))).fetch('https://faces' + path, init);
-  if (response.status !== 200) throw new Error('face service ' + response.status);
+  if (response.status !== 200) throw Object.assign(new Error('face service ' + response.status), {status: response.status});
   const result = await response.json();
   return {...result, faces: result.faces.map(face => {
     const faceBytes = fromBase64(face.embedding);
@@ -150,6 +160,17 @@ export async function mediaObject(db, media) {
   else if (kind === 'legacy' && a && Number(b) > 0) row = await first(db, `SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
     WHERE p.id=? AND ${POST_VISIBLE} ORDER BY ph.object_key LIMIT 1 OFFSET ?`, a, Number(b) - 1);
   return row?.object_key || null;
+}
+
+const MAX_SEND = 15 * 1024 * 1024;
+
+// A photo to analyse: the original, or for a very large one a 1600 px copy made with Cloudflare Images.
+async function photoBytes(env, key) {
+  const bytes = await readObject(env, key);
+  if (!bytes || bytes.byteLength <= MAX_SEND || !env.IMAGES) return bytes;
+  const result = await env.IMAGES.input(new Response(bytes).body).transform({width: 1600, height: 1600, fit: 'scale-down'})
+    .output({format: 'image/jpeg', quality: 90});
+  return new Uint8Array(await result.response().arrayBuffer());
 }
 
 async function readObject(env, key) {
@@ -240,7 +261,7 @@ export async function scanPhoto(env, post, media, notify = 'later') {
   const db = env.DB;
   if (faceMode(env) === 'off') return {faces: 0, tagged: []};
   const key = await mediaObject(db, media);
-  const bytes = key && await readObject(env, key);
+  const bytes = key && await photoBytes(env, key);
   if (!bytes) return {faces: 0, tagged: []};
   const result = await analyseImage(env, bytes, 'photo', media);
   const stamp = Date.now();
@@ -248,14 +269,22 @@ export async function scanPhoto(env, post, media, notify = 'later') {
     q(db, 'DELETE FROM faces WHERE media=?', media),
     ...result.faces.map(f => q(db, 'INSERT INTO faces(media,post,box,score,size,embedding,model) VALUES(?,?,?,?,?,?,?)',
       media, post, JSON.stringify(f.box), f.score, f.size, f.bytes, result.model)),
-    q(db, `INSERT INTO face_scans VALUES(?,?,'done',?,?,?) ON CONFLICT(media) DO UPDATE SET status='done',faces=excluded.faces,
-      model=excluded.model,scanned=excluded.scanned`, media, post, result.faces.length, result.model, stamp),
+    q(db, `INSERT INTO face_scans(media,post,status,faces,width,height,model,scanned) VALUES(?,?,'done',?,?,?,?,?)
+      ON CONFLICT(media) DO UPDATE SET status='done',faces=excluded.faces,width=excluded.width,height=excluded.height,
+      model=excluded.model,scanned=excluded.scanned`, media, post, result.faces.length, result.width ?? null, result.height ?? null, result.model, stamp),
   ]);
   const ids = (await rows(db, 'SELECT id FROM faces WHERE media=? ORDER BY id', media)).map(r => r.id);
   // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
   const skip = new Set((await rows(db, `SELECT member FROM face_matches WHERE media=? AND state='removed'
     UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
   const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await consentingRefs(db, skip));
+  const kept = pairs.map(p => p.member);
+  const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
+  const stale = (await rows(db, `SELECT member FROM face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
+  if (stale.length) await db.batch(stale.flatMap(member => [
+    q(db, `DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=? AND origin='auto'`, media, String(member)),
+    q(db, `DELETE FROM face_matches WHERE media=? AND member=? AND state IN ('auto','shadow')`, media, member),
+  ]));
   const written = await writeMatches(env, pairs.map(p => ({media, post, member: p.member, face: p.face, score: p.score})), notify);
   return {faces: result.faces.length, tagged: written.map(w => w.member)};
 }
@@ -269,9 +298,14 @@ export async function handleQueue(batch, env) {
       msg.ack();
     } catch (error) {
       console.error('face job', job.type, error?.message);
-      if (msg.attempts >= 5) {
+      if (job.type === 'media' && error?.status === 400) {
+        // The service cannot read this image: retrying will not help, and the sweep leaves skipped photos alone.
+        await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,?,'skipped',0,?,?)
+          ON CONFLICT(media) DO UPDATE SET status='skipped',scanned=excluded.scanned`, job.media, job.post, FACE_MODEL, Date.now()).run().catch(() => {});
+        msg.ack();
+      } else if (msg.attempts >= 5) {
         // Give up for now; the hourly sweep picks up failed photos and members still without references.
-        if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans VALUES(?,?,'failed',0,?,?) ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned`,
+        if (job.type === 'media') await q(env.DB, `INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,?,'failed',0,?,?) ON CONFLICT(media) DO UPDATE SET status='failed',scanned=excluded.scanned`,
           job.media, job.post, FACE_MODEL, Date.now()).run().catch(() => {});
         msg.ack();
       } else msg.retry({delaySeconds: Math.min(300, 30 * (msg.attempts || 1))});
@@ -286,6 +320,17 @@ export async function forgetPostFaces(db, post) {
     q(db, 'DELETE FROM faces WHERE post=?', post),
     q(db, 'DELETE FROM face_scans WHERE post=?', post),
     q(db, "DELETE FROM face_matches WHERE post=? AND state<>'removed'", post),
+  ];
+}
+
+// The same for every memory in a topic that is being hidden.
+export async function forgetTopicFaces(db, topic) {
+  if (!await faceSchema(db)) return [];
+  const inTopic = 'SELECT id FROM posts WHERE topic=?';
+  return [
+    q(db, `DELETE FROM faces WHERE post IN (${inTopic})`, topic),
+    q(db, `DELETE FROM face_scans WHERE post IN (${inTopic})`, topic),
+    q(db, `DELETE FROM face_matches WHERE post IN (${inTopic}) AND state<>'removed'`, topic),
   ];
 }
 
@@ -407,6 +452,9 @@ async function notMe(req, env, me) {
     q(env.DB, `DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=? AND origin='auto'`, media, String(me)),
     q(env.DB, `INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,?,?,NULL,0,'removed',?)
       ON CONFLICT(media,member) DO UPDATE SET state='removed'`, media, me, tag.post, Date.now()),
+    // "You're in a photo" no longer applies once none of that memory's automatic tags of you are left.
+    q(env.DB, `DELETE FROM notifications WHERE recipient=? AND event_key='found:'||? AND NOT EXISTS(SELECT 1 FROM photo_tags
+      WHERE post=? AND kind='person' AND target=? AND origin='auto')`, me, tag.post, tag.post, String(me)),
   ]);
   return see(form.get('next') ? safeNext(form.get('next')) : '/photos-of-you');
 }
@@ -429,7 +477,8 @@ export async function faceRoute({req, env, me, path, post}) {
     await db.batch([pref,
       q(db, 'DELETE FROM face_refs WHERE member=?', me),
       q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(me)),
-      q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", me)]);
+      q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", me),
+      q(db, "DELETE FROM notifications WHERE recipient=? AND (event_key LIKE 'found:%' OR event_key LIKE 'found-all:%')", me)]);
   }
   return see(safeNext(form.get('next')));
 }
@@ -442,7 +491,7 @@ const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a 
     SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,p.id AS post
       FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${POST_VISIBLE}`;
 const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
-  WHERE NOT EXISTS(SELECT 1 FROM face_scans s WHERE s.media=shown.media AND s.status='done')`;
+  WHERE NOT EXISTS(SELECT 1 FROM face_scans s WHERE s.media=shown.media AND s.status IN ('done','skipped'))`;
 
 // Queue photos never scanned (or whose scan failed), and members who said yes but have no references yet
 // (their job may have failed while the container was starting). Runs hourly; also the backlog run.

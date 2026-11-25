@@ -380,7 +380,7 @@ test('sweep queues unscanned visible photos including legacy ones, and nothing w
   const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2), hidden=w.photo('p3','u3',3);
   w.sqlite.exec(`UPDATE posts SET hidden=1 WHERE id='p3'; INSERT INTO posts(id,author,body,created,origin) VALUES('lp',1,'old',1,'sub1');
     INSERT INTO photos VALUES('sub1','old1.jpg','memory','Old one')`);
-  w.sqlite.prepare("INSERT INTO face_scans VALUES(?,'p2','done',0,'m',1)").run(b);
+  w.sqlite.prepare("INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,'p2','done',0,'m',1)").run(b);
   assert.equal(await sweep(w.env),2);
   assert.deepEqual(sent.map(m=>m.body.media).sort(),['legacy/lp/1',a]);
   assert.deepEqual(sent.map(m=>m.body.type),['media','media']);
@@ -389,7 +389,7 @@ test('sweep queues unscanned visible photos including legacy ones, and nothing w
 });
 test('failed scans are swept again', async()=>{
   const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
-  const a=w.photo('p1','u1',1); w.sqlite.prepare("INSERT INTO face_scans VALUES(?,'p1','failed',0,'m',1)").run(a);
+  const a=w.photo('p1','u1',1); w.sqlite.prepare("INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,'p1','failed',0,'m',1)").run(a);
   assert.equal(await sweep(w.env),1);
 });
 test('the Worker runs the sweep on its schedule', async()=>{
@@ -563,4 +563,107 @@ test('M5: tagging someone by hand over an automatic tag makes it manual', async(
   await scanPhoto(w.env,'p1',a);
   await w.call('/posts/p1',ck,{action:'tag-add',photo:a,tag:'2'});
   assert.equal(w.sqlite.prepare("SELECT origin FROM photo_tags WHERE target='2'").get().origin,'manual');
+});
+
+// ---------- small issues ----------
+import { readFileSync } from 'node:fs';
+
+test('S1: a re-scan removes automatic tags the new scan no longer supports', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE origin='auto'").get().n,1);
+  w.photoFaces[1]=[9];                                  // the face no longer looks like member 2
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags").get().n,0);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM face_matches").get().n,0);
+});
+test('S1: a re-scan keeps Not me and manual tags', async()=>{
+  const w=faceWorld(); w.consent(2,0); w.consent(3,1); const a=w.photo('p1','u1',1); w.photoFaces[1]=[9];
+  w.sqlite.prepare("INSERT INTO face_matches VALUES(?,2,'p1',NULL,0,'removed',1,1)").run(a);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target) VALUES('p1',?,'person','3')").run(a);
+  await scanPhoto(w.env,'p1',a);
+  assert.equal(w.sqlite.prepare("SELECT state FROM face_matches WHERE member=2").get().state,'removed');
+  assert.equal(w.sqlite.prepare("SELECT origin FROM photo_tags WHERE target='3'").get().origin,'manual');
+});
+
+test('S2: a scan records the size of the image its face boxes refer to', async()=>{
+  const w=faceWorld(); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  const row=w.sqlite.prepare("SELECT width,height FROM face_scans WHERE media=?").get(a);
+  assert.deepEqual([row.width,row.height],[100,100]);
+});
+
+test('S3: a very large original is shrunk with Cloudflare Images before matching', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0]; w.photoFaces[7]=[0];
+  const big=new Uint8Array(16*1024*1024); big[0]=1; w.objects.set('social/u1',big);
+  let asked;
+  w.env.IMAGES={input:()=>({transform(o){asked=o;return this;},output:async()=>({response:()=>new Response(new Uint8Array([7]))})})};
+  assert.deepEqual((await scanPhoto(w.env,'p1',a)).tagged,[2]);
+  assert.deepEqual(asked,{width:1600,height:1600,fit:'scale-down'});
+});
+test('S3: an image the service cannot read is skipped, not retried every hour', async()=>{
+  const w=faceWorld(); const a=w.photo('p1','u1',1);
+  w.env.FACES={idFromName:n=>n,get:()=>({fetch:async()=>Response.json({error:'unreadable image'},{status:400})})};
+  const msg=message({type:'media',post:'p1',media:a});
+  await handleQueue({messages:[msg]},w.env);
+  assert.equal(msg.acked,1);
+  assert.equal(w.sqlite.prepare("SELECT status FROM face_scans WHERE media=?").get(a).status,'skipped');
+  const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  assert.equal(await sweep(w.env),0);
+});
+
+test('S4: Not me clears that memory\'s face notification when nothing is left to show', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2); w.photoFaces[1]=[0]; w.photoFaces[2]=[0];
+  await scanPhoto(w.env,'p1',a,'post'); await scanPhoto(w.env,'p1',b,'post');
+  await w.call('/faces/not-me',ck,{media:a});
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
+  await w.call('/faces/not-me',ck,{media:b});
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,0);
+});
+test('S4: turning recognition off clears face notifications only', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a,'post');
+  w.sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key) VALUES(2,1,'like','p1','','like:p1:1'),(2,NULL,'mention','p1','x','found-all:3:1')");
+  await w.call('/faces/consent',ck,{choice:'no'});
+  assert.deepEqual(w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all().map(r=>r.event_key),['like:p1:1']);
+});
+
+test('S5: two requests at once start the container only once', async()=>{
+  const log={started:0}; let up=false;
+  const state={container:{get running(){return up;},start(){log.started++;},getTcpPort:()=>({fetch:async()=>{if(!up)throw new Error('refused');return new Response('ok');}}),
+    destroy:async()=>{},monitor:()=>new Promise(()=>{})},storage:{get:async()=>0,put:async()=>{},setAlarm:async()=>{}}};
+  const box=new FaceContainer(state,{}); let t=0; box.clock=()=>t;
+  box.sleep=async ms=>{t+=ms; if(t>=1000) up=true;};
+  const [r1,r2]=await Promise.all([box.fetch(new Request('https://faces/health')),box.fetch(new Request('https://faces/health'))]);
+  assert.equal(r1.status,200); assert.equal(r2.status,200); assert.equal(log.started,1);
+});
+test('S5: a container that dies while starting is started again', async()=>{
+  const log={started:0}; let up=false, crashed=false;
+  const state={container:{get running(){return up;},start(){log.started++; if(log.started>1) up=true;},
+    getTcpPort:()=>({fetch:async()=>{if(!up)throw new Error('refused');return new Response('ok');}}),
+    destroy:async()=>{},monitor:()=>new Promise((_,reject)=>{ if(!crashed){crashed=true; setTimeout(()=>reject(new Error('exit 1')),0);} })},
+    storage:{get:async()=>0,put:async()=>{},setAlarm:async()=>{}}};
+  const box=new FaceContainer(state,{}); let t=0; box.clock=()=>t; box.sleep=async ms=>{t+=ms; await new Promise(r=>setTimeout(r,1));};
+  const res=await box.fetch(new Request('https://faces/health'));
+  assert.equal(res.status,200); assert.equal(log.started,2);
+});
+
+test('S6: migration 0017 can be run again after a failure part-way', ()=>{
+  const w=fixture();
+  const sql=readFileSync(new URL('../migrations/0017_face_tagging.sql',import.meta.url),'utf8');
+  assert.throws(()=>w.sqlite.exec(sql),/duplicate column/);   // a second run fails only at its last step
+  assert.match(sql.trim(),/ADD COLUMN origin[^;]*;$/);
+  w.sqlite.exec(`INSERT INTO posts(id,author,body,created) VALUES('p1',1,'x',1);
+    INSERT INTO photo_tags(post,media,kind,target) VALUES('p1','post/a','person','2')`);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
+});
+test('S6: hiding a topic forgets the faces of its memories', async()=>{
+  const w=faceWorld(); w.consent(2,0); const ck=await w.session(1,'aaaa');
+  w.sqlite.exec("INSERT INTO topics(id,title,kind) VALUES('t1','Face test topic','Event')");
+  const a=w.photo('p1','u1',1); w.sqlite.exec("UPDATE posts SET topic='t1' WHERE id='p1'"); w.photoFaces[1]=[0];
+  await scanPhoto(w.env,'p1',a);
+  assert.equal((await w.call('/admin',ck,{action:'hide-topic',target:'t1',reason:'test'})).status,303);
+  for (const t of ['faces','face_scans']) assert.equal(w.sqlite.prepare(`SELECT count(*) n FROM ${t}`).get().n,0,t);
 });
