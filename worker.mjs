@@ -1,6 +1,7 @@
 import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock } from './views.mjs';
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
+import { completedProfilesCTE } from './completion.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -45,6 +46,10 @@ export default {
         return write;
       };
       let response = await route(request, env, record, member=>{viewer=member;});
+      if (env.PREVIEW_LABEL && response.headers.get('Content-Type')?.includes('text/html')) {
+        const html=(await response.text()).replace(/<body\b[^>]*>/,tag=>tag+'<div role="note" style="padding:6px 12px;text-align:center;background:#e4c58b;color:#251b14;font:600 12px/1.4 sans-serif">Preview · live data</div>');
+        response=new Response(html,{status:response.status,headers:response.headers});
+      }
       // Dark is the default; a visitor who picked light gets the attribute flipped before the page leaves.
       if (/(?:^|;\s*)theme=light(?:;|$)/.test(request.headers.get('Cookie')||'') && response.headers.get('Content-Type')?.includes('text/html')) {
         const html = (await response.text()).replace('<html lang="en" data-theme="dark"','<html lang="en" data-theme="light"');
@@ -336,14 +341,9 @@ async function route(req, env, record, setViewer) {
     member.portrait=profile?.portrait;
     member.unread=unread.total;
   }
-  async function feed(size, featured, q='') {
+  async function feed(size, q='') {
     const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM uploads up WHERE up.post=p.id)
       OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) THEN 604800000 ELSE 0 END`;
-    const suppliedSeed=u.searchParams.get('mix');
-    const mix=featured ? (/^\d{1,6}$/.test(suppliedSeed||'') ? Number(suppliedSeed) : crypto.getRandomValues(new Uint32Array(1))[0]%999983) : 0;
-    const jitter = featured ? `((p.created % 999983 + coalesce(unicode(substr(p.id,-1,1)),0)*8191
-      + coalesce(unicode(substr(p.id,-2,1)),0)*131) * ${mix+101} % 999983) * 6048` : '0';
-    const score = featured ? `(p.created+(${photoBonus})+(${jitter}))` : 'p.created';
     const before = Number(u.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
     const cursor = u.searchParams.get('cursor') || '';
     const search = `AND (instr(lower(p.body||' '||r.name||' '||r.nickname||' '||coalesce(subject.name,'')||' '||coalesce(subject.nickname,'')||' '||coalesce(t.title,'')||' '||coalesce((SELECT title FROM memory_albums WHERE post=p.id),'')),lower(?))>0
@@ -356,25 +356,13 @@ async function route(req, env, record, setViewer) {
       OR EXISTS(SELECT 1 FROM uploads a WHERE a.post=p.id AND instr(lower(a.caption),lower(?))>0)
       OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin AND instr(lower(ph.caption),lower(?))>0)
       OR (lower(?) IN ('photo','photos') AND ((${photoBonus})>0)))`;
-    const rows = await posts(`(${score}<? OR (${score}=? AND p.id<?)) ${q?search:''}`,
-      [before,before,cursor,...(q?Array(7).fill(q):[])],size+1,`${score} DESC,p.id DESC`);
+    const rows = await posts(`(p.created<? OR (p.created=? AND p.id<?)) ${q?search:''}`,
+      [before,before,cursor,...(q?Array(7).fill(q):[])],size+1,'p.created DESC,p.id DESC');
     const more = rows.length>size;
     if (more) rows.pop();
     const last=rows.at(-1);
-    const codeAtEnd = (value,offset) => Array.from(value).at(-offset)?.codePointAt(0) ?? 0;
-    const offset = more && featured
-      ? ((last.created % 999983 + codeAtEnd(last.id,1)*8191 + codeAtEnd(last.id,2)*131) * (mix+101) % 999983)*6048
-      : 0;
-    const position = more && last.created+(featured && (last.feed_photo||last.has_legacy_photo)?604800000:0)+offset;
-    const next = more ? '/memories?before='+position+'&cursor='+encode(last.id)+(featured?'&featured=1&mix='+mix:'')+(q?'&q='+encode(q):'') : '';
-    if (!featured) return {rows,next};
-    const photos=rows.filter(row=>row.feed_photo||row.has_legacy_photo);
-    const words=rows.filter(row=>!row.feed_photo&&!row.has_legacy_photo);
-    const mixed=[];
-    while(photos.length||words.length){
-      mixed.push(...photos.splice(0,2),...words.splice(0,1));
-    }
-    return {rows:mixed,next};
+    const next = more ? '/memories?before='+last.created+'&cursor='+encode(last.id)+(q?'&q='+encode(q):'') : '';
+    return {rows,next};
   }
   // "Looking forward to meeting": tolerant of a database where migration 0014 has not run yet.
   const meetLimit = 60;
@@ -419,7 +407,7 @@ async function route(req, env, record, setViewer) {
   }
   if (path==='/memories') {
     const q=(u.searchParams.get('q')||'').trim().slice(0,100);
-    const {rows,next} = await feed(12,u.searchParams.get('featured')==='1',q);
+    const {rows,next} = await feed(12,q);
     if (u.searchParams.get('fragment')==='1') return json({html:page.memoryCards(rows),next});
     return show('Memories',page.memories(rows,next,q,id(),await whatsappCompletion(),me));
   }
@@ -439,10 +427,15 @@ async function route(req, env, record, setViewer) {
     return json([...people,...topics,...suggestions.filter(x=>!topics.some(t=>t.label.toLowerCase()===x.label.toLowerCase()))]);
   }
   if (path==='/') {
-    const [{rows,next},people,meet,unlock] = await Promise.all([feed(9,true),all(`SELECT r.id,r.name,r.dorm,r.nickname,${portrait} AS portrait FROM roster r ${seedJoin}
-      WHERE EXISTS(SELECT 1 FROM submissions y WHERE y.subject=r.id AND y.contributor=r.id AND y.kind='self')
-      ORDER BY random() LIMIT 12`,+pilot),meetSummary(),whatsappCompletion()]);
-    return render('Kal • Aaj • Aur Kal',page.home(rows,people,next,id(),me,meet,unlock),member,{home:true,active:'/'});
+    const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),
+      all(`${completedProfilesCTE}
+        SELECT r.id,r.name,r.dorm,r.nickname,c.city,c.life,${portrait} AS portrait,
+          pc.completed_at,pc.basis AS completion_basis
+        FROM completed_profiles c JOIN roster r ON r.id=c.id ${seedJoin}
+        LEFT JOIN profile_completion pc ON pc.member=r.id
+        WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.id=r.id AND m.suspended=1)
+        ORDER BY coalesce(pc.completed_at,pc.observed_at,0) DESC,pc.observed_order DESC,r.name LIMIT 12`,+pilot,+pilot)]);
+    return render('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {
   const completeness = `(2 * EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))

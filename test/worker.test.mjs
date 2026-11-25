@@ -88,6 +88,70 @@ test('preview reuses a live admin session without sending a sign-in email',async
  assert.equal(sqlite.prepare("SELECT count(*) n FROM site_events WHERE event='email_accepted'").get().n,0);
 });
 
+test('fresh profiles require all seven items, record first completion and preserve ordering',async()=>{
+ const {call,session,sqlite}=fixture();
+ const ck=await session(2,'bbbb');
+ sqlite.exec(`
+   INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"Admin life","family":"Family"}','[]');
+   INSERT INTO profile_fields VALUES(1,'thenPhotoObject','admin-then.jpg'),(1,'nowPhotoObject','admin-now.jpg');
+   INSERT INTO profile_fields VALUES(2,'city','Bangalore'),(2,'life','A new chapter'),(2,'thenPhotoObject','then.jpg');
+   UPDATE profile_completion SET completed_at=NULL,basis='baseline' WHERE member=1;
+ `);
+ let html=await body(await call('/',ck));
+ let section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.match(section,/Test Admin/);assert.doesNotMatch(section,/Test Classmate|Completed today/);
+ assert.ok(html.indexOf('id="fresh-profiles-title"')<html.indexOf('class="meet-banner"'));
+ assert.equal((await call('/profile',ck,{field:'city',value:'Pune'})).status,303);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM profile_completion WHERE member=2").get().n,0);
+ sqlite.exec("INSERT INTO profile_fields VALUES(2,'nowPhotoObject','now.jpg')");
+ assert.equal((await call('/profile',ck,{field:'family',value:'Family'})).status,303);
+ const first=sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=2").get().completed_at;
+ html=await body(await call('/',ck));
+ section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.ok(section.indexOf('Test Classmate')<section.indexOf('Test Admin'));
+ assert.match(section,/Pune/);assert.match(section,/Completed today/);
+ const adminCookie=await session(1,'aaaa');
+ await call('/profile',adminCookie,{field:'city',value:'Mumbai'});
+ assert.equal(sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=1").get().completed_at,null);
+ await call('/profile',ck,{field:'family',value:''});
+ section=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.doesNotMatch(section,/Test Classmate/);
+ await call('/profile',ck,{field:'family',value:'Family again'});
+ assert.equal(sqlite.prepare("SELECT completed_at FROM profile_completion WHERE member=2").get().completed_at,first);
+ sqlite.exec('UPDATE members SET suspended=1 WHERE id=1');
+ section=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.doesNotMatch(section,/Test Admin/);
+});
+
+test('database tracking captures live writes before preview visits and preserves imported dates',async()=>{
+ const {call,session,sqlite}=fixture();
+ sqlite.exec(`
+  INSERT INTO yearbook_public VALUES(1,'{"city":"Mumbai","life":"An older entry","family":"Family"}','[]');
+  INSERT INTO profile_fields VALUES(1,'thenPhotoObject','old-then.jpg'),(1,'nowPhotoObject','old-now.jpg');
+  DELETE FROM profile_completion WHERE member=1;
+ `);
+ // Applying the migration to an existing completed entry must not invent its date.
+ sqlite.exec(readFileSync(new URL('../migrations/0017_profile_completion.sql',import.meta.url),'utf8'));
+ assert.equal(sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=1').get().completed_at,null);
+ sqlite.exec(`INSERT INTO profile_fields VALUES
+  (2,'city','Pune'),(2,'life','A new chapter'),(2,'thenPhotoObject','then.jpg'),(2,'nowPhotoObject','now.jpg');`);
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM profile_completion WHERE member=2').get().n,0);
+ // Simulate the existing production Worker, which knows nothing about preview tracking.
+ sqlite.exec("INSERT OR REPLACE INTO profile_fields VALUES(2,'family','Family')");
+ const first=sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=2').get().completed_at;
+ assert.ok(first>0);
+ sqlite.exec("INSERT OR REPLACE INTO profile_fields VALUES(2,'city','Bangalore')");
+ assert.equal(sqlite.prepare('SELECT completed_at FROM profile_completion WHERE member=2').get().completed_at,first);
+ const ck=await session(1,'aaaa');
+ const html=await body(await call('/',ck));
+ const section=html.match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.ok(section.indexOf('Test Classmate')<section.indexOf('Test Admin'));
+ assert.match(section,/Completed today/);
+ sqlite.exec("UPDATE profile_completion SET completed_at=NULL,observed_at=1,observed_order=1,basis='observed' WHERE member=2");
+ const observed=(await body(await call('/',ck))).match(/<section class="home-classmates home-fresh"[\s\S]*?<\/section>/)[0];
+ assert.match(observed,/Recently completed/);assert.doesNotMatch(observed,/Completed today/);
+});
+
 test('current interactions and feed',async()=>{
  const {call,session,sqlite}=fixture();
  const cookie=await session(2,'bbbb');
@@ -126,12 +190,43 @@ test('verification is one-time and redirects directly',async()=>{
  assert.match(await replay.text(),/Request a fresh link/);
  assert.equal(replay.headers.get('set-cookie'),null);
 });
+test('home and Memories show newest posts first with stable pagination and no photo boost',async()=>{
+ const {call,session,sqlite}=fixture();
+ const ck=await session(1,'aaaa');
+ sqlite.exec("INSERT INTO topics VALUES('hidden-topic','Hidden topic','event',1,NULL)");
+ for(let i=1;i<=18;i++){
+  const id='ordered-'+String(i).padStart(2,'0');
+  sqlite.prepare('INSERT INTO posts(id,author,body,created,hidden,topic) VALUES(?,?,?,?,?,?)')
+   .run(id,2,'Ordered memory '+i,100000+Math.floor(i/3),i===18?1:0,i===17?'hidden-topic':null);
+ }
+ sqlite.exec("INSERT INTO uploads VALUES('old-photo',2,'old.jpg','image/jpeg','old-digest','','ordered-01',100000)");
+ await call('/posts/ordered-01',ck,{action:'like',liked:'1'});
+ await call('/posts/ordered-01',ck,{action:'comment',body:'A new comment on an old memory'});
+ const posted=await call('/compose',ck,{id:crypto.randomUUID(),body:'A freshly posted memory',about:'person:2'});
+ const newId=posted.headers.get('location').split('/').at(-1);
+ const expected=[newId,...Array.from({length:16},(_,i)=>'ordered-'+String(16-i).padStart(2,'0'))];
+ const ids=html=>[...html.matchAll(/data-post="([^"]+)"/g)].map(m=>m[1]);
+ const next=html=>html.match(/data-feed-next href="([^"]+)"/)?.[1].replaceAll('&amp;','&');
+ const home=await body(await call('/',ck));
+ assert.deepEqual(ids(home),expected.slice(0,9));
+ assert.doesNotMatch(next(home),/featured|mix/);
+ const remaining=await (await call(next(home)+'&fragment=1',ck)).json();
+ assert.deepEqual([...ids(home),...ids(remaining.html)],expected);
+ for(const path of ['/memories','/memories?featured=1&mix=123','/memories?q=memory']){
+  const html=await body(await call(path,ck));
+  assert.deepEqual(ids(html),expected.slice(0,12));
+  const rest=await (await call(next(html)+'&fragment=1',ck)).json();
+  assert.deepEqual([...ids(html),...ids(rest.html)],expected);
+ }
+});
+
 test('featured cards and comment controls',async()=>{
  const {call,session}=fixture();
  const ck=await session(1,'aaaa');
  const home=await body(await call('/',ck));
- assert.match(home,/What are they up to\?/);
- assert.equal((home.match(/class="person-tile"/g)||[]).length,1);
+ assert.match(home,/Freshly completed profiles/);
+ assert.doesNotMatch(home,/What are they up to\?/);
+ assert.equal((home.match(/class="person-tile"/g)||[]).length,0);
  const profile=await body(await call('/people/2',ck));
  assert.match(profile,/Add a memory about this classmate/);
  const created=await call('/compose',ck,{id:crypto.randomUUID(),body:'Campus',about:'person:2'});
@@ -147,12 +242,14 @@ test('featured cards and comment controls',async()=>{
  await call(path,ck,{action:'delete-comment',comment:result[0].id});
  assert.equal((await (await call(path+'?panel=comments',ck)).json()).length,0);
 });
-test('directory and reunion resolve and home features up to twelve submitters',async()=>{
+test('directory and reunion resolve and home features up to twelve completed profiles',async()=>{
  const {call,session,sqlite}=fixture();
  const ck=await session(1,'aaaa');
  for(let id=3;id<=15;id++){
-  sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Classmate '+id,'D3','');
+  sqlite.prepare('INSERT INTO roster VALUES(?,?,?,?)').run(id,'Classmate '+id,'D3','Nick');
   sqlite.prepare("INSERT INTO submissions(id,subject,contributor,kind,payload) VALUES(?,?,?,'self','{}')").run('self-'+id,id,id);
+  for(const [field,value] of Object.entries({city:'Pune',life:'My story',family:'Family',thenPhotoObject:'then.jpg',nowPhotoObject:'now.jpg'}))
+   sqlite.prepare('INSERT INTO profile_fields VALUES(?,?,?)').run(id,field,value);
  }
  const home=await body(await call('/',ck));
  assert.match(home,/<a href="\/people">Classmates<\/a>/);
