@@ -1,4 +1,4 @@
-import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock } from './views.mjs';
+import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock, reunionCatchups } from './views.mjs';
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 import { completedProfilesCTE } from './completion.mjs';
@@ -242,7 +242,7 @@ async function route(req, env, record, setViewer) {
   function whatsappCompletion() {
     return completionPromise ||= (async()=>{
     const [roster, selected, photos] = await Promise.all([
-      one('SELECT dorm,nickname FROM roster WHERE id=?',me),
+      one('SELECT r.dorm,r.nickname,a.status AS attendance FROM roster r LEFT JOIN attendance a ON a.member=r.id WHERE r.id=?',me),
       all('SELECT field,value FROM selected_profile_fields WHERE member=? AND pilot_only<=? ORDER BY priority',me,+pilot),
       all(`SELECT ph.slot FROM yearbook_public y,json_each(y.images) j
         JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
@@ -466,9 +466,10 @@ async function route(req, env, record, setViewer) {
       }
       return new Response('Your reunion details changed. Reload the page and try again.',{status:409});
     }
-    const section = reunion?'':(u.searchParams.get('section')||'').trim().slice(0,20);
+    const section = (u.searchParams.get('section')||'').trim().slice(0,20);
+    const catchup = reunion && ['confirmed','requested','incoming','outgoing','none'].includes(u.searchParams.get('catchup')) ? u.searchParams.get('catchup') : '';
     const dorms = await all("SELECT DISTINCT dorm FROM roster WHERE trim(dorm)<>'' ORDER BY CAST(dorm AS INTEGER),dorm");
-    const sections = reunion?[]:await all('SELECT DISTINCT section FROM roster_sections ORDER BY section');
+    const sections = await all('SELECT DISTINCT section FROM roster_sections ORDER BY section');
     const rows = await all(`SELECT r.id,r.name,r.dorm,r.nickname,rs.section,${portrait} AS portrait,
       CASE WHEN coalesce(m.attendance_private,0)=0 THEN coalesce(rt.status,a.status) END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
@@ -477,7 +478,18 @@ async function route(req, env, record, setViewer) {
       AND (?='' OR r.dorm=?) AND (?='' OR rs.section=?)
       AND (?='' OR (coalesce(m.attendance_private,0)=0 AND CASE WHEN ? THEN rt.status ELSE coalesce(rt.status,a.status) END=?))
       ORDER BY ${completeness} DESC,r.name`,+pilot,q,q,dorm,dorm,section,section,status,+reunion,status);
-    const directory = page.directory(rows,attendanceNames,q,status,dorms,dorm,reunion,sections,section);
+    let attendees=rows;
+    if(reunion){
+      const [wishes,checks]=await Promise.all([
+        all('SELECT member,target,request_id,accepted_at FROM meet_wishes WHERE member=? OR target=?',me,me),
+        whatsappCompletion()
+      ]);
+      attendees=reunionCatchups(rows,wishes,me,checks.every(check=>check.complete),catchup);
+    }
+    const returnFilters=new URLSearchParams();
+    for(const [key,value] of Object.entries({q,dorm,section,catchup}))if(value)returnFilters.set(key,value);
+    const reunionReturn='/reunion'+(returnFilters.size?'?'+returnFilters:'')+'#reunion-attendees';
+    const directory = page.directory(attendees,attendanceNames,q,status,dorms,dorm,reunion,sections,section,catchup,reunionReturn);
     if (!reunion) return show('Classmates',directory);
     const tracker = await one("SELECT * FROM reunion_tracker WHERE member=? AND status='attending'",me);
     const saved = tracker && await one('SELECT details FROM reunion_logistics WHERE member=?',me);
@@ -550,13 +562,40 @@ async function route(req, env, record, setViewer) {
       if (req.headers.get('Accept')==='application/json' && inline!=='displayName') return json({value});
       return redirect('/people/'+me);
     }
-    const jobs = ['life','city','company','education','dorm','family','nickname'].map(key => {
+    const keys=['life','city','company','education','dorm','family','nickname'];
+    if(f.get('profile_form')==='all')keys.push(...profileKeys,'country','section','displayName','professionalFocus','researchHighlight');
+    const jobs = [...new Set(keys)].filter(key=>f.has(key)||f.has('hide_'+key)).map(key => {
       if (f.has('hide_'+key)) return sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,key,'');
-      const value = str(f,key);
+      const value = str(f,key,key==='displayName'?120:4000);
       return value ? sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,key,value) : sql('DELETE FROM profile_fields WHERE member=? AND field=?',me,key);
     });
-    jobs.push(sql('UPDATE members SET attendance_private=? WHERE id=?',+f.has('attendance_private'),me));
-    await db.batch(jobs);
+    const uploads=[];
+    // Validate every selected photo before writing any profile data.
+    for(const [name,key] of [['portraitPhoto','portraitObject'],['thenPhoto','thenPhotoObject'],['nowPhoto','nowPhotoObject']]){
+      const file=f.get(name);
+      if(!(file instanceof File)||!file.size)continue;
+      const photo=file.size<=15*1024*1024&&cleanPhoto(new Uint8Array(await file.arrayBuffer()));
+      if(!photo)return invalid('Choose JPEG or PNG photos up to 15 MB each. Your changes have not been saved.');
+      uploads.push({field:key,key:'profile/'+id(),photo});
+    }
+    const attendance=f.has('attendance')?str(f,'attendance',20):null;
+    if(attendance!==null&&!Object.hasOwn(attendanceNames,attendance))return invalid('Choose an attendance status.');
+    const originals=uploads.length?await all("SELECT field,value FROM profile_fields WHERE member=? AND field IN ('portraitObject','thenPhotoObject','nowPhotoObject')",me):[];
+    const uploaded=[];
+    try{
+      for(const upload of uploads){
+        await env.MEDIA.put(upload.key,upload.photo.bytes,{httpMetadata:{contentType:upload.photo.type}});
+        uploaded.push(upload.key);
+        jobs.push(sql('INSERT OR REPLACE INTO profile_fields VALUES(?,?,?)',me,upload.field,upload.key));
+      }
+      if(attendance!==null)jobs.push(sql('INSERT INTO attendance VALUES(?,?) ON CONFLICT(member) DO UPDATE SET status=excluded.status',me,attendance));
+      jobs.push(sql('UPDATE members SET attendance_private=? WHERE id=?',+f.has('attendance_private'),me));
+      await db.batch(jobs);
+    }catch(error){
+      await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));
+      throw error;
+    }
+    await Promise.allSettled(originals.filter(row=>uploads.some(upload=>upload.field===row.field)&&row.value).map(row=>env.MEDIA.delete(row.value)));
     return redirect('/people/'+me);
   }
   if (path==='/gallery') {
