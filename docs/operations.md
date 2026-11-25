@@ -132,3 +132,62 @@ No migration is needed for this release.
 **Photo sizes.** Responsive sizes are still stored in R2 under `variants/webp-v1/<width>/<original key>`. A newly requested size is returned as soon as it is generated and stored afterwards (`waitUntil`). Concurrent requests for the same new size in one isolate share a single transformation. If a size would not be smaller than the original, an empty marker object is stored under `variants/webp-v1-original/<width>/<original key>` (never at the variant key, which older Worker versions would serve as an image) and the original is served from then on, without re-attempting the transformation. Right after upload, memory photos get 480 and 1200 px and profile photos get 96, 256 and 480 px in the background. Originals are never changed or removed by this. Deleting a stored variant or marker is always safe: it is regenerated on the next request. Rolling the Worker back needs no R2 cleanup. Media authorization and cache headers are unchanged.
 
 **Browser requests.** `social.js` (now `?v=24`) routes likes, comments, tags, the comments panel, infinite memory loading, photo uploads, publishing and tag search through one helper with a per-request deadline and readable errors, including a sign-in message when a session has expired. Nothing is retried automatically. Photo uploads and publishing use stable ids, so pressing again after an unconfirmed attempt never duplicates a memory or photo.
+
+
+## Face tagging
+
+Batchmates who say yes are found in memory photos and tagged automatically. Each photo is sent to a face service
+(`face-service/`, InsightFace in a Cloudflare Container), every face's embedding is kept in D1, and faces are compared
+with the member's own profile photos (portrait, Then, Now) and their 2006 yearbook portrait. A match scoring 0.35 or
+more (`FACE_BAR` in `faces.mjs`) becomes a photo tag with `origin='auto'`. Design and test results:
+`docs/superpowers/specs/2026-11-25-face-tagging-design.md`.
+
+**Modes.** `FACE_TAGGING` is set as a variable on the Worker in the Cloudflare dashboard, not in
+`wrangler.toml`; `keep_vars = true` keeps it across deploys, and unset means `off`.
+- `off`: nothing is scanned, queued or shown. The consent prompt is hidden.
+- `shadow`: photos are scanned and matched against members who said yes, but nobody is tagged or notified. Admins see
+  the would-be tags at `/admin/faces`, lowest scores first.
+- `on`: matches become tags. Each person gets one notification per memory ("You're in 3 photos"); matches found later
+  (a new member, a new profile photo, publishing) arrive as one "We found you in N photos" notification.
+
+**Consent.** Signed-in members see "Find me in batch photos?" on Home once. "Not now" is remembered; either answer can
+be changed on their own profile. Turning it off deletes their reference faces and their automatic tags (manual tags
+stay). "Not me" on a photo removes that tag for good. Only members who said yes are ever matched.
+
+**One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
+`photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or
+without the migration; until it has run, face tagging stays hidden.
+1. Create the queues: `npx wrangler queues create face-jobs` and `npx wrangler queues create face-jobs-dlq`.
+2. Merge. The Git integration runs `npx wrangler deploy`, which also builds `face-service/Dockerfile` (pip install
+   plus a ~190 MB model download) and rolls out the container. Check the build log for the image step.
+3. Back up D1, then add the tables:
+   `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0019_face_tagging.sql`.
+4. Set `FACE_TAGGING=shadow` in the dashboard. Members now see "Find me in batch photos?".
+5. At `/admin/faces`, press **Scan all photos now** (the hourly sweep would get there too, 200 photos an hour).
+   Check a sample of the shadow matches.
+6. Set `FACE_TAGGING=on`, then press **Publish shadow matches as tags**. Each member gets one "We found you in N
+   photos". From then on, photos in new memories notify once per memory; older photos found by the hourly sweep are
+   gathered into the next hourly summary, so nobody gets a burst.
+
+If a face job fails (for example while the container is still starting) it is retried; after five tries photos are
+marked failed. The hourly sweep retries a failed photo, and a member who said yes but has no usable reference photo,
+once a day and three times at most, so nothing keeps waking the container. Posting is never affected.
+Photos over 15 MB are shrunk to 1600 px with Cloudflare Images before matching. A photo the face service cannot read is
+marked skipped and is not retried.
+
+**Staging.** Workers that contain a Durable Object get no preview URLs from `wrangler versions upload`. If the staging
+Worker deploys from this `wrangler.toml`, it now needs its own queues too; otherwise leave `FACE_TAGGING` unset there.
+
+**Running costs.** The container (`standard-2`, one vCPU; at most 2 instances, at most 2 jobs at a time) starts on
+demand and stops after one idle minute (memory is billed while it runs; the cost is a 10–30 s cold start for the
+first photo after a quiet spell). Each container analyses one photo at a time, a few seconds each, which is
+within the usage included in Workers Paid for a few thousand photos a month.
+
+**Licence.** The InsightFace `buffalo_l` models are licensed for non-commercial research use; Hari has taken
+responsibility for that question. The models are downloaded when the image is built and are never committed.
+
+**Local development.** Run the service with the models unpacked locally:
+`cd face-service && FACE_MODELS=/path/to/buffalo_l PORT=8080 python3 app.py`, and start the Worker with
+`FACE_SERVICE_URL=http://localhost:8080` and `FACE_TAGGING=shadow` in `.dev.vars`. `wrangler.local.toml` has no queue, so
+photos are only scanned locally if you copy the two queue blocks from `wrangler.toml` into it. Tests:
+`cd face-service && python3 -m unittest` (add `FACE_MODELS=…` to include the model check).

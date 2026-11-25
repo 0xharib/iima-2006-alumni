@@ -21,6 +21,8 @@ node --test
 
 Tests use synthetic classmates, an isolated in-memory SQLite database, and an in-memory photo store. They do not send email or contact production.
 
+The face service has its own tests: `cd face-service && python3 -m unittest`. See [Face tagging](docs/operations.md#face-tagging) for how automatic face tagging is deployed and switched on.
+
 ## Run locally
 
 Use `wrangler.local.toml` for local development. The default `wrangler.toml` targets production and is used by Cloudflare’s Git integration. Apply the schema and load the synthetic roster, then start the Worker.

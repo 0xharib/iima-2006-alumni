@@ -1,3 +1,4 @@
+import { FACE_COPY } from './faces.mjs';
 import {navigationLinks,mobileNavigation,mobileNavCSS} from './navigation.mjs';
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
@@ -12,6 +13,20 @@ const input=(name,label,value='',extra='')=>`<label>${e(label)}<input name="${e(
 const area=(name,label,value='',extra='')=>`<label>${e(label)}<textarea name="${e(name)}" ${extra}>${e(value)}</textarea></label>`;
 export const field=(name,value)=>`<input type="hidden" name="${e(name)}" value="${e(value)}">`;
 export const form=(action,body,label,extra='')=>`<form method="post" action="${e(action)}" ${extra}>${body}<button type="submit">${e(label)}</button></form>`;
+const faceCopy=FACE_COPY;
+// Consent for automatic face tagging: a card on Home while unanswered, a switch on the owner's profile afterwards.
+// "Not me" on the viewer's own automatic tag on a photo.
+function notMe(photo,me){
+  const mine=JSON.parse(photo.linked_tags||'[]').some(tag=>tag.kind==='person'&&tag.member===me&&tag.origin==='auto');
+  return mine?`<div class="face-not-me"><span>You were found in this photo automatically.</span>${form('/faces/not-me',field('media',photo.media)+field('next','/posts/'+String(photo.source||'').split('/').pop()+'#photo-'+photo.media.replaceAll('/','-')),'Not me')}</div>`:'';
+}
+function faceConsent(state,next){
+  const choice=(value,label,extra='')=>form('/faces/consent',field('choice',value)+field('next',next),label,extra);
+  if(state==='ask') return `<section class="meet-banner face-consent" aria-label="Find me in batch photos"><h2>Find me in batch photos?</h2>
+    <p>${faceCopy}</p><div class="face-consent-actions">${choice('yes','Yes, find me','class="cta-form"')}${choice('no','Not now')}</div></section>`;
+  return `<div class="face-consent face-consent-switch"><p><strong>Find me in batch photos: ${state==='on'?'On':'Off'}</strong> ${faceCopy}</p>
+    ${choice(state==='on'?'no':'yes',state==='on'?'Turn off':'Turn on')}<a href="/photos-of-you">Photos of you</a></div>`;
+}
 const action=(url,name,label,values={})=>form(url,field('action',name)+Object.entries(values).map(([key,val])=>field(key,val)).join(''),label,'class="inline"');
 const report=(type,target)=>`<details><summary>Report ${e(type)}</summary>${form('/report',field('type',type)+field('target',target)+area('reason','What needs checking?','','required maxlength="1000"'),'Send report')}</details>`;
 const list=(items,empty)=>items.length?`<ul class="plain">${items.map(item=>`<li>${item}</li>`).join('')}</ul>`:`<p>${e(empty)}</p>`;
@@ -289,12 +304,13 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[]){
+  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],faces='hidden'){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
       <div class="hero-actions"><a class="cta cta-primary" href="/compose" data-compose-open>Share a memory</a><a class="cta cta-quiet" href="/people/${me}">Edit profile</a></div>
       </div>${countdown()?`<a class="seal-link" href="/reunion">${countdown()}</a>`:''}</section>
+      ${faces==='ask'?faceConsent('ask','/'):''}
       <section class="home-classmates home-fresh" aria-labelledby="fresh-profiles-title"><div class="section-head"><h2 id="fresh-profiles-title">Freshly completed profiles</h2>${link('/people','See all')}</div>
         ${fresh.length?`<div class="fresh-browse"><span>Latest first · ${fresh.length} profiles</span><div><button type="button" data-fresh-step="-1" aria-label="Previous completed profiles" disabled>←</button><button type="button" data-fresh-step="1" aria-label="Next completed profiles">→</button></div></div><div class="people-grid" role="region" aria-label="Freshly completed profiles, newest first. Swipe or use the arrows to browse" data-fresh-strip tabindex="0">${fresh.map(row=>`<a class="person-tile" href="/people/${row.id}">${portrait(row,true,256)}<div>${classmate(row,row.city?[row.city]:[])}${row.completed_at||row.completion_basis==='observed'?`<small class="completed-label">${row.completed_at?completionLabel(row.completed_at):'Recently completed'}</small>`:''}</div></a>`).join('')}</div>`:'<p class="fresh-empty">Completed profiles will appear here. Be one of the first to share your story.</p>'}
       </section>
@@ -399,7 +415,7 @@ export const page={
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
       }).join('')}`;
   },
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false}){
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces='hidden'){
     const own = me === row.id;
     stories=profileMemoryRows(stories,row.id);
     const received = stories.filter(post=>post.author!==row.id);
@@ -489,6 +505,7 @@ export const page={
                  `<p>No photo shared.</p>`}
 </div>`;
             }).join('')}</div></section>`:''}
+          ${own&&faces!=='hidden'?`<section class="profile-section profile-face-consent">${faceConsent(faces,'/people/'+me)}</section>`:''}
 
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
           ${profileLinks.length?`<section class="profile-section"><h2>Selected links</h2><ul>${profileLinks.join('')}</ul></section>`:''}
@@ -543,8 +560,8 @@ export const page={
     const gallery=isAlbum?`<section aria-label="Album photos" class="album-panels memory-collage">${photos.map((photo,i)=>`<article class="album-photo-panel collage-card" data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" id="photo-${e(photo.media.replaceAll('/','-'))}">
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
-        <div data-memory-tags>${memoryTags(photo)}</div>${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos);
+        <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
@@ -556,6 +573,28 @@ export const page={
       '<h2 id="comments">Comments</h2>'+list(comments.map(c=>`<div class="comment-row" id="comment-${e(c.id)}">${link('/people/'+c.author,c.name)}${c.author===me?
       `<details class="comment-menu"><summary aria-label="Comment options">⋯</summary><div>${action(url,'delete-comment','Delete comment',{comment:c.id})}</div></details><details><summary>Edit comment</summary>${form(url,field('action','edit-comment')+field('comment',c.id)+input('body','Comment',c.body,'required'),'Save')}</details>`:''}${report('comment',c.id)}<p class="story">${e(c.body)}</p></div>`),'No comments yet.')+
       (()=>{const composer=form(url,field('action','comment')+area('body','Add a comment','','required maxlength="1200"'),'Post comment');return commentPosted?`<details><summary>Add another comment</summary>${composer}</details>`:composer;})();
+  },
+  adminFaces(data,queued=0,published=NaN){
+    const c=data.counts, modes={off:'Off: nothing is scanned',shadow:'Shadow: photos are scanned and matched, but nobody is tagged or told',on:'On: matches become tags and notifications'};
+    const stat=(label,value)=>`<div><dt>${e(label)}</dt><dd>${e(String(value))}</dd></div>`;
+    if(!data.ready) return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+      <p>Not set up yet: run <code>migrations/0019_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
+    return `<p>${link('/admin?view=tools','Admin tools')}</p><h1>Face tagging</h1>
+      <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
+      ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}
+      <dl class="face-stats">${stat('Photos on the site',c.photos)}${stat('Scanned',c.scanned)}${stat('Failed scans',c.failed)}${stat('Faces found',c.faces)}
+        ${stat('Members who said yes',c.consenting)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
+      <div class="face-admin-actions">${form('/admin/faces',field('action','scan-all'),'Scan all photos now')}
+        ${data.mode==='on'&&c.shadow?form('/admin/faces',field('action','publish'),'Publish shadow matches as tags'):''}</div>
+      <h2>Shadow matches, lowest scores first</h2>
+      ${data.shadow.length?`<section class="photos-of-you">${data.shadow.map(m=>`<figure><a href="/posts/${e(m.post)}#photo-${e(m.media.replaceAll('/','-'))}"><img src="${mediaSrc(m.media,256)}" alt="Photo matched to ${e(m.name)}" loading="lazy"></a>
+        <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span></figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}`;
+  },
+  photosOfYou(list){
+    return `<h1>Photos of you</h1><p class="sub">Photos you're tagged in. Tags marked "found automatically" came from face matching; use Not me to remove one.</p>
+      ${list.length?`<section class="photos-of-you">${list.map(p=>`<figure><a href="/posts/${e(p.post)}#photo-${e(p.media.replaceAll('/','-'))}"><img src="${mediaSrc(p.media,480)}" alt="Photo you're tagged in" loading="lazy"></a>
+        ${p.origin==='auto'?`<figcaption>Found automatically ${form('/faces/not-me',field('media',p.media)+field('next','/photos-of-you'),'Not me')}</figcaption>`:''}</figure>`).join('')}</section>`
+        :'<p>No photos of you yet. When batchmates share photos you’re in, they’ll appear here.</p>'}`;
   },
   notifications(rows,me,unlocked=true){
     const labels={mention:'mentioned you',like:'liked your memory',comment:'commented on your memory',tag:'added a tag to your memory',catchup_request:'wants to catch up with you',catchup_accepted:'accepted your catch-up request'};
@@ -569,18 +608,21 @@ export const page={
         const requestAction=n.kind==='catchup_request'?(n.meet_request?(n.meet_accepted?'<p class="meet-status">You accepted this request.</p>':meetForm('accept',n.actor,'/notifications','Accept request','notification-accept',n.meet_request)):'<p class="meet-hint">This request is no longer active.</p>'):'';
         const body=['Shared a yearbook photo.','Shared a photo.'].includes(n.memory_text)?'':n.memory_text;
         const photo=n.anchor.startsWith('photo-');
+        const found=n.event_key?.startsWith('found:'), foundAll=n.event_key?.startsWith('found-all:');
+        const foundLabel=foundAll?`We found you in ${Number(n.event_key.split(':')[1])} photo${Number(n.event_key.split(':')[1])===1?'':'s'}`
+          :found?(n.found_count>1?`You're in ${n.found_count} photos`:`You're in a photo`):'';
         const summary=n.comment_text||body;
         return `<article class="notification-card${n.is_read?'':' new'}">
           <div class="notification-byline">
-             ${n.actor_name?`<a href="/people/${n.actor}">${portrait({name:n.actor_name,portrait:n.actor_portrait})}${e(n.actor_name)}</a>`:`<strong>${n.sample?'Test activity':'A classmate'}</strong>`}
+             ${n.actor_name?`<a href="/people/${n.actor}">${portrait({name:n.actor_name,portrait:n.actor_portrait})}${e(n.actor_name)}</a>`:`<strong>${n.sample?'Test activity':foundAll?'Batch photos':'A classmate'}</strong>`}
             <small>${n.sample?'Test · ':''}${dates.format(n.created*1000)}${n.is_read?'':' · Unread'}</small>
           </div>
           <a class="notification-preview" href="${url}">
             ${n.preview_media?`<img src="${mediaSrc(n.preview_media,256)}" srcset="${mediaSet(n.preview_media,[256,480])}" sizes="(max-width: 600px) 100px, 170px" alt="${photo?'Tagged photo':'Memory preview'}" loading="lazy">`:''}
-            <div><strong>${labels[n.kind]}${photo?' on a photo':''}</strong>
+            <div><strong>${foundLabel?e(foundLabel):labels[n.kind]+(photo?' on a photo':'')}</strong>
               ${n.album_title?`<span class="notification-album">${e(n.album_title)}</span>`:''}
               ${summary?`<p>${e(summary.slice(0,240))}${summary.length>240?'…':''}</p>`:''}
-              <span class="notification-open">${n.kind==='comment'&&!n.sample?'View comment':photo?'View photo':n.post?'Open memory':catchup?'View catch-up':'Mark as read'}</span>
+              <span class="notification-open">${foundAll?'See your photos':n.kind==='comment'&&!n.sample?'View comment':photo?'View photo':n.post?'Open memory':catchup?'View catch-up':'Mark as read'}</span>
             </div>
           </a>
           ${requestAction}
@@ -617,7 +659,7 @@ export const page={
       ${table(['Classmate','Yearbook submitted','Profile details saved','Photo','Enriched information'],coverage.map(row=>[row,yes(row.submitted),yes(row.edited),yes(row.portrait||row.has_photos),yes(row.enriched)]))}`;
   },
   admin(reports,seeds,topics,memories){const actions=['invite','revoke','approve-seed','hold-seed','resolve-report','hide-post','restore-post','hide-comment','restore-comment','rename-topic','hide-topic','merge-topic','publish-memory'];
-    return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
+    return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')} · ${link('/admin/faces','Face tagging')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
       <h2>Take action</h2>${form('/admin',select('action','Action',actions.map(a=>[a,a.replaceAll('-',' ')]))+input('target','Target ID','','required')+
       input('reason','Reason','','required')+input('into','Merge destination topic ID')+input('title','New topic title'),'Apply action')}
       <h2>Reunion tracker</h2><p>${link('/admin/export?kind=reunion','Download attendee logistics')}</p>${form('/admin',field('action','attendance-preview')+area('rsvp','CSV with roster_id,status (attending, declined, unknown)','','required'),'Preview import')}
