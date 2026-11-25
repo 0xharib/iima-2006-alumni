@@ -2,7 +2,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { enqueuePhotos, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
+import { faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
 import { completedProfilesCTE } from './completion.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
@@ -857,7 +857,6 @@ async function route(req, env, record, setViewer, ctx) {
       await db.batch(jobs);
       for (const object of uploaded) warmVariants(env,ctx,object,'image/jpeg',memoryWidths);
       uploaded.length=0;
-      await enqueuePhotos(env,key,order.map(photo=>'post/'+photo));
       return success();
     } finally {
       await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));

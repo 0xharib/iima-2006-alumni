@@ -199,21 +199,6 @@ test('a job that keeps failing is recorded as a failed scan', async()=>{
   await handleQueue({messages:[msg]},w.env);
   assert.equal(w.sqlite.prepare("SELECT status FROM face_scans WHERE media=?").get(m).status,'failed');
 });
-test('posting queues each photo and never fails because of the queue', async()=>{
-  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
-  for (const queue of [undefined,{sendBatch:async()=>{throw new Error('queue down');}},'record']) {
-    const w=faceWorld(); const ck=await w.session(2,'bbbb'); const sent=[];
-    if(queue==='record') w.env.FACE_JOBS={sendBatch:async msgs=>{sent.push(...msgs);}}; else if(queue) w.env.FACE_JOBS=queue;
-    const f=new FormData(); const key=crypto.randomUUID(); f.set('id',key); f.set('body','Hello');
-    f.append('images',new File([png],'a.png',{type:'image/png'}));
-    const res=await w.call('/compose',ck,f);
-    assert.equal(res.status,303,await res.text());
-    if(queue==='record'){
-      assert.equal(sent.length,1); assert.equal(sent[0].body.type,'media'); assert.equal(sent[0].body.post,key);
-      assert.match(sent[0].body.media,/^post\/[0-9a-f-]{36}$/);
-    }
-  }
-});
 test('hiding a post removes its faces', async()=>{
   const w=faceWorld(); w.consent(2,0); const m=w.photo('p1','u1',1); w.photoFaces[1]=[0];
   await scanPhoto(w.env,'p1',m);
@@ -223,7 +208,7 @@ test('hiding a post removes its faces', async()=>{
   assert.deepEqual(await scanPhoto(w.env,'p1',m),{faces:0,tagged:[]});
 });
 
-import { refreshRefs, rematchMember } from '../faces.mjs';
+import { refreshRefs, rematchMember, summarise } from '../faces.mjs';
 const pngBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aA1sAAAAASUVORK5CYII=','base64');
 const storedFace=(w,media,post,dim)=>w.sqlite.prepare("INSERT INTO faces(media,post,box,score,size,embedding,model) VALUES(?,?,'[0,0,40,40]',0.9,40,?,'buffalo_l/w600k_r50')").run(media,post,vectorBytes(unitVec(dim))).lastInsertRowid;
 
@@ -248,7 +233,7 @@ test('rematch tags earlier photos and sends one summary', async()=>{
   const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2);
   w.sqlite.exec("UPDATE posts SET created=5 WHERE id='p2'");
   storedFace(w,a,'p1',0); storedFace(w,b,'p2',0); storedFace(w,b,'p2',9);
-  assert.equal(await rematchMember(w.env,2),2);
+  assert.equal(await rematchMember(w.env,2),2); await summarise(w.env);
   assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2' AND origin='auto'").get().n,2);
   const notes=w.sqlite.prepare('SELECT actor,post,anchor,event_key FROM notifications WHERE recipient=2').all();
   assert.equal(notes.length,1); assert.equal(notes[0].actor,null); assert.equal(notes[0].post,'p2');
@@ -274,7 +259,7 @@ test('found notification reads You are in 2 photos and opens the photo', async()
 test('found-all notification opens Photos of you', async()=>{
   const w=faceWorld(); w.consent(2,0); const ck=await w.session(2,'bbbb');
   const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2); storedFace(w,a,'p1',0); storedFace(w,b,'p2',0);
-  await rematchMember(w.env,2);
+  await rematchMember(w.env,2); await summarise(w.env);
   const page=await (await w.call('/notifications',ck)).text();
   assert.match(page,/We found you in 2 photos/); assert.match(page,/Batch photos/);
   const id=w.sqlite.prepare("SELECT id FROM notifications WHERE recipient=2").get().id;
@@ -332,14 +317,14 @@ test('sweep queues unscanned visible photos including legacy ones, and nothing w
   assert.equal(await sweep(off.env),0);
 });
 test('failed scans are swept again', async()=>{
-  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async()=>{}};
   const a=w.photo('p1','u1',1); w.sqlite.prepare("INSERT INTO face_scans(media,post,status,faces,model,scanned) VALUES(?,'p1','failed',0,'m',1)").run(a);
   assert.equal(await sweep(w.env),1);
 });
 test('the Worker runs the sweep on its schedule', async()=>{
-  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}}; w.photo('p1','u1',1);
-  await workerModule.default.scheduled({cron:'17 * * * *'},w.env,{waitUntil(){}});
-  assert.equal(sent.length,1);
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async b=>{sent.push({body:b});}}; w.photo('p1','u1',1);
+  await workerModule.default.scheduled({cron:'17 */3 * * *'},w.env,{waitUntil(){}});
+  assert.deepEqual(sent.map(m=>m.body.type),['media','finish']);
 });
 test('admin faces page is admin-only and shows counts without embeddings', async()=>{
   const w=faceWorld('shadow'); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
@@ -364,7 +349,7 @@ test('publish turns shadow matches into tags with one summary each', async()=>{
   assert.equal(notes.length,1); assert.match(notes[0].event_key,/^found-all:2:/);
 });
 test('scan-all queues everything unscanned', async()=>{
-  const w=faceWorld('shadow'); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const w=faceWorld('shadow'); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async()=>{}};
   w.photo('p1','u1',1); w.photo('p2','u2',2);
   const res=await w.call('/admin/faces',await w.session(1,'aaaa'),{action:'scan-all'});
   assert.equal(res.status,303); assert.equal(res.headers.get('location'),'/admin/faces?queued=2'); assert.equal(sent.length,2);
@@ -403,11 +388,11 @@ test('I3/I4: re-matching many photos stays within D1 limits and summarises only 
   let queries=0; const prepare=w.env.DB.prepare.bind(w.env.DB);
   w.env.DB={...w.env.DB,prepare(sql){ if((sql.match(/\?/g)||[]).length>100) throw new Error('too many SQL variables'); queries++; return prepare(sql); },batch:w.env.DB.batch.bind(w.env.DB)};
   for(let i=0;i<150;i++){ const m=w.photo('p'+i,'u'+i,1); storedFace(w,m,'p'+i,0); }
-  assert.equal(await rematchMember(w.env,2),150);
+  assert.equal(await rematchMember(w.env,2),150); await summarise(w.env);
   assert.ok(queries<400,'queries '+queries);
   const notes=()=>w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all().map(r=>r.event_key);
   assert.equal(notes().length,1); assert.match(notes()[0],/^found-all:150:/);
-  assert.equal(await rematchMember(w.env,2),0);         // a profile photo change: nothing new, no new summary
+  assert.equal(await rematchMember(w.env,2),0); await summarise(w.env);   // a profile photo change: nothing new, no new summary
   assert.equal(notes().length,1);
 });
 
@@ -433,14 +418,6 @@ test('I10/M6: photos found by the sweep wait for one summary, which leaves out y
   await workerModule.default.scheduled({},w.env);
   assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
 });
-test('I10: a photo job from a new memory still notifies per memory', async()=>{
-  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
-  await handleQueue({messages:[message({type:'media',post:'p1',media:a,notify:'post'})]},w.env);
-  assert.equal(w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").get().event_key,'found:p1');
-  await workerModule.default.scheduled({},w.env);
-  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,1);
-});
-
 test('I5: a family Then photo uses the face that matches the yearbook, or none', async()=>{
   const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); picture(w,2);
   w.objects.set('profile/t2',new Uint8Array([6])); w.sqlite.exec("INSERT INTO profile_fields VALUES(2,'thenPhotoObject','profile/t2')");
@@ -530,7 +507,7 @@ test('S3: an image the service cannot read is skipped, not retried every hour', 
   await handleQueue({messages:[msg]},w.env);
   assert.equal(msg.acked,1);
   assert.equal(w.sqlite.prepare("SELECT status FROM face_scans WHERE media=?").get(a).status,'skipped');
-  const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async()=>{}};
   assert.equal(await sweep(w.env),0);
 });
 
@@ -585,7 +562,7 @@ test('S6: hiding a topic forgets the faces of its memories', async()=>{
 // ---------- cost: retry what keeps failing once a day, three times at most ----------
 const DAY=24*60*60*1000;
 test('C: a failed photo is retried once a day, three times at most', async()=>{
-  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);}};
+  const w=faceWorld(); const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async()=>{}};
   const a=w.photo('p1','u1',1);
   const fail=(tries,ago)=>w.sqlite.prepare("INSERT OR REPLACE INTO face_scans(media,post,status,faces,model,scanned,tries) VALUES(?,'p1','failed',0,'m',?,?)").run(a,Date.now()-ago,tries);
   fail(1,60*60*1000); assert.equal(await sweep(w.env),0);      // failed an hour ago: wait
@@ -689,4 +666,73 @@ test('E7: saving a profile photo, inline or with the full form, marks a rebuild 
     assert.deepEqual({...w.sqlite.prepare('SELECT ref_tries,ref_tried FROM face_prefs WHERE member=2').get()},{ref_tries:0,ref_tried:null},how);
     assert.deepEqual(sent,[],how);
   }
+});
+
+// ---------- 26 Nov: one batch every 3 hours ----------
+import { finishRun } from '../faces.mjs';
+const recorder=w=>{ const sent=[]; w.env.FACE_JOBS={sendBatch:async m=>{sent.push(...m);},send:async(b,o)=>{sent.push({body:b,...o});}}; return sent; };
+const HOUR=60*60*1000;
+
+test('B1: posting a memory queues nothing and never fails because of face tagging', async()=>{
+  const w=faceWorld(); const sent=recorder(w); const ck=await w.session(2,'bbbb');
+  const f=new FormData(); f.set('id',crypto.randomUUID()); f.set('body','Hello'); f.append('images',new File([pngBytes],'a.png',{type:'image/png'}));
+  assert.equal((await w.call('/compose',ck,f)).status,303);
+  assert.deepEqual(sent,[]);
+});
+test('B2: the batch queues new photos, rebuilds for new or changed profiles, and one delayed finish job', async()=>{
+  const w=faceWorld(); const sent=recorder(w); w.photo('p1','u1',1);
+  picture(w,2);                                                            // new: no row yet
+  picture(w,3); w.consent(3,0); w.sqlite.exec('UPDATE face_prefs SET ref_tried=NULL WHERE member=3');   // changed photo
+  w.consent(4,1);                                                          // built and unchanged
+  w.sqlite.exec('INSERT INTO face_prefs(member,recognise,decided) VALUES(1,1,1)');   // no profile picture
+  await sweep(w.env);
+  assert.deepEqual(sent.filter(m=>m.body.type==='media').map(m=>m.body.media),['post/u1']);
+  assert.deepEqual(sent.filter(m=>m.body.type==='ref').map(m=>m.body.member).sort(),[2,3]);
+  const finish=sent.filter(m=>m.body.type==='finish');
+  assert.equal(finish.length,1); assert.equal(finish[0].delaySeconds,2400);
+});
+test('B3: a reference job only rebuilds; the finish job re-matches recent rebuilds and sends one summary each', async()=>{
+  const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[50]=[0];
+  picture(w,2); const a=w.photo('p1','u1',1); storedFace(w,a,'p1',0);
+  await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
+  assert.equal(autoTags(w,2),0);                                          // nothing until the run finishes
+  picture(w,3); w.consent(3,5); w.sqlite.prepare('UPDATE face_prefs SET ref_tried=? WHERE member=3').run(Date.now()-7*HOUR);
+  const b=w.photo('p2','u2',2); storedFace(w,b,'p2',5);                   // 3 was rebuilt too long ago to re-match
+  const msg=message({type:'finish'}); await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);
+  assert.equal(autoTags(w,2),1); assert.equal(autoTags(w,3),0);
+  const notes=w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").all();
+  assert.equal(notes.length,1); assert.match(notes[0].event_key,/^found-all:1:/);
+});
+test('B4: a photo and a new profile picture handled at the same moment still meet at the finish', async()=>{
+  const w=faceWorld(); w.photoFaces[1]=[0]; w.photoFaces[50]=[0]; picture(w,2);
+  const a=w.photo('p1','u1',1);
+  await scanPhoto(w.env,'p1',a);                                          // scanned before 2's references existed
+  await refreshRefs(w.env,2);                                             // built after the scan read the references
+  assert.equal(autoTags(w,2),0);
+  await finishRun(w.env);
+  assert.equal(autoTags(w,2),1);
+});
+test('B5: photo jobs never notify per memory; the finish job sends the summary', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];
+  await handleQueue({messages:[message({type:'media',post:'p1',media:a,notify:'post'})]},w.env);
+  assert.equal(autoTags(w,2),1);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=2").get().n,0);
+  await finishRun(w.env);
+  assert.match(w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=2").get().event_key,/^found-all:1:/);
+});
+test('B6: the batch removes the automatic tags of anyone without a profile picture, keeping Not me and manual tags', async()=>{
+  const w=faceWorld(); recorder(w); w.consent(3,0,0);
+  const a=w.photo('p1','u1',1), b=w.photo('p1','u2',2), c=w.photo('p1','u3',3);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('p1',?,'person','3','auto'),('p1',?,'person','3','manual')").run(a,b);
+  w.sqlite.prepare("INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,3,'p1',NULL,0.9,'auto',1),(?,3,'p1',NULL,0,'removed',1)").run(a,c);
+  w.sqlite.exec("INSERT INTO notifications(recipient,actor,kind,post,anchor,event_key) VALUES(3,NULL,'mention','p1','x','found-all:1:1'),(3,1,'like','p1','','like:p1:1')");
+  await sweep(w.env);
+  assert.deepEqual(w.sqlite.prepare("SELECT origin FROM photo_tags WHERE target='3'").all().map(r=>r.origin),['manual']);
+  assert.deepEqual(w.sqlite.prepare("SELECT state FROM face_matches WHERE member=3").all().map(r=>r.state),['removed']);
+  assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs WHERE member=3').get().n,0);
+  const keys=w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=3").all().map(r=>r.event_key);
+  assert.ok(keys.includes('like:p1:1')); assert.ok(!keys.some(k=>k.startsWith('found')),keys.join());
+});
+test('B7: the batch runs every 3 hours', ()=>{
+  assert.match(readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8'),/crons = \["17 \*\/3 \* \* \*"\]/);
 });

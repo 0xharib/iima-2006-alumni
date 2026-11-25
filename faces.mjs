@@ -146,16 +146,6 @@ export async function faceSchema(db) {
   return true;
 }
 
-// Queue every photo of a new memory. Never throws: posting must not fail because of face tagging.
-export async function enqueuePhotos(env, post, media) {
-  if (faceMode(env) === 'off' || !env.FACE_JOBS || !media.length) return;
-  try {
-    if (!await faceSchema(env.DB)) return;
-    for (let i = 0; i < media.length; i += 100)
-      await env.FACE_JOBS.sendBatch(media.slice(i, i + 100).map(m => ({body: {type: 'media', post, media: m, notify: 'post'}})));
-  } catch (error) { console.error('face queue', error?.message); }
-}
-
 // R2 key of a photo shown in a visible memory, or null.
 export async function mediaObject(db, media) {
   const [kind, a, b] = String(media).split('/');
@@ -239,7 +229,7 @@ export async function writeMatches(env, matches, notify = 'later') {
 }
 
 // One "We found you in N photos" per member for automatic tags they haven't been told about. Your own uploads are
-// tagged but not counted. Runs hourly and straight after re-matching or publishing.
+// tagged but not counted. Runs at the end of each batch and after publishing.
 export async function summarise(env, member = null) {
   const db = env.DB;
   if (faceMode(env) !== 'on' || !await faceSchema(db)) return 0;
@@ -297,8 +287,10 @@ export async function handleQueue(batch, env) {
   for (const msg of batch.messages) {
     const job = msg.body || {};
     try {
-      if (job.type === 'media') await scanPhoto(env, job.post, job.media, job.notify === 'post' ? 'post' : 'later');
-      else if (job.type === 'ref' && faceMode(env) !== 'off') { await refreshRefs(env, job.member); await rematchMember(env, job.member); }
+      // Notifications wait for the run's finish job: one summary per person per run.
+      if (job.type === 'media') await scanPhoto(env, job.post, job.media);
+      else if (job.type === 'ref' && faceMode(env) !== 'off') await refreshRefs(env, job.member);
+      else if (job.type === 'finish') await finishRun(env);
       msg.ack();
     } catch (error) {
       console.error('face job', job.type, error?.message);
@@ -437,9 +429,7 @@ export async function rematchMember(env, member) {
     }
     after = page[page.length - 1].id;
   }
-  const written = await writeMatches(env, [...best.values()], 'later');
-  await summarise(env, member);
-  return written.length;
+  return (await writeMatches(env, [...best.values()], 'later')).length;
 }
 
 // Every photo the member is tagged in, newest memory first.
@@ -468,7 +458,7 @@ export async function faceRoute({req, env, me, path, post}) {
   return notMe(req, env, me);
 }
 
-// ---------- hourly sweep and the admin page ----------
+// ---------- the 3-hour batch and the admin page ----------
 
 // Every photo shown in a visible memory, with the media id the site uses for it.
 const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
@@ -481,22 +471,58 @@ const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
     AND (s.status IN ('done','skipped') OR (s.status='failed' AND (s.tries>=3 OR s.scanned>?1))))`;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Queue photos never scanned (or whose scan failed), and members who said yes but have no references yet
-// (their job may have failed while the container was starting). Runs hourly; also the backlog run.
-export async function sweep(env, limit = 200) {
+const HOUR_MS = 60 * 60 * 1000;
+const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
+const REMATCH_WINDOW_MS = 6 * HOUR_MS;   // two runs: a rebuild finished after one run's finish is caught by the next
+
+// Members to (re)build references for: eligible and new, marked after a profile photo changed, or without usable
+// references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
+const NEEDS_REFS = `SELECT pf.member FROM profile_fields pf LEFT JOIN face_prefs f ON f.member=pf.member
+  WHERE pf.field='portraitObject' AND trim(pf.value)<>'' AND (f.member IS NULL OR (f.ref_tries<3 AND (f.ref_tried IS NULL
+    OR (f.ref_tried<?1 AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=pf.member)))))
+  ORDER BY pf.member LIMIT ?2`;
+
+// Anyone who no longer has a profile picture loses their references and automatic tags (Not me and manual tags stay).
+async function dropIneligible(db) {
+  const gone = await rows(db, `SELECT member FROM (SELECT member FROM face_refs UNION SELECT member FROM face_matches
+    WHERE state<>'removed') x WHERE NOT ${ELIGIBLE('x.member')} LIMIT 100`);
+  for (const {member} of gone) await db.batch([
+    q(db, 'DELETE FROM face_refs WHERE member=?', member),
+    q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(member)),
+    q(db, "DELETE FROM face_matches WHERE member=? AND state<>'removed'", member),
+    q(db, "DELETE FROM notifications WHERE recipient=? AND (event_key LIKE 'found:%' OR event_key LIKE 'found-all:%')", member),
+  ]);
+  return gone.length;
+}
+
+// The batch, every 3 hours (and the admin's "Scan all photos now"): queue new or failed photos and reference
+// rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
+export async function sweep(env, limit = 500) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
+  await dropIneligible(env.DB);
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, `SELECT member FROM face_prefs f WHERE ${ELIGIBLE('f.member')} AND ref_tries<3
-    AND (ref_tried IS NULL OR ref_tried<?) AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY decided LIMIT 50`, dayAgo);
+  const people = await rows(env.DB, NEEDS_REFS, dayAgo, 100);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
     ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));
+  await env.FACE_JOBS.send({type: 'finish'}, {delaySeconds: FINISH_DELAY_S});
   return todo.length;
 }
 
-export async function faceCron(env) {
+// End of a run: match everyone whose references were rebuilt recently against every stored face (this also catches
+// a photo scanned while their references were being built), then send each person one summary.
+export async function finishRun(env) {
+  const db = env.DB;
+  if (faceMode(env) === 'off' || !await faceSchema(db)) return;
+  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member')}
+    AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
+  for (const {member} of recent) await rematchMember(env, member);
   await summarise(env);
+}
+
+export async function faceCron(env) {
+  await summarise(env);   // anything left over from the previous run
   await sweep(env);
 }
 
