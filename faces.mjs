@@ -6,6 +6,16 @@ export const FACE_MODEL = 'buffalo_l/w600k_r50';
 
 export const faceMode = env => ['off','shadow','on'].includes(env?.FACE_TAGGING) ? env.FACE_TAGGING : 'off';
 
+// Members without a profile picture of their own (the "2006 group") are matched only through 2006 references
+// (a hand-tagged single-face photo such as the Placecom album, the iimages yearbook PDF, the seed portrait). Their own
+// switch, FACE_TAGGING_2006 (off | shadow | on, unset = off), can never go further than FACE_TAGGING, and stays off
+// until migration 0021 has run.
+const LEVEL = {off: 0, shadow: 1, on: 2};
+export const faceMode2006 = env => {
+  const own = ['off','shadow','on'].includes(env?.FACE_TAGGING_2006) ? env.FACE_TAGGING_2006 : 'off';
+  return LEVEL[own] < LEVEL[faceMode(env)] ? own : faceMode(env);
+};
+
 // D1 hands BLOBs back as ArrayBuffer or number[]; node:sqlite as Uint8Array.
 export function toVector(blob) {
   const bytes = blob instanceof Uint8Array ? blob : blob instanceof ArrayBuffer ? new Uint8Array(blob) : Uint8Array.from(blob);
@@ -130,8 +140,22 @@ const anchorFor = media => 'photo-' + media.replace(/\//g, '-');
 const changes = result => result?.meta?.changes ?? result?.changes ?? 0;
 const CHUNK = 30;   // matches per db.batch: three statements each, well inside D1's limits
 
-// Who can be matched: members who uploaded their own profile picture. Nobody is asked; Not me is the only control.
-export const ELIGIBLE = member => `EXISTS(SELECT 1 FROM profile_fields pf WHERE pf.member=${member} AND pf.field='portraitObject' AND trim(pf.value)<>'')`;
+// Who can be matched. Members who uploaded their own profile picture always; with FACE_TAGGING_2006 shadow or on,
+// everyone on the roster (whether they can actually be found depends on having a usable reference face).
+// Nobody is asked; Not me is the only control.
+export const OWN_PICTURE = member => `EXISTS(SELECT 1 FROM profile_fields pf WHERE pf.member=${member} AND pf.field='portraitObject' AND trim(pf.value)<>'')`;
+export const ELIGIBLE = (member, wide = false) => wide ? `EXISTS(SELECT 1 FROM roster er WHERE er.id=${member})` : OWN_PICTURE(member);
+
+// Migration 0021 (tagged and archive references, notes) may not have run yet; until it has, the 2006 group stays off.
+const refs2006Ready = new WeakSet();
+async function refs2006Schema(db) {
+  if (refs2006Ready.has(db)) return true;
+  try { await db.prepare('SELECT member FROM face_archive LIMIT 0').bind().all(); } catch { return false; }
+  refs2006Ready.add(db);
+  return true;
+}
+// Is the 2006 group being matched right now (shadow or on)?
+export const wide2006 = async env => faceMode2006(env) !== 'off' && await refs2006Schema(env.DB);
 
 // Migration 0019 may not have run yet (it must follow the deploy). Until it has, face tagging stays hidden and
 // nothing touches its tables or columns. Only a positive answer is cached, per database binding.
@@ -174,9 +198,9 @@ async function readObject(env, key) {
   return object.body instanceof Uint8Array ? object.body : new Uint8Array(await new Response(object.body).arrayBuffer());
 }
 
-async function eligibleRefs(db, except = new Set()) {
+async function eligibleRefs(env, except = new Set()) {
   const refs = new Map();
-  for (const ref of await rows(db, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member')}`)) {
+  for (const ref of await rows(env.DB, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member', await wide2006(env))}`)) {
     if (except.has(ref.member)) continue;
     if (!refs.has(ref.member)) refs.set(ref.member, []);
     refs.get(ref.member).push(toVector(ref.embedding));
@@ -184,24 +208,36 @@ async function eligibleRefs(db, except = new Set()) {
   return refs;
 }
 
-// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still has a
-// profile picture, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
-const ALLOWED = `NOT EXISTS(SELECT 1 FROM removed_album_photos WHERE ?2='post/'||photo) AND NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
+// A match may be written only if: no manual tag for that person on that photo, no "Not me", the person is still
+// eligible, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
+const allowed = wide => `NOT EXISTS(SELECT 1 FROM removed_album_photos WHERE ?2='post/'||photo) AND NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
   AND NOT EXISTS(SELECT 1 FROM active_face_matches WHERE media=?2 AND member=?4 AND state='removed')
-  AND ${ELIGIBLE('?4')}
+  AND ${ELIGIBLE('?4', wide)}
   AND NOT EXISTS(SELECT 1 FROM active_face_matches WHERE media=?2 AND face=?5 AND member<>?4 AND state IN ('shadow','auto'))`;
+
+// Members (of those given) with a profile picture of their own.
+async function withOwnPicture(db, members) {
+  const list = [...new Set(members)];
+  if (!list.length) return new Set();
+  return new Set((await rows(db, `SELECT DISTINCT pf.member FROM profile_fields pf, json_each(?) j
+    WHERE pf.member=j.value AND pf.field='portraitObject' AND trim(pf.value)<>''`, JSON.stringify(list))).map(r => r.member));
+}
 
 // Write matches the same way for every path. notify 'post': one notification per member per memory now (new
 // memories). notify 'later': no notification now; summarise() tells each member once (backlog, re-matching, publishing).
 // Returns the matches that changed something: a new tag ('on') or a new shadow match ('shadow').
 export async function writeMatches(env, matches, notify = 'later') {
-  const db = env.DB, mode = faceMode(env), stamp = Date.now();
-  if (mode === 'off' || !matches.length) return [];
+  const db = env.DB, stamp = Date.now();
+  if (faceMode(env) === 'off' || !matches.length) return [];
+  const wide = await wide2006(env), ALLOWED = allowed(wide);
   const written = [];
   for (let i = 0; i < matches.length; i += CHUNK) {
     const chunk = matches.slice(i, i + CHUNK), jobs = [], tagIndex = [];
+    const own = wide ? await withOwnPicture(db, chunk.map(m => m.member)) : null;
     for (const m of chunk) {
       const args = [m.post, m.media, String(m.member), m.member, m.face ?? null];
+      // The 2006 group follows its own switch: shadow there means shadow even while FACE_TAGGING is on.
+      const mode = own && !own.has(m.member) ? faceMode2006(env) : faceMode(env);
       if (mode === 'shadow') {
         tagIndex.push(jobs.length);
         jobs.push(q(db, `INSERT INTO face_matches(media,member,post,face,score,state,created,notified)
@@ -268,10 +304,15 @@ export async function scanPhoto(env, post, media, notify = 'later') {
       model=excluded.model,scanned=excluded.scanned`, media, post, result.faces.length, result.width ?? null, result.height ?? null, result.model, stamp),
   ]);
   const ids = (await rows(db, 'SELECT id FROM active_faces WHERE media=? ORDER BY id', media)).map(r => r.id);
+  // A photo with one face and one person tagged by hand can be that person's reference (the next batch rebuilds it).
+  if (result.faces.length === 1 && await wide2006(env)) {
+    const tagged = await rows(db, `SELECT CAST(target AS INTEGER) AS member,origin FROM active_photo_tags WHERE media=? AND kind='person'`, media);
+    if (tagged.length === 1 && tagged[0].origin === 'manual') await markRefs(env, tagged[0].member);
+  }
   // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
   const skip = new Set((await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state='removed'
     UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
-  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(db, skip));
+  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(env, skip));
   const kept = pairs.map(p => p.member);
   const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
   const stale = (await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
@@ -338,15 +379,16 @@ export async function forgetTopicFaces(db, topic) {
 const safeNext = value => /^\/(?![\/\\])[^\r\n\\]*$/.test(String(value || '')) ? String(value) : '/';
 const see = url => new Response(null, {status: 303, headers: {Location: url}});
 const missingPage = () => new Response('Page unavailable', {status: 404});
-const eligible = async (db, member) => !!await first(db, `SELECT 1 AS ok WHERE ${ELIGIBLE('?')}`, member);
+const eligible = async (env, member) => !!await first(env.DB, `SELECT 1 AS ok WHERE ${ELIGIBLE('?', await wide2006(env))}`, member);
 
-// Home nudges members without a profile picture, while face tagging runs.
+// Home nudges members who cannot be matched yet (no profile picture, and the 2006 group is off), while face tagging runs.
 export async function faceNudge(env, me) {
   if (faceMode(env) === 'off' || !await faceSchema(env.DB)) return false;
-  return !await eligible(env.DB, me);
+  return !await eligible(env, me);
 }
 
-// After a profile photo changes: mark the member's references for a rebuild by the next batch. Never throws.
+// After a profile photo changes, or the member is tagged by hand: mark their references for a rebuild by the next
+// batch. Never throws.
 export async function markRefs(env, member) {
   try {
     if (!await faceSchema(env.DB)) return;
@@ -355,9 +397,10 @@ export async function markRefs(env, member) {
   } catch (error) { console.error('face refs', error?.message); }
 }
 
+// Reference photos to analyse, anchor first: the approved seed portrait (or the imported yearbook portrait), then the
+// member's own photos.
 async function refSources(db, member) {
   const sources = [];
-  // The 2006 portrait comes first: it is the anchor for choosing the right face in family photos.
   const seed = await first(db, `SELECT portrait_key FROM profile_seeds WHERE roster_id=? AND review_status='approved'
     AND portrait_key IS NOT NULL AND portrait_key<>''`, member);
   const yearbook = seed || await first(db, `SELECT ph.object_key AS portrait_key FROM yearbook_public y,json_each(y.images) j
@@ -369,6 +412,27 @@ async function refSources(db, member) {
   for (const [field, source] of [['portraitObject', 'portrait'], ['thenPhotoObject', 'then'], ['nowPhotoObject', 'now']])
     if (own[field]) sources.push([source, own[field]]);
   return sources;
+}
+
+export const TAGGED_MIN_SIZE = 80;   // px; smaller faces make poor references
+
+// References that need no analysis (migration 0021): the member's largest face on a photo tagged by hand where the
+// photo has exactly one face and exactly one person tag, and their face from the iimages 2006 yearbook PDF.
+async function storedRefs(db, member) {
+  const found = [];
+  const tagged = await first(db, `SELECT f.media AS object_key,f.embedding FROM active_photo_tags t
+    JOIN active_faces f ON f.media=t.media JOIN posts p ON p.id=t.post
+    WHERE t.kind='person' AND t.origin='manual' AND t.target=? AND f.size>=? AND ${POST_VISIBLE}
+      AND (SELECT count(*) FROM active_photo_tags o WHERE o.media=t.media AND o.kind='person')=1
+      AND (SELECT count(*) FROM active_faces o WHERE o.media=t.media)=1
+    ORDER BY f.size DESC,f.media LIMIT 1`, String(member), TAGGED_MIN_SIZE);
+  if (tagged) found.push({source: 'tagged', key: tagged.object_key, bytes: tagged.embedding});
+  const archive = await first(db, 'SELECT object_key,embedding FROM face_archive WHERE member=? AND model=?', member, FACE_MODEL);
+  if (archive) found.push({source: 'archive', key: archive.object_key, bytes: archive.embedding});
+  return found.map(r => {
+    const vector = toVector(r.bytes);
+    return {...r, vector, bytes: vectorBytes(vector)};
+  });
 }
 
 // Pick the member's face in a reference photo. The yearbook portrait: its largest face. Other photos may show family:
@@ -385,31 +449,57 @@ function pickFace(source, faces, chosen) {
   return best;
 }
 
+// Consistency check. A reference must look like at least one of the member's other references (AGREE or more); the
+// ones that do not (a seed portrait of someone else, a logo, a face hidden by hair, a poor scan) are left out and
+// noted for the admin. If no two references agree, only the most trusted one is kept.
+export const AGREE = 0.30;
+const TRUST = ['portrait', 'tagged', 'yearbook', 'then', 'now', 'archive'];
+export function consistent(refs) {
+  if (refs.length < 2) return {kept: refs, dropped: []};
+  const best = refs.map((a, i) => Math.max(...refs.map((b, j) => (i === j ? -1 : similarity(a.vector, b.vector)))));
+  const core = refs.filter((_, i) => best[i] >= AGREE);
+  const kept = core.length ? core : [refs.reduce((a, b) => (TRUST.indexOf(b.source) < TRUST.indexOf(a.source) ? b : a))];
+  return {kept, dropped: refs.filter(r => !kept.includes(r)).map(r => ({...r, agreement: best[refs.indexOf(r)]}))};
+}
+
 export async function refreshRefs(env, member) {
   const db = env.DB;
-  if (!await eligible(db, member)) return 0;
-  const kept = [], unreadable = [], chosen = [];
+  if (!await eligible(env, member)) return 0;
+  const wide = await wide2006(env);
+  const found = wide ? await storedRefs(db, member) : [], unreadable = [];
+  const chosen = found.map(r => r.vector);
   for (const [source, key] of await refSources(db, member)) {
     try {
       const bytes = await readObject(env, key);
       if (!bytes) continue;
       const face = pickFace(source, (await analyseImage(env, bytes, 'photo', 'ref-' + member)).faces, chosen);
       if (!face) continue;
-      const saved = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?,?,?,?,? WHERE ${ELIGIBLE('?')}`,
-        member, source, key, face.bytes, FACE_MODEL, member).run();
-      if (changes(saved) > 0) { kept.push(source); chosen.push(face.vector); }
+      found.push({source, key, bytes: face.bytes, vector: face.vector});
+      chosen.push(face.vector);
     } catch (error) {
       console.error('face ref', source, error?.message);
       unreadable.push(source);   // keep an earlier reference for this source rather than lose it
     }
   }
-  const keep = [...kept, ...unreadable];
+  const {kept, dropped} = consistent(found);
+  const ELIG = ELIGIBLE('?6', wide), stamp = Date.now();
+  const saved = [];
+  for (const ref of kept) {
+    const result = await q(db, `INSERT OR REPLACE INTO face_refs SELECT ?1,?2,?3,?4,?5 WHERE ${ELIG}`,
+      member, ref.source, ref.key, ref.bytes, FACE_MODEL, member).run();
+    if (changes(result) > 0) saved.push(ref.source);
+  }
+  const keep = [...saved, ...unreadable];
   await q(db, `DELETE FROM face_refs WHERE member=? AND source NOT IN (${keep.map(() => '?').join(',') || "''"})`, member, ...keep).run();
+  if (wide) await db.batch([
+    q(db, 'DELETE FROM face_ref_notes WHERE member=?', member),
+    ...dropped.map(r => q(db, 'INSERT OR REPLACE INTO face_ref_notes VALUES(?,?,?,?,?)', member, r.source, r.key, r.agreement, stamp)),
+  ]);
   // No usable photo counts as a try: the batch retries once a day, three times at most, until a profile photo changes.
   await q(db, `INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?1,1,?2,?3,?2)
-    ON CONFLICT(member) DO UPDATE SET ref_tries=${kept.length ? '0' : 'face_prefs.ref_tries+1'},ref_tried=?2`,
-    member, Date.now(), kept.length ? 0 : 1).run();
-  return kept.length;
+    ON CONFLICT(member) DO UPDATE SET ref_tries=${saved.length ? '0' : 'face_prefs.ref_tries+1'},ref_tried=?2`,
+    member, Date.now(), saved.length ? 0 : 1).run();
+  return saved.length;
 }
 
 // Match members against every face already stored (photos shared before their references were built), reading the
@@ -417,7 +507,7 @@ export async function refreshRefs(env, member) {
 export async function rematchMembers(env, members) {
   const db = env.DB, refs = new Map();
   for (const member of members) {
-    if (!await eligible(db, member)) continue;
+    if (!await eligible(env, member)) continue;
     const vectors = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
     if (vectors.length) refs.set(member, vectors);
   }
@@ -482,6 +572,7 @@ async function removeGalleryTags(req, env, me) {
     ]));
     removed+=tags.length;
   }
+  if(removed) await markRefs(env,me);   // one of those photos may have been my face reference
   return see('/photos-of-you?removed='+removed);
 }
 
@@ -508,17 +599,19 @@ const HOUR_MS = 60 * 60 * 1000;
 const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
 const REMATCH_WINDOW_MS = 6 * HOUR_MS;   // two runs: a rebuild finished after one run's finish is caught by the next
 
-// Members to (re)build references for: eligible and new, marked after a profile photo changed, or without usable
-// references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
-const NEEDS_REFS = `SELECT pf.member FROM profile_fields pf LEFT JOIN face_prefs f ON f.member=pf.member
-  WHERE pf.field='portraitObject' AND trim(pf.value)<>'' AND (f.member IS NULL OR (f.ref_tries<3 AND (f.ref_tried IS NULL
-    OR (f.ref_tried<?1 AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=pf.member)))))
-  ORDER BY pf.member LIMIT ?2`;
+// Members to (re)build references for: eligible and new, marked after a profile photo changed or a hand tag, or
+// without usable references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
+const needsRefs = wide => `SELECT e.id AS member FROM roster e LEFT JOIN face_prefs f ON f.member=e.id
+  WHERE ${ELIGIBLE('e.id', wide)} AND (f.member IS NULL OR (f.ref_tries<3 AND (f.ref_tried IS NULL
+    OR (f.ref_tried<?1 AND NOT EXISTS(SELECT 1 FROM face_refs r WHERE r.member=e.id)))))
+  ORDER BY e.id LIMIT ?2`;
 
-// Anyone who no longer has a profile picture loses their references and automatic tags (Not me and manual tags stay).
-async function dropIneligible(db) {
+// Anyone no longer eligible (no profile picture, and the 2006 group switched off) loses their references and automatic
+// tags (Not me and manual tags stay).
+async function dropIneligible(env) {
+  const db = env.DB;
   const gone = await rows(db, `SELECT member FROM (SELECT member FROM face_refs UNION SELECT member FROM active_face_matches
-    WHERE state<>'removed') x WHERE NOT ${ELIGIBLE('x.member')} LIMIT 100`);
+    WHERE state<>'removed') x WHERE NOT ${ELIGIBLE('x.member', await wide2006(env))} LIMIT 100`);
   for (const {member} of gone) await db.batch([
     q(db, 'DELETE FROM face_refs WHERE member=?', member),
     q(db, "DELETE FROM photo_tags WHERE kind='person' AND target=? AND origin='auto'", String(member)),
@@ -532,10 +625,10 @@ async function dropIneligible(db) {
 // rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
 export async function sweep(env, limit = 500) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
-  await dropIneligible(env.DB);
+  await dropIneligible(env);
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, NEEDS_REFS, dayAgo, 100);
+  const people = await rows(env.DB, needsRefs(await wide2006(env)), dayAgo, 100);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
     ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));
@@ -548,7 +641,7 @@ export async function sweep(env, limit = 500) {
 export async function finishRun(env) {
   const db = env.DB;
   if (faceMode(env) === 'off' || !await faceSchema(db)) return;
-  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member')}
+  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member', await wide2006(env))}
     AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
   await rematchMembers(env, recent.map(r => r.member));
   await summarise(env);
@@ -561,30 +654,39 @@ export async function faceCron(env) {
 
 export async function faceAdminData(env) {
   const db = env.DB;
-  if (!await faceSchema(db)) return {mode: faceMode(env), ready: false, counts: {}, shadow: []};
+  if (!await faceSchema(db)) return {mode: faceMode(env), ready: false, counts: {}, shadow: [], notes: []};
   const count = async (query, ...args) => (await first(db, query, ...args)).n;
+  const ready2006 = await refs2006Schema(db);
   return {
-    mode: faceMode(env), ready: true,
+    mode: faceMode(env), mode2006: faceMode2006(env), ready: true, ready2006,
     counts: {
       photos: await count(`SELECT count(*) n FROM (${SHOWN_PHOTOS})`),
       scanned: await count(`SELECT count(*) n FROM face_scans WHERE status='done'`),
       failed: await count(`SELECT count(*) n FROM face_scans WHERE status='failed'`),
       faces: await count('SELECT count(*) n FROM active_faces'),
-      eligible: await count(`SELECT count(*) n FROM members m WHERE ${ELIGIBLE('m.id')}`),
+      eligible: await count(`SELECT count(*) n FROM members m WHERE ${OWN_PICTURE('m.id')}`),
+      found2006: await count(`SELECT count(DISTINCT r.member) n FROM face_refs r WHERE NOT ${OWN_PICTURE('r.member')}`),
+      archive: ready2006 ? await count('SELECT count(*) n FROM face_archive') : 0,
       shadow: await count(`SELECT count(*) n FROM active_face_matches WHERE state='shadow'`),
       auto: await count(`SELECT count(*) n FROM active_face_matches WHERE state='auto'`),
       removed: await count(`SELECT count(*) n FROM active_face_matches WHERE state='removed'`),
     },
     // Lowest scores first: those are the ones worth checking by eye.
-    shadow: await rows(db, `SELECT m.media,m.post,m.score,r.name FROM active_face_matches m JOIN roster r ON r.id=m.member
-      WHERE m.state='shadow' ORDER BY m.score LIMIT 200`),
+    shadow: await rows(db, `SELECT m.media,m.post,m.score,r.name,NOT ${OWN_PICTURE('m.member')} AS via2006
+      FROM active_face_matches m JOIN roster r ON r.id=m.member WHERE m.state='shadow' ORDER BY m.score LIMIT 200`),
+    // Reference photos the consistency check left out, worst first.
+    notes: ready2006 ? await rows(db, `SELECT n.member,n.source,n.object_key,n.agreement,r.name FROM face_ref_notes n
+      JOIN roster r ON r.id=n.member ORDER BY n.agreement LIMIT 200`) : [],
   };
 }
 
 // Turn shadow matches into real tags, then tell each member once.
 export async function publishShadow(env) {
   if (faceMode(env) !== 'on' || !await faceSchema(env.DB)) return null;
-  const shadow = await rows(env.DB, `SELECT media,post,member,face,score FROM active_face_matches WHERE state='shadow' AND score>=? ORDER BY member`, FACE_BAR);
+  // While the 2006 group is in shadow, only members with their own profile picture are published.
+  const ownOnly = faceMode2006(env) !== 'on' ? ` AND ${OWN_PICTURE('s.member')}` : '';
+  const shadow = await rows(env.DB, `SELECT media,post,member,face,score FROM active_face_matches s WHERE state='shadow' AND score>=?${ownOnly}
+    ORDER BY member`, FACE_BAR);
   const written = await writeMatches(env, shadow, 'later');
   await summarise(env);
   return written.length;

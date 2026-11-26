@@ -1013,6 +1013,8 @@ async function route(req, env, record, setViewer, ctx) {
         );
       } else return invalid('Choose a classmate, place or event.');
       await db.batch([...tagJobs,sql('DELETE FROM notification_tag_actor WHERE post=?',key)]);
+      // A hand tag on a photo can become the person's face reference (a one-face photo such as a Placecom portrait).
+      if (photoScope && kind==='person' && /^\d+$/.test(target)) await markRefs(env,Number(target));
     } else if (action==='tag-correct') {
       photoScope=str(f,'photo',100);
       const target=str(f,'tag',112);
@@ -1026,6 +1028,8 @@ async function route(req, env, record, setViewer, ctx) {
         if(await faceSchema(db)) jobs.push(sql("INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,?,?,NULL,0,'removed',?) ON CONFLICT(media,member) DO UPDATE SET state='removed'",photoScope,Number(target),key,Date.now()));
         if(await faceSchema(db)) jobs.push(sql("DELETE FROM notifications WHERE recipient=? AND event_key='found:'||? AND NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=? AND kind='person' AND target=? AND origin='auto')",Number(target),key,key,target));
         await db.batch(jobs);
+        // The photo may have been this person's face reference.
+        await markRefs(env,Number(target));
         }
       }else{
         await db.batch([sql("DELETE FROM tags WHERE post=? AND member=? AND status='accepted'",key,Number(target)),sql("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,target)]);

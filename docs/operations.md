@@ -150,16 +150,36 @@ more (`FACE_BAR` in `faces.mjs`) becomes a photo tag with `origin='auto'`. Desig
 - `on`: matches become tags, and each person gets one "We found you in N photos" notification per batch.
 
 **Who is matched.** Every member who has uploaded their own profile picture; nobody is asked. Their Then/Now photos
-and their approved yearbook portrait are used as extra reference faces, but the yearbook alone never makes anyone
-eligible. Members without a profile picture see "Add a profile picture to be found in batch photos" on Home. "Not me"
-on a photo removes that tag for good and is the only control. Someone who no longer has a profile picture loses their
-automatic tags at the next batch (manual tags stay).
+and their approved seed portrait are used as extra reference faces. "Not me" on a photo removes that tag for good and
+is the only control.
+
+**The 2006 group** (`docs/superpowers/specs/2026-11-27-face-refs-2006-design.md`). Members without a profile picture
+are matched through 2006 photos only while `FACE_TAGGING_2006` (off | shadow | on, set in the dashboard like
+`FACE_TAGGING`; unset means off) allows it. It never goes further than `FACE_TAGGING`. Their references are:
+- `tagged`: a photo tagged by hand that has exactly one face (80 px or more) and one person tag, such as the Placecom
+  album. Tagging someone by hand marks their references for a rebuild.
+- `archive`: their face from the iimages 2006 yearbook PDF, imported once into `face_archive` (see below).
+- the approved seed portrait.
+Every member's references must agree with each other (0.30 or more against at least one other); the ones that don't
+are left out and listed under "Reference photos left out" on `/admin/faces`. In shadow, the group's matches are marked
+"2006" on that page and **Publish** leaves them alone. Members who cannot be matched see "Add a profile picture to be
+found in batch photos" on Home. Anyone no longer eligible (no profile picture, and the 2006 group off) loses their
+references and automatic tags at the next batch (Not me and manual tags stay).
+
+**Setting up the 2006 group (once).**
+1. After this Worker is deployed: `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0021_face_refs_2006.sql`.
+2. Import the yearbook PDF faces: `npx wrangler d1 execute iima-2006-alumni --remote --file face-archive-2006.sql`.
+   That file is kept outside this repository (it holds face data); it was generated offline with the same model and
+   pipeline as `face-service/app.py`.
+3. Set `FACE_TAGGING_2006=shadow`. After the next batch's finish job, check the "2006" shadow matches and the left-out
+   reference photos at `/admin/faces`.
+4. Set `FACE_TAGGING_2006=on` and press **Publish**.
 
 **The batch.** Nothing happens when a memory is posted or a profile photo is saved (saving only marks the member's
 references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 11:47 … 02:47 IST) the Worker:
-1. removes the references and automatic tags of anyone without a profile picture;
+1. removes the references and automatic tags of anyone no longer eligible;
 2. queues photos not yet scanned (and failed ones; see below), up to 500;
-3. queues reference rebuilds for members with a profile picture who are new or changed a profile photo, up to 100;
+3. queues reference rebuilds for eligible members who are new, changed a profile photo or were tagged by hand, up to 100;
 4. queues one finish job, delayed 40 minutes: it matches everyone rebuilt in the last 6 hours against every stored
    face, then sends each person one summary notification. Your own uploads are tagged but not counted.
 **Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos.
