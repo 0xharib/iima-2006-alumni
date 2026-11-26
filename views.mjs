@@ -1,3 +1,4 @@
+import {isMemorial, memorialName, memorialPhotos, memorialCSS} from './memorial.mjs';
 import {navigationLinks,mobileNavigation,mobileNavCSS} from './navigation.mjs';
 import { agenda, missingReunionDetails, outings, partySummary, reunionValues } from './reunion.mjs';
 import { socialScript } from './social.mjs';
@@ -183,6 +184,8 @@ export const siteCSS = `
   .memory-nav{display:flex;flex-wrap:wrap;gap:.6rem 1.3rem;align-items:center;margin-bottom:1rem}.memory-feed{max-width:44rem}
   @media(max-width:600px){.directory-controls{grid-template-columns:1fr 1fr}.directory-controls label:first-child{grid-column:1/-1}}
   ${mobileNavCSS}
+  ${memorialCSS}
+  .profile-picture-editor{display:flex;align-items:center;gap:1rem}.profile-picture-editor [data-portrait-preview]{width:92px;flex:0 0 92px;aspect-ratio:1}.profile-picture-editor [data-portrait-preview] img,.profile-picture-editor [data-portrait-preview] .initials{width:100%;height:100%;aspect-ratio:1;border-radius:50%;object-fit:cover;background:var(--tint);display:grid;place-items:center;font-size:1.7rem}.profile-photo-change{display:block;margin:.5rem 0}.profile-picture-editor p{margin:0 0 .5rem}.profile-picture-editor input{max-width:100%}@media(max-width:420px){.profile-picture-editor{align-items:flex-start}.profile-picture-editor [data-portrait-preview]{width:70px;flex-basis:70px}}
   `;
 // FNV-1a over the stylesheet: any style change produces a new URL, so immutable caching is safe.
 export const siteCSSVersion = (() => {
@@ -207,7 +210,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script data-member="'+member.id+'" src="/social.js?v=25" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script data-member="'+member.id+'" src="/social.js?v=26" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -294,7 +297,7 @@ export const page={
         button.disabled=false;
       }
     });`,
-  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],nudge=false){
+  home(rows,next,key,me,meet={available:false},unlock=[],fresh=[],nudge=false,hasMemorial=false){
     return `<div class="alumni-home"><section class="campus-hero"><div>
       <p class="class-label">IIM Ahmedabad · Class of 2006</p><h1 class="reunion-title" aria-label="${reunionTitle}">${titleCreative()}</h1>
       <p class="hero-lede">Twenty years since LKP. Find your batchmates, trade the old stories, and see you in Jaipur.</p>
@@ -309,9 +312,14 @@ export const page={
         <div class="meet-mine">${meet.picked.length?`<span class="meet-faces">${meetFaces(meet.picked)}</span><span class="registry">You’ve picked ${meet.picked.length}</span>`:'<span class="meet-hint">Send a catch-up request to the WIMWIans you want to meet in Jaipur. They’ll be notified and can accept it.</span>'}
           <a class="cta cta-primary" href="/people/${me}#meet">${meet.picked.length?'Add more':'Choose who to catch up with'}</a></div>
       </section>`:''}
-      <section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add memory</a>${link('/memories','See all')}</div></div>${memoriesCompletionPrompt(collage(rows,next),unlock,me)}</section>
+      ${hasMemorial?`<a class="memorial-feature" href="/remembering-sachin"><img src="/memorial-photo/then" alt="" loading="lazy"><div><small class="memorial-label">Remembering Sachin</small><h2>Always one of us.</h2><p>A friend, a brother, a character. Read his story and share a memory.</p></div></a>`: ''}<section class="home-memories"><div class="section-head"><h2>Memories</h2><div class="memory-nav"><a href="/compose" data-compose-open>Add memory</a>${link('/memories','See all')}</div></div>${memoriesCompletionPrompt(collage(rows,next),unlock,me)}</section>
       ${page.composeDialog(key)}
     </div>`;
+  },
+  memorial(row,stories,key,tribute=[]){
+    const pic=(name,alt='')=>`<img src="/memorial-photo/${name}" alt="${e(alt)}" loading="lazy">`;
+    const figures={1:'college',2:'friends-1',3:'holi',4:'graduation',6:'family-1'};
+    return `<div class="memorial"><header class="memorial-hero"><div class="memorial-portraits">${pic('then','Sachin in 2006')}${pic('now','Sachin in later years')}</div><div class="memorial-hero-copy"><p class="memorial-label">In loving memory</p><h1>Sachin Kumar Suman</h1><h2>A Friend, A Brother, A Character!</h2><p>D21 · Section C · Class of 2006</p><a class="cta" href="/compose?person=${row.id}">Share a memory of Sachin</a></div></header><div class="memorial-content"><article class="memorial-article">${tribute.map(([heading,body],i)=>`${heading?'<h2>'+e(heading)+'</h2>':''}${body.split('\n\n').map(p=>'<p>'+e(p)+'</p>').join('')}${figures[i]?'<figure>'+pic(figures[i])+'</figure>':''}`).join('')}</article><aside class="memorial-aside"><section class="profile-section profile-memories"><div class="section-head"><h2>Memories of Sachin</h2><a href="/compose?person=${row.id}">Add a memory</a></div>${stories.length?memoryBatch(profileMemoryRows(stories,row.id)):'<p>Share a story, photograph or a few words about Sachin.</p>'}</section><section><h2>Through the years</h2><div class="memorial-gallery">${memorialPhotos.map(name=>`<a href="/memorial-photo/${name}">${pic(name,'Photograph from Sachin’s life')}</a>`).join('')}</div></section></aside></div>${memoryDialog()}</div>`;
   },
   memories(rows,next,q,key,checks=[],me){return `<div class="memory-toolbar">
     <form method="get" action="/memories"><label><span class="memory-search-label">Search memories</span><input aria-label="Search memories" type="search" name="q" value="${e(q)}" placeholder="Search memories"></label><button>Search</button></form>
@@ -401,7 +409,7 @@ export const page={
   directoryCards(rows,statuses,reunion=false,next='/reunion#reunion-attendees'){
     const labels={confirmed:'Catch up confirmed',incoming:'Catch up requested',outgoing:'Catch up requested'};
     return `${rows.map(row=>{
-        const content=`<a class="directory-card" href="/people/${row.id}"><span style="display:block;position:relative">${portrait(row,true,256,'(max-width:650px) 42vw, 220px')}${reunion&&labels[row.catchup]?`<span style="position:absolute;bottom:.4rem;left:.35rem;right:.35rem;padding:.3rem .4rem;border-radius:.35rem;background:${row.catchup==='confirmed'?'#244e40':'#29221f'};color:#fff;font-size:.75rem;line-height:1.3;text-align:center;font-weight:600">${labels[row.catchup]}</span>`:''}</span><div>${classmate(row,row.section?['Section '+row.section]:[])}${!reunion&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`;
+        const content=`<a class="directory-card" href="/people/${row.id}"><span style="display:block;position:relative">${isMemorial(row.name)?'<img src="/memorial-photo/then" alt="" loading="lazy">':portrait(row,true,256,'(max-width:650px) 42vw, 220px')}${reunion&&labels[row.catchup]?`<span style="position:absolute;bottom:.4rem;left:.35rem;right:.35rem;padding:.3rem .4rem;border-radius:.35rem;background:${row.catchup==='confirmed'?'#244e40':'#29221f'};color:#fff;font-size:.75rem;line-height:1.3;text-align:center;font-weight:600">${labels[row.catchup]}</span>`:''}</span><div>${classmate(row,row.section?['Section '+row.section]:[])}${isMemorial(row.name)?'<small class="memorial-label">In Memoriam</small>':''}${!reunion&&!isMemorial(row.name)&&row.status==='attending'?`<small class="attend-yes">${e(statuses[row.status]||'Attending')}</small>`:''}</div></a>`;
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
       }).join('')}`;
   },
@@ -518,12 +526,12 @@ export const page={
     const more=Array.from(new Set(['country','professionalFocus',...Object.keys(fields)])).filter(key=>['country','professionalFocus','researchHighlight','interests','reunionStory','extra','prompt','printName'].includes(key));
     return `<p><a href="/people/${member.id}">Back to my profile</a></p><p>Complete the essentials to unlock memories, WhatsApp Insights and incoming catch-up names. Write a few sentences for the story questions so your batchmates can catch up with you. Highlighted items are still needed; you can save your progress at any time.</p>`+
       form('/profile',field('profile_form','all')+
+      `<section class="panel" id="profile-field-portrait"><h2>Profile picture</h2><div class="profile-picture-editor"><div data-portrait-preview>${portrait({...member,portrait:fields.currentPortrait},false,256)}</div><div><p>Choose the photo shown throughout the site. This is separate from your Then and Now photos.</p><label class="profile-photo-change"><span>${fields.currentPortrait?'Change photo':'Add profile picture'}</span><input type="file" name="portraitPhoto" accept="image/jpeg,image/png"></label><small>Optional · Save profile to apply your change.</small></div></div></section>`+
       '<fieldset><legend>The essentials · 5 required details</legend>'+rows(['dorm','nickname'])+`<div id="profile-field-section">${input('section','Section',fields.section||'','maxlength="20" placeholder="Your section"')}<small>Optional · shown on your profile</small></div>`+rows(['city','life','family'])+'</fieldset>'+
       '<section class="panel"><h2>Then / Now · 2 required photos</h2><p>Choose a photo from your WIMWI days and one from your life today. Existing photos stay unless you choose replacements.</p>'+photos+'</section>'+
       '<section class="panel"><h2>Your work and studies</h2><p>Add these if you’d like to share more.</p>'+rows(optional)+'</section>'+
       `<section class="panel" id="a-little-more-you">${moreYouIntro}${rows(['outsideWork','moment','firstDayAdvice','anythingElse'])}</section>`+
       `<details class="panel"><summary>More profile details and settings</summary><div id="profile-field-displayName">${input('displayName','Name',fields.displayName||member.name,'maxlength="120"')}</div>
-      <h3>Profile picture</h3><label>Choose photo<input type="file" name="portraitPhoto" accept="image/jpeg,image/png"></label>
       ${select('attendance','Reunion attendance',[['unknown','Choose an option'],['attending','Attending'],['declined','Not attending']],fields.attendance||'unknown')}
       ${rows(more)}${checkbox('attendance_private','Hide my attendance status',!!member.attendance_private)}</details>
       <p>Your answers and selected photos will be saved together.</p>`,'Save profile','enctype="multipart/form-data" data-profile-form');
