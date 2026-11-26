@@ -502,13 +502,12 @@ export const socialScript = String.raw`
           await send(path(card),data);
           await comments(card);
         } finally {button.disabled=false;}
-      } else if(button.matches('[data-correct-tag],[data-undo-tag]')){
-        const undo=button.hasAttribute('data-undo-tag');
-        const target=undo?button.dataset.undoTag:button.dataset.correctTag;
+      } else if(button.matches('[data-correct-tag]')){
+        const target=button.dataset.correctTag;
         button.disabled=true;
         try{
           const data=new FormData();
-          data.set('action',undo?'tag-add':'tag-correct');data.set('tag',target);
+          data.set('action','tag-correct');data.set('tag',target);
           if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
           const {tags}=await send(path(card),data);
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
@@ -517,12 +516,7 @@ export const socialScript = String.raw`
               if(!rendered.querySelector('[data-panel-content="tags"]').hidden)await editableTags(rendered);
             }
           }
-          message(card,undo?'Tag restored.':'Tag removed.');
-          if(!undo){
-            const restore=document.createElement('button');restore.type='button';restore.dataset.undoTag=target;restore.textContent='Undo';
-            const status=card.querySelector('.memory-result');status.append(' ',restore);
-            setTimeout(()=>restore.remove(),10000);
-          }
+          message(card,'Tag removed.');
         }finally{button.disabled=false;}
       } else if(button.matches('[data-tag-id]')){
         const panel=card.querySelector('[data-panel-content="tags"]');
