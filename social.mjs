@@ -392,16 +392,18 @@ export const socialScript = String.raw`
     const panel=card.querySelector('[data-panel-content="tags"]');
     const list=card.querySelector('[data-memory-tags]');
     if(!list)return;
-    list.querySelectorAll('[data-correct-tag]').forEach(x=>x.remove());
+    list.querySelectorAll('[data-correct-tag],[data-photo-edit-only]').forEach(x=>x.remove());
     if(panel.hidden)return;
     const photo=card.dataset.photoScope||'';
     const rows=await request(path(card)+'?panel=tags&photo='+encodeURIComponent(photo));
+    if(card.dataset.singlePhoto){const extra=await request(path(card)+'?panel=tags&photo='+encodeURIComponent(card.dataset.singlePhoto));rows.push(...extra.map(row=>({...row,photo:card.dataset.singlePhoto})));}
     if(panel.hidden)return;
     for(const row of rows){
-      const link=list.querySelector('a[href="/people/'+CSS.escape(String(row.member))+'"]');
+      let link=list.querySelector('a[href="/people/'+CSS.escape(String(row.member))+'"]');
+      if(row.photo){let group=list.querySelector('.memory-tags');if(!group){group=document.createElement('div');group.className='memory-tags';list.append(group);}link=document.createElement('a');link.href='/people/'+row.member;link.textContent='@'+row.label;link.dataset.photoEditOnly='';group.append(link);}
       if(!link)continue;
       const remove=document.createElement('button');
-      remove.type='button';remove.dataset.correctTag=row.member;remove.textContent='×';
+      remove.type='button';remove.dataset.correctTag=row.member;if(row.photo)remove.dataset.correctPhoto=row.photo;remove.textContent='×';
       remove.style.cssText='padding:0 6px;min-width:24px;min-height:24px;border:0;background:transparent;color:inherit';
       remove.setAttribute('aria-label','Remove tag for '+row.label);
       link.after(remove);
@@ -493,7 +495,7 @@ export const socialScript = String.raw`
           panel.querySelector('input,textarea')?.focus();
           if(button.dataset.panel==='comments') await comments(card);
           if(button.dataset.panel==='tags') await editableTags(card);
-        }else if(button.dataset.panel==='tags'){card.querySelectorAll('[data-correct-tag]').forEach(x=>x.remove());}
+        }else if(button.dataset.panel==='tags'){card.querySelectorAll('[data-correct-tag],[data-photo-edit-only]').forEach(x=>x.remove());}
       } else if(button.matches('[data-comment-again]')){
         button.hidden=true;
         const form=button.parentElement.querySelector('form');
@@ -513,10 +515,10 @@ export const socialScript = String.raw`
         try{
           const data=new FormData();
           data.set('action','tag-correct');data.set('tag',target);
-          if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
+          if(button.dataset.correctPhoto||card.dataset.photoScope)data.set('photo',button.dataset.correctPhoto||card.dataset.photoScope);
           const {tags}=await send(path(card),data);
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
-            if(rendered.dataset.photoScope===card.dataset.photoScope){
+            if(rendered.dataset.photoScope===(button.dataset.correctPhoto||card.dataset.photoScope)){
               rendered.querySelector('[data-memory-tags]').innerHTML=tags;
               const panel=rendered.querySelector('[data-panel-content="tags"]');
               panel?.querySelectorAll('[data-correct-tag]').forEach(remove=>{
@@ -532,7 +534,7 @@ export const socialScript = String.raw`
         const toggle=card.querySelector('[data-panel="tags"]');
         button.disabled=true;
         panel.hidden=true;
-        card.querySelectorAll('[data-correct-tag]').forEach(x=>x.remove());
+        card.querySelectorAll('[data-correct-tag],[data-photo-edit-only]').forEach(x=>x.remove());
         toggle.setAttribute('aria-expanded','false');
         try {
           const data=new FormData();
