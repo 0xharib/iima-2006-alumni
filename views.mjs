@@ -142,6 +142,7 @@ const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
       <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
       <div data-tag-results></div></div>
     <div class="memory-result" role="status"></div>
+    ${!scoped&&photos.length===1?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(photo.replaceAll('/','-'))}">Manage photo tags →</a>`:''}
   </article>`;
 }).join('');
 const memoryDialog=()=>`<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
@@ -564,11 +565,11 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:photos.map(photo=>`<section data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" class="album-photo-panel">${images([photo])}<div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</section>`).join('');
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:photos.map(photo=>`<section data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" id="photo-${e(photo.media.replaceAll('/','-'))}" class="album-photo-panel">${images([photo])}<div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</section>`).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
-      ${isAlbum?`<p>${photos.length} photos</p>`:''}
+      ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
-      ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${gallery}`+
+      ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${isAlbum?gallery:''}`+
       (item.author===me?`${photos.length&&!item.origin?link(url+'/album','Edit album · add, remove or reorder photos'):''}<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',caption,photos.length?'':'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
       (item.subject===me||item.is_about_me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
       (tags.length?'<h2>Tags</h2>'+list(tags.map(t=>link('/people/'+t.member,t.name)+' '+badge(t.status)+
