@@ -889,7 +889,7 @@ test('one shared mobile navigation sits outside the header on site and WhatsApp 
   const html=skin(template,{nonce:'test',theme:'dark',current});
   assert.match(html,/<body class="story has-mobile-nav">/);
   assert.equal((html.match(/<nav class="app-bottom-nav"/g)||[]).length,1);
-  assert.match(html,/<a href="\/wa\/" aria-current="page">WhatsApp<\/a>/);
+  assert.match(html,/<a href="\/wa\/" aria-current="page">WhatsApp Insights<\/a>/);
   assert.ok(html.indexOf('<nav class="app-bottom-nav"')>html.indexOf('</main>'));
  }
 });

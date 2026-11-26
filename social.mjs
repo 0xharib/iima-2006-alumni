@@ -681,6 +681,11 @@ export const socialScript = String.raw`
             }
           }
         }
+        if(state.portrait?.src){
+          const preview=form.querySelector('[data-portrait-preview]');
+          if(preview){let img=preview.querySelector('img');if(!img){img=document.createElement('img');img.alt='Your profile picture';preview.replaceChildren(img);}img.src=state.portrait.src;}
+          const label=form.querySelector('.profile-photo-change span');if(label)label.textContent='Change photo';
+        }
         if(!state.lifeGenerated)form.querySelector('#profile-field-life .profile-generated-review')?.remove();
         // Uploaded files are saved; clear them so a second save does not upload them again.
         form.querySelectorAll('input[type=file]').forEach(input=>{input.value='';});

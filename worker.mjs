@@ -1,3 +1,4 @@
+import {isMemorial, loadTribute, memorialPhotos} from './memorial.mjs';
 import { render, signIn, page, form, field, escape, whatsappRequirements, whatsappUnlock, reunionCatchups, siteCSS, siteCSSVersion } from './views.mjs';
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
@@ -85,6 +86,13 @@ export default {
 async function route(req, env, record, setViewer, ctx) {
   const u = new URL(req.url), path = u.pathname, post = req.method === 'POST';
   const db = env.DB;
+  // The isolated preview is invitation-only; no production account or resources are used.
+  if(env.PREVIEW_LABEL && env.MEMORIAL_PREVIEW_KEY){
+    const access=req.headers.get('Cookie')?.match(/(?:^|;\s*)memorial-preview=([a-f0-9]+)/)?.[1];
+    if(path==='/preview-access' && u.searchParams.get('key')===env.MEMORIAL_PREVIEW_KEY)
+      return redirect('/',{'Set-Cookie':'memorial-preview='+env.MEMORIAL_PREVIEW_KEY+'; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400','Referrer-Policy':'no-referrer'});
+    if(access!==env.MEMORIAL_PREVIEW_KEY)return new Response('Private preview. Use your invitation link.',{status:403});
+  }
   const sql = (query, ...args) => db.prepare(query).bind(...args);
   const one = (query, ...args) => sql(query,...args).first();
   const all = async (query,...args) => (await sql(query,...args).all()).results;
@@ -161,7 +169,7 @@ async function route(req, env, record, setViewer, ctx) {
   const show = (title,body) => renderPage(title,body,member);
   const data = () => req.formData();
   const mailHelp = 'mailto:s.tahseen.q@gmail.com,arun.devanathan@gmail.com?subject=IIMA%20Class%20of%202006%20roster%20email&body=Name%3A%0ADorm%20Number%3A%0ADorm%20Name%3A%0ACorrect%20Email%20ID%3A';
-  const rosterEmail = key => one(`SELECT email FROM reminder_contacts c WHERE batchmate_id=? AND trim(email) LIKE '%_@_%._%' AND
+  const rosterEmail = key => one(`SELECT email FROM reminder_contacts c WHERE batchmate_id=? AND NOT EXISTS(SELECT 1 FROM roster r WHERE r.id=c.batchmate_id AND lower(trim(r.name))='sachin kumar suman') AND trim(email) LIKE '%_@_%._%' AND
     (SELECT count(*) FROM reminder_contacts x WHERE lower(trim(x.email))=lower(trim(c.email)))=1`,key);
   const limit = async (key, minutes, maximum) => {
     const window = Math.floor(now()/(minutes*60000));
@@ -188,7 +196,7 @@ async function route(req, env, record, setViewer, ctx) {
   if (path === '/names' && !post) {
     const query = (u.searchParams.get('q') || '').trim().slice(0,80);
     if (query.length < 2) return json([]);
-    return json(await all("SELECT id,name FROM roster WHERE instr(lower(name),lower(?))>0 ORDER BY name LIMIT 12",query));
+    return json(await all("SELECT id,name FROM roster WHERE lower(trim(name))<>'sachin kumar suman' AND instr(lower(name),lower(?))>0 ORDER BY name LIMIT 12",query));
   }
   if (['/submit','/yearbook'].includes(path) && !post) return redirect(member?'/people/'+member.id:'/signin');
   const signInPage = async (key, next, feedback = '') => {
@@ -202,15 +210,15 @@ async function route(req, env, record, setViewer, ctx) {
     return signIn({selected, maskedEmail, next, mailHelp, feedback});
   };
   // Dedicated isolated demo environment only. Never enable this flag on production.
-  if (env.PREVIEW_DEMO==='1' && (path==='/preview-demo' || (!member && (path==='/'||path==='/signin')))) {
+  if (env.PREVIEW_LABEL && env.PREVIEW_DEMO==='1' && (path==='/preview-demo' || (!member && (path==='/'||path==='/signin')))) {
     if(post){
       const chosen=Number((await data()).get('member'));
       if(![1,2].includes(chosen))return missing();
       const raw=id()+id();
       await run('INSERT INTO sessions VALUES(?,?,?)',await hash(raw),chosen,now()+86400000);
-      return redirect('/memories',{'Set-Cookie':cookie(raw,86400)});
+      return redirect('/',{'Set-Cookie':cookie(raw,86400)});
     }
-    return show('Album preview', '<p>This is an isolated test site with sample classmates. Uploads and edits stay here.</p>'+form('/preview-demo',field('member','1'),'Try as album owner')+form('/preview-demo',field('member','2'),'Try as another classmate'));
+    return show('Memorial & navigation preview', '<p>This is an isolated test site. All interactions stay here.</p>'+form('/preview-demo',field('member','1'),'Enter preview')+form('/preview-demo',field('member','2'),'Try as another classmate'));
   }
   if (!post && !member && env.PREVIEW_LABEL && (path==='/' || path==='/signin'))
     return redirect('https://iima-class-of-2006.in/preview',{'Cache-Control':'no-store'});
@@ -270,6 +278,17 @@ async function route(req, env, record, setViewer, ctx) {
   }
   if (!member) return redirect('/signin?next='+encode(path+u.search));
   const me = member.id;
+  if(isMemorial(member.name)) return new Response('This is a memorial profile.',{status:403});
+  if(path==='/remembering-sachin' && !post){
+    const row=await one("SELECT id FROM roster WHERE lower(trim(name))='sachin kumar suman'");
+    return row?redirect('/people/'+row.id):missing();
+  }
+  if(path.startsWith('/memorial-photo/') && !post){
+    const name=path.slice('/memorial-photo/'.length);
+    if(!memorialPhotos.includes(name))return missing();
+    const object=await env.MEDIA.get('memorial/sachin/'+name+'.jpg');
+    return object?new Response(object.body,{headers:{'Content-Type':'image/jpeg','Cache-Control':'private, max-age=3600'}}):missing();
+  }
   // Browser navigations ask for HTML: start the chrome queries alongside the page's own queries.
   if (!post && /text\/html/.test(req.headers.get('Accept')||'') && u.searchParams.get('fragment')!=='1') loadChrome().catch(()=>{});
   if (path==='/preview' && !post) {
@@ -283,7 +302,7 @@ async function route(req, env, record, setViewer, ctx) {
   if (path==='/tag-search' && !post) {
     const q = (u.searchParams.get('q')||'').trim().slice(0,80);
     if (q.length<2) return json([]);
-    return json(await all(`SELECT id,name,nickname FROM roster WHERE id<>? AND
+    return json(await all(`SELECT id,name,nickname FROM roster WHERE id<>? AND lower(trim(name))<>'sachin kumar suman' AND
       instr(lower(name||' '||nickname),lower(?))>0 ORDER BY name LIMIT 12`,me,q));
   }
   const admin = member.role === 'admin';
@@ -310,7 +329,7 @@ async function route(req, env, record, setViewer, ctx) {
   // previews (versioned so a replacement is never served from cache) and whether Life, Lately is
   // still the imported draft. Read after the write, in the same request.
   async function profileState() {
-    const [checks,photos,life,name] = await Promise.all([
+    const [checks,photos,life,name,currentPortrait] = await Promise.all([
       whatsappCompletion(),
       all(`SELECT ph.slot,'yearbook/'||y.member||'/'||j.key AS media,'' AS version
         FROM yearbook_public y,json_each(y.images) j
@@ -320,7 +339,8 @@ async function route(req, env, record, setViewer, ctx) {
         FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,me,me),
       one(`SELECT value,source FROM selected_profile_fields WHERE member=? AND field='life' AND pilot_only<=?
         ORDER BY priority DESC LIMIT 1`,me,+pilot),
-      one("SELECT value FROM profile_fields WHERE member=? AND field='displayName'",me)
+      one("SELECT value FROM profile_fields WHERE member=? AND field='displayName'",me),
+      one(`SELECT ${portrait} AS media,(SELECT value FROM profile_fields WHERE member=r.id AND field='portraitObject') AS version FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,me)
     ]);
     const version=value=>String(value||'').replace(/[^\w-]/g,'').slice(-12);
     const preview={};
@@ -329,7 +349,7 @@ async function route(req, env, record, setViewer, ctx) {
       src:'/media/'+photo.media+'?w=480'+(photo.version?'&v='+version(photo.version):'')};
     const missing=checks.filter(check=>!check.complete);
     return {saved:true,profile:'/people/'+me,checks,complete:!missing.length,missing:missing.map(check=>check.key),
-      photos:preview,lifeGenerated:!!String(life?.value||'').trim()&&life.source==='selected_enrichment',
+      portrait:currentPortrait?.media?{src:'/media/'+currentPortrait.media+'?w=256'+(currentPortrait.version?'&v='+version(currentPortrait.version):'')}:null,photos:preview,lifeGenerated:!!String(life?.value||'').trim()&&life.source==='selected_enrichment',
       name:String(name?.value||'').trim()||member.name};
   }
   if (!post && (path==='/wa' || path.startsWith('/wa/'))) {
@@ -464,7 +484,7 @@ async function route(req, env, record, setViewer, ctx) {
             coalesce(pc.completed_at,pc.observed_at,0) AS rank_at,coalesce(pc.observed_order,0) AS rank_order,rr.name AS rank_name
           FROM profile_completion_state st JOIN roster rr ON rr.id=st.member
           LEFT JOIN profile_completion pc ON pc.member=st.member
-          WHERE st.complete_${mode}=1 AND NOT EXISTS(SELECT 1 FROM members m WHERE m.id=st.member AND m.suspended=1)
+          WHERE st.complete_${mode}=1 AND lower(trim(rr.name))<>'sachin kumar suman' AND NOT EXISTS(SELECT 1 FROM members m WHERE m.id=st.member AND m.suspended=1)
           ORDER BY rank_at DESC,rank_order DESC,rank_name LIMIT 12) f
         JOIN roster r ON r.id=f.member ${seedJoin}
         ORDER BY f.rank_at DESC,f.rank_order DESC,f.rank_name`,+pilot);
@@ -476,7 +496,7 @@ async function route(req, env, record, setViewer, ctx) {
           pc.completed_at,pc.basis AS completion_basis
         FROM completed_profiles c JOIN roster r ON r.id=c.id ${seedJoin}
         LEFT JOIN profile_completion pc ON pc.member=r.id
-        WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.id=r.id AND m.suspended=1)
+        WHERE lower(trim(r.name))<>'sachin kumar suman' AND NOT EXISTS(SELECT 1 FROM members m WHERE m.id=r.id AND m.suspended=1)
         ORDER BY coalesce(pc.completed_at,pc.observed_at,0) DESC,pc.observed_order DESC,r.name LIMIT 12`,+pilot,+pilot);
     }
   }
@@ -501,7 +521,7 @@ async function route(req, env, record, setViewer, ctx) {
     const target = Number(str(f,'target',12));
     const action = str(f,'action',10);
     const back = destination(str(f,'next',300)||'/people/'+me);
-    if (!['add','remove','accept'].includes(action) || !Number.isInteger(target) || target===me || !(await one('SELECT id FROM roster WHERE id=?',target)))
+    if (!['add','remove','accept'].includes(action) || !Number.isInteger(target) || target===me || !(await one("SELECT id FROM roster WHERE id=? AND lower(trim(name))<>'sachin kumar suman'",target)))
       return invalid('Choose a classmate.');
     if (action==='accept') {
       const request=str(f,'request',80);
@@ -544,7 +564,7 @@ async function route(req, env, record, setViewer, ctx) {
   }
   if (path==='/') {
     const [{rows,next},meet,unlock,fresh] = await Promise.all([feed(9),meetSummary(),whatsappCompletion(),freshProfiles()]);
-    return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh,await faceNudge(env,me)),member,{home:true,active:'/'});
+    return renderPage('Kal • Aaj • Aur Kal',page.home(rows,next,id(),me,meet,unlock,fresh,await faceNudge(env,me),!!await one("SELECT id FROM roster WHERE lower(trim(name))='sachin kumar suman'")),member,{home:true,active:'/'});
   }
   if (path==='/people' || path==='/reunion') {
     const reunion=path==='/reunion';
@@ -596,7 +616,7 @@ async function route(req, env, record, setViewer, ctx) {
               + 2*EXISTS(SELECT 1 FROM featured f WHERE f.target=CAST(r.id AS TEXT)) AS score
           FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
           LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id ${seedJoin}
-          WHERE (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' Dorm '||coalesce(r.dorm,'')),lower(?))>0)
+          WHERE lower(trim(r.name))<>'sachin kumar suman' AND (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' Dorm '||coalesce(r.dorm,'')),lower(?))>0)
           AND (?='' OR r.dorm=?) AND (?='' OR rs.section=?)
           AND (?='' OR (coalesce(m.attendance_private,0)=0 AND CASE WHEN ? THEN rt.status ELSE coalesce(rt.status,a.status) END=?))
         ), ranked AS (SELECT *,score+(portrait IS NOT NULL) AS rank,count(*) OVER () AS total FROM matches)
@@ -636,6 +656,7 @@ async function route(req, env, record, setViewer, ctx) {
     const row = await one(`SELECT r.*,a.status AS own_attendance,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
+    if(isMemorial(row.name))return renderPage(row.name,page.memorial(row,await profileMemories(key),id(),await loadTribute(env.MEDIA)),member,{home:true,active:'/remembering-sachin'});
     const [seed,selected,section,photos,stories,profilePhotos,meet] = await Promise.all([
       one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot),
       all(`SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=?
@@ -663,7 +684,7 @@ async function route(req, env, record, setViewer, ctx) {
   if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me))):missing();
   if (path==='/profile') {
     if (!post) {
-      const [roster,fields,photos,checks]=await Promise.all([
+      const [roster,fields,photos,checks,currentPortrait]=await Promise.all([
         one('SELECT r.dorm,r.nickname,rs.section,a.status AS attendance FROM roster r LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id WHERE r.id=?',me),
         all('SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=? ORDER BY priority',me,+pilot),
         all(`SELECT ph.slot,'yearbook/'||y.member||'/'||j.key AS media,ph.caption
@@ -672,9 +693,10 @@ async function route(req, env, record, setViewer, ctx) {
           WHERE y.member=? AND ph.slot IN ('then','now')
           UNION ALL SELECT substr(field,1,length(field)-11),'profile-photo/'||member||'/'||substr(field,1,length(field)-11),''
           FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,me,me),
-        whatsappCompletion()
+        whatsappCompletion(),
+        one(`SELECT ${portrait} AS media FROM roster r ${seedJoin} WHERE r.id=?`,+pilot,me)
       ]);
-      const values={...roster};for(const item of fields){
+      const values={...roster,currentPortrait:currentPortrait?.media};for(const item of fields){
         if(item.field==='section'&&item.source==='selected_enrichment'&&roster.section)continue;
         values[item.field]=item.value;
       }
