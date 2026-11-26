@@ -585,14 +585,20 @@ export const page={
       <p>Not set up yet: run <code>migrations/0019_face_tagging.sql</code> against the database (see docs/operations.md, “Face tagging”). Until then face tagging stays hidden.</p>`;
     return `<p>${link('/admin?view=tools','Admin tools')}</p>
       <p><strong>Mode:</strong> ${e(modes[data.mode])}. Set <code>FACE_TAGGING</code> to off, shadow or on in the Cloudflare dashboard.</p>
+      <p><strong>Members without a profile picture (2006 photos):</strong> ${e(data.ready2006?modes[data.mode2006]:'Off: run migrations/0021_face_refs_2006.sql first')}. Set <code>FACE_TAGGING_2006</code>; it never goes further than <code>FACE_TAGGING</code>.</p>
       ${queued?`<p class="notice">Queued ${queued} photos for scanning.</p>`:''}${Number.isFinite(published)?`<p class="notice">Published ${published} tags.</p>`:''}
       <dl class="face-stats">${stat('Photos on the site',c.photos)}${stat('Scanned',c.scanned)}${stat('Failed scans',c.failed)}${stat('Faces found',c.faces)}
-        ${stat('Members with a profile picture',c.eligible)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
+        ${stat('Members with a profile picture',c.eligible)}${stat('Found through 2006 photos only',c.found2006)}${stat('Yearbook PDF faces imported',c.archive)}${stat('Shadow matches',c.shadow)}${stat('Automatic tags',c.auto)}${stat('Removed with Not me',c.removed)}</dl>
       <div class="face-admin-actions">${form('/admin/faces',field('action','scan-all'),'Scan all photos now')}
         ${data.mode==='on'&&c.shadow?form('/admin/faces',field('action','publish'),'Publish shadow matches as tags'):''}</div>
       <h2>Shadow matches, lowest scores first</h2>
       ${data.shadow.length?`<section class="photos-of-you">${data.shadow.map(m=>`<figure><a href="/posts/${e(m.post)}#photo-${e(m.media.replaceAll('/','-'))}"><img src="${mediaSrc(m.media,256)}" alt="Photo matched to ${e(m.name)}" loading="lazy"></a>
-        <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span></figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}`;
+        <figcaption>${e(m.name)} <span>${Number(m.score).toFixed(2)}</span>${m.via2006?' <span>2006</span>':''}</figcaption></figure>`).join('')}</section>`:'<p>No shadow matches.</p>'}
+      ${data.notes?.length?`<h2>Reference photos left out</h2><p class="sub">These did not look like the member's other reference photos (a different person, a logo, a hidden face or a poor scan), so they are not used. Fix the photo or the tag if it is wrong.</p>
+        <table class="face-notes"><thead><tr><th>Member</th><th>Photo</th><th>Agreement</th></tr></thead><tbody>${data.notes.map(n=>{
+          const what={yearbook:'Seed portrait',tagged:'Tagged photo',archive:'Yearbook PDF',portrait:'Profile picture',then:'Then photo',now:'Now photo'}[n.source]||n.source;
+          const where=n.source==='tagged'?` <a href="${mediaSrc(n.object_key,480)}">view</a>`:'';
+          return `<tr><td>${link('/people/'+n.member,n.name)}</td><td>${e(what)}${where}</td><td>${Number(n.agreement).toFixed(2)}</td></tr>`;}).join('')}</tbody></table>`:''}`;
   },
   photosOfYou(list,removed=0){
     if(!list.length)return (removed>0?`<p role="status">Removed ${removed} ${removed===1?'tag':'tags'} from your gallery.</p>`:'')+'<p class="sub">No photos of you yet. When batchmates share photos you’re in, they’ll appear here.</p>';
