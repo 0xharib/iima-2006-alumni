@@ -20,6 +20,10 @@ the iimages 2006 yearbook PDF as the base for everyone's appearance.
   least one of the member's other references. The ones that don't are left out and listed for admins at
   `/admin/faces` (`face_ref_notes`). If no two agree, only the most trusted is kept (profile picture, tagged photo, seed
   portrait, Then, Now, yearbook PDF).
+- **A higher bar for 2006 photos.** A match that rests on a `tagged` or `archive` reference needs 0.40
+  (`FACE_BAR_2006`); current photos (profile picture, Then/Now, seed portrait) keep 0.35. In Hari's labelled test photos
+  the 2006 references at 0.35 named two wrong people (Jay Dave and Arup Ghosh at 0.36, which Hari rejected on 27 Nov);
+  at 0.40 there were none and nobody else was lost.
 - **Rebuilds.** A hand tag on a photo marks that person's references for a rebuild, and so does scanning a one-face
   photo that carries one hand tag. The batch builds references for the whole roster while the 2006 group is on.
 - **Shadow for the new group.** While `FACE_TAGGING=on` and `FACE_TAGGING_2006=shadow`, the 2006 group's matches are
@@ -34,8 +38,9 @@ the iimages 2006 yearbook PDF as the base for everyone's appearance.
 InsightFace buffalo_l, bar 0.35:
 - Placecom face vs everyone's yearbook PDF face: right person first 196/204; at 0.35, 187 right, 0 wrong.
 - Seed portrait vs the 2006 photos: 213/217 first; at 0.35, 206 right, 0 wrong.
-- Labelled site photos: seeds only found 105/114; seeds + 2006 found 113/119; 0 wrong either way. It also named 22 faces
-  that had been labelled "not in profiles", 19 of them people with no current portrait.
+- Labelled site photos (with Hari's 27 Nov answers): seeds + 2006 found 114/120. At 0.35 for everything it also made 2
+  wrong matches; with 0.40 for 2006 references it made none and still found 114/120, plus 18 people with no current
+  portrait in faces that had been labelled "not in profiles".
 - The consistency check, run on the same data, leaves out exactly the bad references found by eye (a seed portrait of
   someone else, a seed with the face hidden, a half-hidden Then photo, poor PDF scans) and changes none of the results.
 - Coverage: 52 people have no usable current portrait; 51 of them get a 2006 reference.

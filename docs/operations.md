@@ -160,6 +160,7 @@ are matched through 2006 photos only while `FACE_TAGGING_2006` (off | shadow | o
   album. Tagging someone by hand marks their references for a rebuild.
 - `archive`: their face from the iimages 2006 yearbook PDF, imported once into `face_archive` (see below).
 - the approved seed portrait.
+A match through a `tagged` or `archive` reference needs 0.40 (`FACE_BAR_2006`), not 0.35.
 Every member's references must agree with each other (0.30 or more against at least one other); the ones that don't
 are left out and listed under "Reference photos left out" on `/admin/faces`. In shadow, the group's matches are marked
 "2006" on that page and **Publish** leaves them alone. Members who cannot be matched see "Add a profile picture to be

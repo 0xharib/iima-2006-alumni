@@ -40,12 +40,29 @@ export function similarity(a, b) {
 }
 
 // Each face goes to at most one member and each member to at most one face, best score first.
+// Matches through a 2006 photo (a tagged Placecom-style portrait or the yearbook PDF) need a higher score: at 0.35
+// they named two wrong people in Hari's test photos, at 0.40 none, and found everyone they found at 0.35.
+export const FACE_BAR_2006 = 0.40;
+const SOURCES_2006 = new Set(['tagged', 'archive']);
+const refEntry = (source, embedding) => ({vector: toVector(embedding), old: SOURCES_2006.has(source)});
+
+// A face's score for one member: the best similarity to any of their references. A reference is a vector, or
+// {vector, old} where old (a 2006 photo) counts only from FACE_BAR_2006 up.
+export function refScore(vector, refs) {
+  let best = -1;
+  for (const ref of refs) {
+    const score = similarity(vector, ref.vector ?? ref);
+    if (ref.old && score < FACE_BAR_2006) continue;
+    if (score > best) best = score;
+  }
+  return best;
+}
+
 export function assign(faces, refs) {
   const pairs = [];
   for (const face of faces) {
     for (const [member, vectors] of refs) {
-      let best = -1;
-      for (const ref of vectors) best = Math.max(best, similarity(face.vector, ref));
+      const best = refScore(face.vector, vectors);
       if (best >= FACE_BAR) pairs.push({face: face.id, member, score: best});
     }
   }
@@ -200,10 +217,10 @@ async function readObject(env, key) {
 
 async function eligibleRefs(env, except = new Set()) {
   const refs = new Map();
-  for (const ref of await rows(env.DB, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member', await wide2006(env))}`)) {
+  for (const ref of await rows(env.DB, `SELECT r.member,r.source,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member', await wide2006(env))}`)) {
     if (except.has(ref.member)) continue;
     if (!refs.has(ref.member)) refs.set(ref.member, []);
-    refs.get(ref.member).push(toVector(ref.embedding));
+    refs.get(ref.member).push(refEntry(ref.source, ref.embedding));
   }
   return refs;
 }
@@ -508,7 +525,7 @@ export async function rematchMembers(env, members) {
   const db = env.DB, refs = new Map();
   for (const member of members) {
     if (!await eligible(env, member)) continue;
-    const vectors = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
+    const vectors = (await rows(db, 'SELECT source,embedding FROM face_refs WHERE member=?', member)).map(r => refEntry(r.source, r.embedding));
     if (vectors.length) refs.set(member, vectors);
   }
   if (!refs.size) return 0;
@@ -519,8 +536,7 @@ export async function rematchMembers(env, members) {
     for (const face of page) {
       const vector = toVector(face.embedding);
       for (const [member, vectors] of refs) {
-        let score = -1;
-        for (const ref of vectors) score = Math.max(score, similarity(vector, ref));
+        const score = refScore(vector, vectors);
         const key = member + '/' + face.media;
         if (score >= FACE_BAR && !(best.get(key)?.score >= score)) best.set(key, {media: face.media, post: face.post, member, face: face.id, score});
       }

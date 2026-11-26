@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fixture } from './fixture.mjs';
-import { faceMode2006, vectorBytes, scanPhoto, refreshRefs, handleQueue, sweep, publishShadow, rematchMember,
+import { refScore, FACE_BAR_2006, faceMode2006, vectorBytes, scanPhoto, refreshRefs, handleQueue, sweep, publishShadow, rematchMember,
   consistent, AGREE, TAGGED_MIN_SIZE, faceAdminData } from '../faces.mjs';
 
 const unitVec = i => { const a = new Float32Array(512); a[i] = 1; return a; };
@@ -199,4 +199,19 @@ test('migration 0021 keeps existing references and can be run again', () => {
   assert.equal(w.sqlite.prepare('SELECT count(*) n FROM face_refs').get().n, 1);
   w.sqlite.exec("INSERT INTO face_refs VALUES(2,'tagged','post/x',x'00','m'),(2,'archive','iimages/a.png',x'00','m')");
   assert.throws(() => w.sqlite.exec("INSERT INTO face_refs VALUES(2,'robot','k',x'00','m')"));
+});
+
+test('a match through a 2006 photo needs 0.40; through a current photo 0.35 is enough', async () => {
+  assert.equal(FACE_BAR_2006, 0.40);
+  const old = [{vector: unitVec(5), old: true}];
+  assert.equal(refScore(mixVec(5, 9, 0.38), old), -1);
+  assert.ok(Math.abs(refScore(mixVec(5, 9, 0.41), old) - 0.41) < 1e-6);
+  assert.ok(Math.abs(refScore(mixVec(5, 9, 0.38), [unitVec(5)]) - 0.38) < 1e-6);
+  const w = world('on', 'on'); w.portrait2006('pc1', 3, 5); await refreshRefs(w.env, 3);
+  const a = w.photo('p1', 'u1', 1); w.photoFaces[1] = [mixVec(5, 9, 0.37)];
+  assert.deepEqual((await scanPhoto(w.env, 'p1', a)).tagged, []);
+  const b = w.photo('p2', 'u2', 2); w.photoFaces[2] = [mixVec(5, 9, 0.45)];
+  assert.deepEqual((await scanPhoto(w.env, 'p2', b)).tagged, [3]);
+  const c = w.photo('p3', 'u3', 3); w.face(c, 'p3', mixVec(5, 9, 0.37), 60);
+  assert.equal(await rematchMember(w.env, 3), 0);
 });
