@@ -160,6 +160,7 @@ are matched through 2006 photos only while `FACE_TAGGING_2006` (off | shadow | o
   album. Tagging someone by hand marks their references for a rebuild.
 - `archive`: their face from the iimages 2006 yearbook PDF, imported once into `face_archive` (see below).
 - the approved seed portrait.
+A match through a `tagged` or `archive` reference needs 0.40 (`FACE_BAR_2006`), not 0.35.
 Every member's references must agree with each other (0.30 or more against at least one other); the ones that don't
 are left out and listed under "Reference photos left out" on `/admin/faces`. In shadow, the group's matches are marked
 "2006" on that page and **Publish** leaves them alone. Members who cannot be matched see "Add a profile picture to be
@@ -182,7 +183,9 @@ references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 
 3. queues reference rebuilds for eligible members who are new, changed a profile photo or were tagged by hand, up to 100;
 4. queues one finish job, delayed 40 minutes: it matches everyone rebuilt in the last 6 hours against every stored
    face, then sends each person one summary notification. Your own uploads are tagged but not counted.
-**Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos.
+**Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos and reference rebuilds
+for everyone who needs one (the 3-hour batch takes 100 people at a time). The finish job re-matches everyone rebuilt
+in the last 6 hours, 100 at a time, up to 600 per run.
 
 **One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
 `photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or

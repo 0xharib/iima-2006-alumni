@@ -40,12 +40,29 @@ export function similarity(a, b) {
 }
 
 // Each face goes to at most one member and each member to at most one face, best score first.
+// Matches through a 2006 photo (a tagged Placecom-style portrait or the yearbook PDF) need a higher score: at 0.35
+// they named two wrong people in Hari's test photos, at 0.40 none, and found everyone they found at 0.35.
+export const FACE_BAR_2006 = 0.40;
+const SOURCES_2006 = new Set(['tagged', 'archive']);
+const refEntry = (source, embedding) => ({vector: toVector(embedding), old: SOURCES_2006.has(source)});
+
+// A face's score for one member: the best similarity to any of their references. A reference is a vector, or
+// {vector, old} where old (a 2006 photo) counts only from FACE_BAR_2006 up.
+export function refScore(vector, refs) {
+  let best = -1;
+  for (const ref of refs) {
+    const score = similarity(vector, ref.vector ?? ref);
+    if (ref.old && score < FACE_BAR_2006) continue;
+    if (score > best) best = score;
+  }
+  return best;
+}
+
 export function assign(faces, refs) {
   const pairs = [];
   for (const face of faces) {
     for (const [member, vectors] of refs) {
-      let best = -1;
-      for (const ref of vectors) best = Math.max(best, similarity(face.vector, ref));
+      const best = refScore(face.vector, vectors);
       if (best >= FACE_BAR) pairs.push({face: face.id, member, score: best});
     }
   }
@@ -200,10 +217,10 @@ async function readObject(env, key) {
 
 async function eligibleRefs(env, except = new Set()) {
   const refs = new Map();
-  for (const ref of await rows(env.DB, `SELECT r.member,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member', await wide2006(env))}`)) {
+  for (const ref of await rows(env.DB, `SELECT r.member,r.source,r.embedding FROM face_refs r WHERE ${ELIGIBLE('r.member', await wide2006(env))}`)) {
     if (except.has(ref.member)) continue;
     if (!refs.has(ref.member)) refs.set(ref.member, []);
-    refs.get(ref.member).push(toVector(ref.embedding));
+    refs.get(ref.member).push(refEntry(ref.source, ref.embedding));
   }
   return refs;
 }
@@ -508,7 +525,7 @@ export async function rematchMembers(env, members) {
   const db = env.DB, refs = new Map();
   for (const member of members) {
     if (!await eligible(env, member)) continue;
-    const vectors = (await rows(db, 'SELECT embedding FROM face_refs WHERE member=?', member)).map(r => toVector(r.embedding));
+    const vectors = (await rows(db, 'SELECT source,embedding FROM face_refs WHERE member=?', member)).map(r => refEntry(r.source, r.embedding));
     if (vectors.length) refs.set(member, vectors);
   }
   if (!refs.size) return 0;
@@ -519,8 +536,7 @@ export async function rematchMembers(env, members) {
     for (const face of page) {
       const vector = toVector(face.embedding);
       for (const [member, vectors] of refs) {
-        let score = -1;
-        for (const ref of vectors) score = Math.max(score, similarity(vector, ref));
+        const score = refScore(vector, vectors);
         const key = member + '/' + face.media;
         if (score >= FACE_BAR && !(best.get(key)?.score >= score)) best.set(key, {media: face.media, post: face.post, member, face: face.id, score});
       }
@@ -597,7 +613,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const HOUR_MS = 60 * 60 * 1000;
 const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
-const REMATCH_WINDOW_MS = 6 * HOUR_MS;   // two runs: a rebuild finished after one run's finish is caught by the next
+const REMATCH_WINDOW_MS = 6 * HOUR_MS;
+const REMATCH_MAX = 600;   // members re-matched per finish job: the whole roster, with room to spare
+// Reference rebuilds queued by "Scan all photos now": the whole roster at once (the 3-hour batch takes 100).
+export const SCAN_ALL_PEOPLE = 1000;   // two runs: a rebuild finished after one run's finish is caught by the next
 
 // Members to (re)build references for: eligible and new, marked after a profile photo changed or a hand tag, or
 // without usable references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
@@ -623,14 +642,14 @@ async function dropIneligible(env) {
 
 // The batch, every 3 hours (and the admin's "Scan all photos now"): queue new or failed photos and reference
 // rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
-export async function sweep(env, limit = 500) {
+export async function sweep(env, limit = 500, people = 100) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
   await dropIneligible(env);
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, needsRefs(await wide2006(env)), dayAgo, 100);
+  const rebuild = await rows(env.DB, needsRefs(await wide2006(env)), dayAgo, people);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
-    ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
+    ...rebuild.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));
   await env.FACE_JOBS.send({type: 'finish'}, {delaySeconds: FINISH_DELAY_S});
   return todo.length;
@@ -641,9 +660,15 @@ export async function sweep(env, limit = 500) {
 export async function finishRun(env) {
   const db = env.DB;
   if (faceMode(env) === 'off' || !await faceSchema(db)) return;
-  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member', await wide2006(env))}
-    AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
-  await rematchMembers(env, recent.map(r => r.member));
+  // Everyone rebuilt recently, 100 at a time (each pass reads the stored faces once), REMATCH_MAX at most per run.
+  const since = Date.now() - REMATCH_WINDOW_MS, wide = await wide2006(env);
+  for (let after = 0, done = 0; done < REMATCH_MAX;) {
+    const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND f.member>? AND ${ELIGIBLE('f.member', wide)}
+      AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, since, after);
+    if (!recent.length) break;
+    await rematchMembers(env, recent.map(r => r.member));
+    after = recent[recent.length - 1].member; done += recent.length;
+  }
   await summarise(env);
 }
 
