@@ -945,7 +945,7 @@ async function route(req, env, record, setViewer, ctx) {
     const f = post ? await data() : null, action = f?.get('action');
     const panel = !post && u.searchParams.get('panel')==='comments';
     // Routine actions and the comments panel need only an authorized, visible post, not its full card.
-    const light = panel || ['like','comment','edit-comment','delete-comment','tag-accept','tag-remove','unassociate','delete','edit'].includes(action);
+    const light = panel || (!post && u.searchParams.get('panel')==='tags') || ['like','comment','edit-comment','delete-comment','tag-accept','tag-remove','unassociate','delete','edit'].includes(action);
     const item = light
       ? await one(`SELECT p.id,p.author,p.subject,p.origin,
           EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(? AS INTEGER) AS TEXT)) AS is_about_me
@@ -959,6 +959,11 @@ async function route(req, env, record, setViewer, ctx) {
       JOIN topics t ON t.id=pt.target WHERE pt.post=? AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       ORDER BY kind,label`,key,key);
     if (!post) {
+      if (u.searchParams.get('panel')==='tags') {
+        const photo=u.searchParams.get('photo')||'';
+        if(photo) return json((await photoLinks()).filter(t=>t.media===photo&&t.kind==='person').map(t=>({member:t.member,label:t.label,origin:t.origin})));
+        return json(await all("SELECT t.member,r.name AS label,'manual' AS origin FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND t.status='accepted' ORDER BY r.name",key));
+      }
       if (panel) return json((await all('SELECT c.id,c.author,c.body,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key)).map(({id,author,name,body})=>({id,name,body,canDelete:author===me})));
       const [comments,tags,images,tagLinks,album] = await Promise.all([
         all('SELECT c.*,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key),
@@ -1008,6 +1013,20 @@ async function route(req, env, record, setViewer, ctx) {
         );
       } else return invalid('Choose a classmate, place or event.');
       await db.batch([...tagJobs,sql('DELETE FROM notification_tag_actor WHERE post=?',key)]);
+    } else if (action==='tag-correct') {
+      photoScope=str(f,'photo',100);
+      const target=str(f,'tag',112);
+      if(!/^\d+$/.test(target)) return invalid('Choose a classmate.');
+      if(photoScope){
+        if(!JSON.parse(item.collage_photos||'[]').includes(photoScope)) return missing();
+        const tag=await one("SELECT target FROM active_photo_tags WHERE post=? AND media=? AND kind='person' AND target=?",key,photoScope,target);
+        if(!tag)return missing();
+        const jobs=[sql("DELETE FROM photo_tags WHERE post=? AND media=? AND kind='person' AND target=?",key,photoScope,target)];
+        if(await faceSchema(db)) jobs.push(sql("INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,?,?,NULL,0,'removed',?) ON CONFLICT(media,member) DO UPDATE SET state='removed'",photoScope,Number(target),key,Date.now()));
+        await db.batch(jobs);
+      }else{
+        await run("UPDATE tags SET status='declined' WHERE post=? AND member=? AND status='accepted'",key,Number(target));
+      }
     } else if (action==='edit-comment' || action==='delete-comment') {
       const comment = str(f,'comment',50), body = str(f,'body',1200);
       if (action==='edit-comment' && body) await run('UPDATE comments SET body=? WHERE id=? AND post=? AND author=?',body,comment,key,me);
@@ -1025,13 +1044,13 @@ async function route(req, env, record, setViewer, ctx) {
       const body = str(f,'body');
       if (body) await run('UPDATE posts SET body=? WHERE id=?',body,key);
     } else return invalid('Action unavailable.');
-    if (req.headers.get('Accept')==='application/json' && ['like','comment','tag-add','delete-comment'].includes(action)) {
+    if (req.headers.get('Accept')==='application/json' && ['like','comment','tag-add','tag-correct','delete-comment'].includes(action)) {
       if (action==='like') {
         const updated = await one('SELECT (SELECT count(*) FROM likes WHERE post=?) AS likes,EXISTS(SELECT 1 FROM likes WHERE post=? AND member=?) AS liked',key,key,me);
         return json({liked:!!updated.liked,likes:updated.likes});
       }
       if (savedComment) return json({comment:savedComment});
-      if (action==='tag-add') {
+      if (action==='tag-add'||action==='tag-correct') {
         const tagged=photoScope?{linked_tags:JSON.stringify((await photoLinks()).filter(link=>link.media===photoScope))}
           :(await posts('p.id=?',[key],1))[0];
         return json({tags:page.memoryTags(tagged)});
