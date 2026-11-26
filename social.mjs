@@ -325,6 +325,15 @@ export const socialScript = String.raw`
       redrawPhotos(composer);
     };
   }
+  const gallery=document.querySelector('[data-personal-gallery]');
+  if(gallery){
+    const form=gallery.querySelector('[data-gallery-form]'),select=form.querySelector('[data-gallery-select]'),cancel=form.querySelector('[data-gallery-cancel]'),remove=form.querySelector('[data-gallery-remove]'),status=form.querySelector('.gallery-selection-status');
+    const checks=[...form.querySelectorAll('input[name=media]')];
+    const update=()=>{const n=checks.filter(c=>c.checked).length;remove.disabled=!n||n>300;remove.textContent=n?'Remove selected ('+n+')':'Remove selected';status.textContent=n>300?'Select at most 300 photos at a time.':n?n+' selected':'';};
+    const mode=on=>{gallery.classList.toggle('is-selecting',on);select.hidden=on;cancel.hidden=!on;remove.hidden=!on;checks.forEach(c=>{c.closest('label').hidden=!on;if(!on)c.checked=false;});update();if(on)checks[0]?.focus();else select.focus();};
+    select.onclick=()=>mode(true);cancel.onclick=()=>mode(false);checks.forEach(c=>c.addEventListener('change',update));
+    form.addEventListener('submit',event=>{if(!gallery.classList.contains('is-selecting')||remove.disabled)event.preventDefault();else if(!confirm('Remove these tags from your gallery? The original photos will remain.'))event.preventDefault();});
+  }
   const viewer=document.querySelector('.album-viewer');
   if(viewer){
     const albumPhotos=[...document.querySelectorAll('[data-album-photo]')];
@@ -336,10 +345,11 @@ export const socialScript = String.raw`
       // A display-sized variant fills the viewer; the original stays one tap away.
       image.srcset=photo.href+'?w=768 768w, '+photo.href+'?w=1200 1200w';image.src=photo.href+'?w=1200';image.alt=photo.querySelector('img').alt;
       const original=viewer.querySelector('[data-album-original]');if(original)original.href=photo.href;
+      const memory=viewer.querySelector('[data-album-memory]');if(memory)memory.href=photo.dataset.memoryHref;
       viewer.querySelector('[role=status]').textContent=(current+1)+' of '+albumPhotos.length;
     };
     albumPhotos.forEach((photo,index)=>photo.addEventListener('click',event=>{
-      event.preventDefault();show(index);viewer.showModal();
+      event.preventDefault();if(gallery?.classList.contains('is-selecting')){const check=photo.closest('figure')?.querySelector('input');if(check){check.checked=!check.checked;check.dispatchEvent(new Event('change'));}return;}show(index);viewer.showModal();
     }));
     viewer.querySelector('[data-album-prev]').onclick=()=>show(current-1);
     viewer.querySelector('[data-album-next]').onclick=()=>show(current+1);

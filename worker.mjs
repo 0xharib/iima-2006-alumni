@@ -681,7 +681,7 @@ async function route(req, env, record, setViewer, ctx) {
     return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me&&await faceSchema(db)),member,{home:true,active:'/people'});
   }
 
-  if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me))):missing();
+  if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me),Math.max(0,Math.min(300,Number(u.searchParams.get('removed'))||0)))):missing();
   if (path==='/profile') {
     if (!post) {
       const [roster,fields,photos,checks,currentPortrait]=await Promise.all([
