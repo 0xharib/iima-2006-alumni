@@ -1000,7 +1000,7 @@ async function route(req, env, record, setViewer, ctx) {
         if (photoScope) tagJobs.push(await faceSchema(db)
           ? sql("INSERT INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?) ON CONFLICT(post,media,kind,target) DO UPDATE SET origin='manual'",key,photoScope,target)
           : sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'person',?)",key,photoScope,target));
-        else tagJobs.push(sql("INSERT INTO tags VALUES(?,?,'accepted') ON CONFLICT(post,member) DO UPDATE SET status='accepted' WHERE tags.status IN ('pending','declined')",key,Number(target)));
+        else tagJobs.push(sql("INSERT INTO tags VALUES(?,?,'accepted') ON CONFLICT(post,member) DO UPDATE SET status='accepted' WHERE tags.status='pending'",key,Number(target)));
       } else if (kind==='topic' && await one('SELECT 1 FROM topics WHERE id=? AND hidden=0 AND redirect IS NULL',target)) {
         if (photoScope) tagJobs.push(sql("INSERT OR IGNORE INTO photo_tags(post,media,kind,target) VALUES(?,?,'topic',?)",key,photoScope,target));
         else tagJobs.push(sql("INSERT OR IGNORE INTO memory_about VALUES(?,'topic',?)",key,target));
