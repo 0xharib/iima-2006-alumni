@@ -115,7 +115,7 @@ const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
   const previews=album?[photo,...photos.filter(media=>media!==photo)].slice(0,3):[];
   const albumImages=previews.map((media,slot)=>`<span class="album-preview-tile"><img src="${mediaSrc(media,slot===0?480:256)}" srcset="${mediaSet(media,slot===0?[256,480,768]:[96,256,480])}" sizes="${slot===0?'(max-width: 490px) 63vw, (max-width: 850px) 30vw, 270px':'(max-width: 490px) 32vw, (max-width: 850px) 15vw, 135px'}" alt="" decoding="async" ${priority&&index<3&&slot===0?'fetchpriority="high"':'loading="lazy"'}>${slot===2&&photos.length>3?`<span class="album-more"><strong>+${photos.length-3}</strong><span>more photos</span></span>`:''}</span>`).join('');
   const image=photo?`<img src="${mediaSrc(photo,480)}" srcset="${mediaSet(photo,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" data-full-src="/media/${e(photo)}" alt="${e(album?title:'Memory shared by '+post.author_name)}" decoding="async" ${priority&&index<3?'fetchpriority="high"':'loading="lazy"'}>`:'';
-  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}"${scoped?` data-photo-scope="${e(post.photo_scope)}"`:''}>
+  return `<article class="collage-card${photo?'':' text-memory'}" data-post="${e(post.id)}"${!scoped&&photos.length===1?` data-single-photo="${e(photo)}"`:''}${scoped?` data-photo-scope="${e(post.photo_scope)}"`:''}>
     ${memoryAuthor(post)}
     <div class="collage-visual">
       ${album?`<a class="album-cover album-collage album-collage-${previews.length}" href="/posts/${e(post.id)}" aria-label="Open ${e(title)}, ${photos.length} photos">${albumImages}</a>`:
@@ -142,7 +142,7 @@ const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
       <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
       <div data-tag-results></div></div>
     <div class="memory-result" role="status"></div>
-    ${!scoped&&photos.length===1?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(photo.replaceAll('/','-'))}">Manage photo tags →</a>`:''}
+
   </article>`;
 }).join('');
 const memoryDialog=()=>`<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
