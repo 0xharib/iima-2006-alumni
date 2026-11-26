@@ -564,11 +564,11 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:photos.map(photo=>`<section data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" class="album-photo-panel">${images([photo])}<div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</section>`).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
-      ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
+      ${isAlbum?`<p>${photos.length} photos</p>`:''}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
-      ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${isAlbum?gallery:''}`+
+      ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${gallery}`+
       (item.author===me?`${photos.length&&!item.origin?link(url+'/album','Edit album · add, remove or reorder photos'):''}<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',caption,photos.length?'':'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
       (item.subject===me||item.is_about_me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
       (tags.length?'<h2>Tags</h2>'+list(tags.map(t=>link('/people/'+t.member,t.name)+' '+badge(t.status)+
