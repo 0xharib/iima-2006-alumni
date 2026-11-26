@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fixture } from './fixture.mjs';
 import { refScore, FACE_BAR_2006, faceMode2006, vectorBytes, scanPhoto, refreshRefs, handleQueue, sweep, publishShadow, rematchMember,
-  consistent, AGREE, TAGGED_MIN_SIZE, faceAdminData } from '../faces.mjs';
+  consistent, AGREE, TAGGED_MIN_SIZE, faceAdminData, finishRun, SCAN_ALL_PEOPLE } from '../faces.mjs';
 
 const unitVec = i => { const a = new Float32Array(512); a[i] = 1; return a; };
 const mixVec = (i, j, w) => { const a = new Float32Array(512); a[i] = w; a[j] = Math.sqrt(1 - w * w); return a; };
@@ -214,4 +214,23 @@ test('a match through a 2006 photo needs 0.40; through a current photo 0.35 is e
   assert.deepEqual((await scanPhoto(w.env, 'p2', b)).tagged, [3]);
   const c = w.photo('p3', 'u3', 3); w.face(c, 'p3', mixVec(5, 9, 0.37), 60);
   assert.equal(await rematchMember(w.env, 3), 0);
+});
+
+test('Scan all queues reference rebuilds for the whole roster, and the finish job re-matches all of them', async () => {
+  const w = world('on', 'on');
+  const ids = Array.from({length: 150}, (_, i) => 1000 + i);
+  const ins = w.sqlite.prepare("INSERT INTO roster VALUES(?,?,'D','')");
+  for (const id of ids) ins.run(id, 'Person ' + id);
+  const sent = []; w.env.FACE_JOBS = {sendBatch: async m => { sent.push(...m); }, send: async () => {}};
+  await w.call('/admin/faces', await w.session(1, 'aaaa'), {action: 'scan-all'});
+  assert.ok(SCAN_ALL_PEOPLE >= 1000);
+  assert.equal(sent.filter(m => m.body.type === 'ref').length, 154);
+  // Every one of them has a reference and is in one stored photo; the finish job must reach the last one too.
+  const m = w.photo('p1', 'u1', 1);
+  const refStmt = w.sqlite.prepare("INSERT INTO face_refs VALUES(?,'archive','k',?,'buffalo_l/w600k_r50')");
+  const pref = w.sqlite.prepare('INSERT OR REPLACE INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(?,1,1,0,?)');
+  ids.forEach((id, i) => { refStmt.run(id, vectorBytes(unitVec(i))); pref.run(id, Date.now()); });
+  w.face(m, 'p1', unitVec(149), 60);
+  await finishRun(w.env);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='1149' AND origin='auto'").get().n, 1);
 });

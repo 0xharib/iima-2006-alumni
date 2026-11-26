@@ -183,7 +183,9 @@ references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 
 3. queues reference rebuilds for eligible members who are new, changed a profile photo or were tagged by hand, up to 100;
 4. queues one finish job, delayed 40 minutes: it matches everyone rebuilt in the last 6 hours against every stored
    face, then sends each person one summary notification. Your own uploads are tagged but not counted.
-**Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos.
+**Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos and reference rebuilds
+for everyone who needs one (the 3-hour batch takes 100 people at a time). The finish job re-matches everyone rebuilt
+in the last 6 hours, 100 at a time, up to 600 per run.
 
 **One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
 `photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or

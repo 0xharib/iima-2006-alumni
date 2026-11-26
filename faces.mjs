@@ -613,7 +613,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const HOUR_MS = 60 * 60 * 1000;
 const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
-const REMATCH_WINDOW_MS = 6 * HOUR_MS;   // two runs: a rebuild finished after one run's finish is caught by the next
+const REMATCH_WINDOW_MS = 6 * HOUR_MS;
+const REMATCH_MAX = 600;   // members re-matched per finish job: the whole roster, with room to spare
+// Reference rebuilds queued by "Scan all photos now": the whole roster at once (the 3-hour batch takes 100).
+export const SCAN_ALL_PEOPLE = 1000;   // two runs: a rebuild finished after one run's finish is caught by the next
 
 // Members to (re)build references for: eligible and new, marked after a profile photo changed or a hand tag, or
 // without usable references and last tried over a day ago (three tries at most until a photo changes). ?1 = a day ago.
@@ -639,14 +642,14 @@ async function dropIneligible(env) {
 
 // The batch, every 3 hours (and the admin's "Scan all photos now"): queue new or failed photos and reference
 // rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
-export async function sweep(env, limit = 500) {
+export async function sweep(env, limit = 500, people = 100) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
   await dropIneligible(env);
   const dayAgo = Date.now() - DAY_MS;
   const todo = await rows(env.DB, UNSCANNED + ' LIMIT ?2', dayAgo, limit);
-  const people = await rows(env.DB, needsRefs(await wide2006(env)), dayAgo, 100);
+  const rebuild = await rows(env.DB, needsRefs(await wide2006(env)), dayAgo, people);
   const jobs = [...todo.map(t => ({body: {type: 'media', post: t.post, media: t.media}})),
-    ...people.map(p => ({body: {type: 'ref', member: p.member}}))];
+    ...rebuild.map(p => ({body: {type: 'ref', member: p.member}}))];
   for (let i = 0; i < jobs.length; i += 100) await env.FACE_JOBS.sendBatch(jobs.slice(i, i + 100));
   await env.FACE_JOBS.send({type: 'finish'}, {delaySeconds: FINISH_DELAY_S});
   return todo.length;
@@ -657,9 +660,15 @@ export async function sweep(env, limit = 500) {
 export async function finishRun(env) {
   const db = env.DB;
   if (faceMode(env) === 'off' || !await faceSchema(db)) return;
-  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member', await wide2006(env))}
-    AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, Date.now() - REMATCH_WINDOW_MS);
-  await rematchMembers(env, recent.map(r => r.member));
+  // Everyone rebuilt recently, 100 at a time (each pass reads the stored faces once), REMATCH_MAX at most per run.
+  const since = Date.now() - REMATCH_WINDOW_MS, wide = await wide2006(env);
+  for (let after = 0, done = 0; done < REMATCH_MAX;) {
+    const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND f.member>? AND ${ELIGIBLE('f.member', wide)}
+      AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, since, after);
+    if (!recent.length) break;
+    await rematchMembers(env, recent.map(r => r.member));
+    after = recent[recent.length - 1].member; done += recent.length;
+  }
   await summarise(env);
 }
 

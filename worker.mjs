@@ -3,7 +3,7 @@ import { render, signIn, page, form, field, escape, whatsappRequirements, whatsa
 import { fonts } from './fonts.mjs';
 import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
-import { faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
+import { SCAN_ALL_PEOPLE, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
 import { completedProfilesCTE } from './completion.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
@@ -1157,7 +1157,7 @@ async function route(req, env, record, setViewer, ctx) {
   if (path==='/admin/faces' && admin) {
     if (!post) return show('Face tagging',page.adminFaces(await faceAdminData(env),Number(u.searchParams.get('queued'))||0,u.searchParams.has('published')?Number(u.searchParams.get('published')):NaN));
     const action=str(await data(),'action',20);
-    if (action==='scan-all') return redirect('/admin/faces?queued='+await sweep(env,5000));
+    if (action==='scan-all') return redirect('/admin/faces?queued='+await sweep(env,5000,SCAN_ALL_PEOPLE));
     if (action==='publish') {
       const published=await publishShadow(env);
       return published===null?invalid('Switch FACE_TAGGING to on before publishing.'):redirect('/admin/faces?published='+published);
