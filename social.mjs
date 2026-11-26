@@ -410,7 +410,7 @@ export const socialScript = String.raw`
       let link=list.querySelector('a[href="/people/'+CSS.escape(String(row.member))+'"]');
       if(row.photo&&!link){let group=list.querySelector('.memory-tags');if(!group){group=document.createElement('div');group.className='memory-tags';list.append(group);}link=document.createElement('a');link.href='/people/'+row.member;link.textContent='@'+row.label;link.dataset.photoEditOnly='';group.append(link);}
       if(!link)continue;
-      if(link.parentElement.hasAttribute('data-tag-chip-edit')){if(row.photo)link.parentElement.querySelector('button').dataset.correctPhoto=row.photo;continue;}
+      if(link.parentElement.hasAttribute('data-tag-chip-edit')){if(row.photo)link.parentElement.querySelector('button').dataset.alsoPhoto=row.photo;continue;}
       const remove=document.createElement('button');
       remove.type='button';remove.dataset.correctTag=row.member;if(row.photo)remove.dataset.correctPhoto=row.photo;remove.textContent='×';
       remove.style.cssText='padding:0 6px;min-width:24px;min-height:24px;border:0;background:transparent;color:inherit';
@@ -465,6 +465,9 @@ export const socialScript = String.raw`
       if(button.matches('[data-enlarge]')){
         if(card.closest('dialog'))return;
         const dialog=document.querySelector('.memory-dialog'), copy=card.cloneNode(true);
+        clearTagEditing(copy);
+        copy.querySelectorAll('[data-panel-content]').forEach(panel=>panel.hidden=true);
+        copy.querySelectorAll('[data-panel]').forEach(toggle=>toggle.setAttribute('aria-expanded','false'));
         const photo=copy.querySelector('[data-full-src]');
         if(photo){
           photo.removeAttribute('loading');
@@ -527,6 +530,7 @@ export const socialScript = String.raw`
           data.set('action','tag-correct');data.set('tag',target);
           if(button.dataset.correctPhoto||card.dataset.photoScope)data.set('photo',button.dataset.correctPhoto||card.dataset.photoScope);
           const {tags}=await send(path(card),data);
+          if(button.dataset.alsoPhoto){const extra=new FormData();extra.set('action','tag-correct');extra.set('tag',target);extra.set('photo',button.dataset.alsoPhoto);await send(path(card),extra);}
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
             if(rendered.dataset.photoScope===(button.dataset.correctPhoto||card.dataset.photoScope)){
               rendered.querySelector('[data-memory-tags]').innerHTML=tags;
