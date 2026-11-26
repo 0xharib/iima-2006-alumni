@@ -1017,15 +1017,18 @@ async function route(req, env, record, setViewer, ctx) {
       photoScope=str(f,'photo',100);
       const target=str(f,'tag',112);
       if(!/^\d+$/.test(target)) return invalid('Choose a classmate.');
+      if (!await limit('tag:'+me,10,20)) return new Response('Please wait before correcting tags.',{status:429});
       if(photoScope){
         if(!JSON.parse(item.collage_photos||'[]').includes(photoScope)) return missing();
         const tag=await one("SELECT target FROM active_photo_tags WHERE post=? AND media=? AND kind='person' AND target=?",key,photoScope,target);
-        if(!tag)return missing();
+        if(tag){
         const jobs=[sql("DELETE FROM photo_tags WHERE post=? AND media=? AND kind='person' AND target=?",key,photoScope,target)];
         if(await faceSchema(db)) jobs.push(sql("INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,?,?,NULL,0,'removed',?) ON CONFLICT(media,member) DO UPDATE SET state='removed'",photoScope,Number(target),key,Date.now()));
+        if(await faceSchema(db)) jobs.push(sql("DELETE FROM notifications WHERE recipient=? AND event_key='found:'||? AND NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=? AND kind='person' AND target=? AND origin='auto')",Number(target),key,key,target));
         await db.batch(jobs);
+        }
       }else{
-        await run("UPDATE tags SET status='declined' WHERE post=? AND member=? AND status='accepted'",key,Number(target));
+        await run("DELETE FROM tags WHERE post=? AND member=? AND status='accepted'",key,Number(target));
       }
     } else if (action==='edit-comment' || action==='delete-comment') {
       const comment = str(f,'comment',50), body = str(f,'body',1200);
