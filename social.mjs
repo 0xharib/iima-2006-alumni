@@ -252,7 +252,7 @@ export const socialScript = String.raw`
   const redrawPhotos=form=>{
     const draft=drafts.get(form);
     const {photos}=draft;
-    const album=photos.length>1;
+    const album=photos.length>1||form.hasAttribute('data-album-edit');
     const title=form.querySelector('[data-album-title]');
     title.hidden=!album;form.elements.title.required=album;
     form.querySelector('[data-cover-hint]').hidden=!album;
