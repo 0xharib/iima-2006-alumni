@@ -204,7 +204,12 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .memory-columns .text-memory{background:var(--tint);border-color:var(--line)}
 .icon-action[data-tooltip]{position:relative}
 .icon-action[data-tooltip]::after{content:attr(data-tooltip);position:absolute;bottom:calc(100% + 4px);left:0;z-index:3;pointer-events:none;opacity:0;padding:.23rem .5rem;border-radius:.35rem;background:#291d17;color:#fff9ec;font:650 .75rem/1.4 var(--sans);white-space:nowrap}
-.icon-action[data-tooltip]:is(:hover,:focus-visible)::after{opacity:1}
+@media (hover:hover) and (pointer:fine){.icon-action[data-tooltip]:hover::after{opacity:1}}
+.icon-action[data-tooltip]:focus-visible::after{opacity:1}
+.icon-action[data-tooltip][aria-expanded="true"]::after{opacity:0}
+.memory-tags .tag-chip-edit{display:inline-flex;align-items:center;border-radius:999px;background:var(--brick-wash);color:var(--brick-deep);overflow:hidden}
+.memory-tags .tag-chip-edit a{background:transparent!important;padding-right:0}
+.memory-tags .tag-chip-edit button{font:inherit;cursor:pointer}
 .comment-row{position:relative;padding:.35rem 2rem .35rem .65rem;border-radius:.65rem;background:var(--tint);margin:.4rem 0}
 .memory-inline [data-comments] .comment-row p{padding:0;margin:.2rem 0;background:transparent}
 .comment-menu{position:absolute;right:.35rem;top:.15rem}
