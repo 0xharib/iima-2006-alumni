@@ -200,3 +200,15 @@ responsibility for that question. The models are downloaded when the image is bu
 `FACE_SERVICE_URL=http://localhost:8080` and `FACE_TAGGING=shadow` in `.dev.vars`. `wrangler.local.toml` has no queue, so
 photos are only scanned locally if you copy the two queue blocks from `wrangler.toml` into it. Tests:
 `cd face-service && python3 -m unittest` (add `FACE_MODELS=…` to include the model check).
+
+## 300-photo album preview
+
+`preview/album-300-editor` is a preview-only release. Use `wrangler.preview.toml` for the isolated `iima-album-preview` Worker, D1 database and R2 bucket. The production config, main branch, database and media are unchanged. This public QA sandbox contains synthetic classmates only; `PREVIEW_DEMO=1` lets visitors try either test account through `/preview-demo`. Never enable that flag on an environment holding real member data. Sign-in email and scheduled face processing are disabled in this sandbox.
+
+Apply migration `0020_album_editing.sql` to the target database before deploying this code. It adds indexed removal markers, active-photo/tag/face views, and an atomic version guard. It neither deletes nor reassigns existing originals or interactions. A removed photo stops appearing in media, profile galleries, tag projections and face jobs. Likes, comments, remaining tags and face IDs retain their original identities. Removed originals and historical tags remain stored; no storage cleanup is performed by album editing.
+
+Owners can edit an uploaded memory's caption/title, append photos, select a cover, reorder with Move earlier/later, and select multiple photos for removal. Imported legacy yearbook photos keep their existing editing behavior. New and edited albums accept 1–300 distinct JPEG/PNG photos, 15 MB per file; text-only memories remain supported. Album editing rejects stale saves and retries of a confirmed save are harmless.
+
+Drafts are scoped to the signed-in member and compose/edit destination in IndexedDB on that device and browser. File blobs are stored once, separately from draft metadata; confirmed uploads are skipped after a retry or reload. Uploads remain three at a time and retain the existing original-quality processing. Browser storage quotas/private modes can prevent persistence; the form then asks the user to keep the page open. Metadata edits preserve the original photo IDs. Publishing clears the local draft and its stored blobs. Gallery images and draft thumbnails load lazily. Large ID lists use one `json_each` parameter instead of exceeding D1's 100-bound-parameter limit; bulk removal uses one SQL statement.
+
+Validation: `node --test` covers the 300/301 boundary, duplicate IDs, ownership, foreign photos, stale edits, retry idempotency, ordering, retained comments/likes/tags/face scans, inaccessible removed media and the version guard. Existing face tests exercise the matching subsystem with synthetic embeddings. Live recognition is not enabled in the sandbox. Before promoting, run browser upload/reload/retry checks on a phone and apply migration 0020 to the production target only with an explicit production release instruction.

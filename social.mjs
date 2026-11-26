@@ -201,20 +201,68 @@ export const socialScript = String.raw`
     });
   }
   const drafts=new WeakMap();
+  const draftDB=new Promise((resolve,reject)=>{
+    const open=indexedDB.open('iima-album-drafts',1);
+    open.onupgradeneeded=()=>{open.result.createObjectStore('drafts');open.result.createObjectStore('files');};
+    open.onsuccess=()=>resolve(open.result);open.onerror=()=>reject(open.error);
+  });
+  draftDB.catch(()=>{});
+  const draftKey=form=>document.querySelector('script[data-member]').dataset.member+':'+new URL(form.action).pathname+':'+location.search;
+  async function draftStore(form,mode,value){
+    const db=await draftDB;
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction('drafts',mode==='get'?'readonly':'readwrite'),store=tx.objectStore('drafts');
+      const op=mode==='get'?store.get(draftKey(form)):mode==='delete'?store.delete(draftKey(form)):store.put(value,draftKey(form));
+      tx.oncomplete=()=>resolve(op.result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+  }
+  async function draftFile(form,id,file){
+    const db=await draftDB;
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction('files',file?'readwrite':'readonly'),store=tx.objectStore('files');
+      const op=file?store.put(file,draftKey(form)+':'+id):store.get(draftKey(form)+':'+id);
+      tx.oncomplete=()=>resolve(op.result);tx.onerror=()=>reject(tx.error);
+    });
+  }
+  async function clearDraft(form){
+    const db=await draftDB;
+    await draftStore(form,'delete');
+    return new Promise((resolve,reject)=>{
+      const tx=db.transaction('files','readwrite'),store=tx.objectStore('files'),prefix=draftKey(form)+':';
+      const cursor=store.openCursor(IDBKeyRange.bound(prefix,prefix+'\uffff'));
+      cursor.onsuccess=()=>{const c=cursor.result;if(c){c.delete();c.continue();}};
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+  }
+  const persistDraft=form=>{
+    const d=drafts.get(form);if(!d||!d.ready||d.clearing)return Promise.resolve();
+    if(!d.photos.length&&!form.elements.body.value.trim()&&!form.elements.title.value.trim())return clearDraft(form).catch(()=>{});
+    const files=d.photos.filter(p=>p.file).map(p=>({id:p.id,file:p.file}));
+    const value={photos:d.photos.map(({url,file,...photo})=>photo),cover:d.cover,id:form.elements.id.value,
+      body:form.elements.body.value,title:form.elements.title.value,tags:form.querySelector('[data-topic-chips]').innerHTML,revision:form.elements.revision?.value};
+    d.saves=(d.saves||Promise.resolve()).catch(()=>{}).then(async()=>{
+      d.storedFiles ||= new Set();
+      for(const photo of files)if(!d.storedFiles.has(photo.id)){await draftFile(form,photo.id,photo.file);d.storedFiles.add(photo.id);}
+      await draftStore(form,'put',value);
+    });
+    d.saves.catch(()=>{form.querySelector('[data-compose-status]').textContent='Draft could not be saved on this device. Keep this page open to finish uploading.';});
+    return d.saves;
+  };
+
   const redrawPhotos=form=>{
     const draft=drafts.get(form);
     const {photos}=draft;
-    const album=photos.length>1;
+    const album=photos.length>1||form.hasAttribute('data-album-edit');
     const title=form.querySelector('[data-album-title]');
     title.hidden=!album;form.elements.title.required=album;
     form.querySelector('[data-cover-hint]').hidden=!album;
     form.querySelector('[data-photo-queue]').replaceChildren(...photos.map((photo,index)=>{
       const item=document.createElement('li'), preview=document.createElement('img');
-      preview.src=photo.url;preview.alt=photo.file.name;
+      preview.src=photo.url;preview.alt=photo.file?.name||photo.name||"Album photo";preview.loading="lazy";
       if(album){
         const cover=document.createElement('button');
         cover.type='button';cover.className='cover-thumb';
-        cover.setAttribute('aria-label','Set '+photo.file.name+' as cover');
+        cover.setAttribute('aria-label','Set '+(photo.file?.name||photo.name||"Album photo")+' as cover');
         cover.setAttribute('aria-pressed',String(draft.cover===photo.id));
         cover.append(preview);
         if(draft.cover===photo.id){
@@ -225,18 +273,57 @@ export const socialScript = String.raw`
       }else item.append(preview);
       const remove=document.createElement('button');
       remove.type='button';remove.className='remove-thumb';remove.textContent='×';
-      remove.setAttribute('aria-label','Remove '+photo.file.name);
+      remove.setAttribute('aria-label','Remove '+(photo.file?.name||photo.name||"Album photo"));
       remove.onclick=()=>{
         photos.splice(index,1);URL.revokeObjectURL(photo.url);
         if(draft.cover===photo.id)draft.cover=photos[0]?.id;
         redrawPhotos(form);
       };
-      item.append(remove);
+      const selected=document.createElement('input');selected.type='checkbox';selected.checked=!!photo.selected;
+      selected.setAttribute('aria-label','Select photo '+(index+1));selected.onchange=()=>{if(form.dataset.saving)return;photo.selected=selected.checked;persistDraft(form);};
+      item.append(selected);
+      for(const [label,offset] of [['Move earlier',-1],['Move later',1]]){
+        const move=document.createElement('button');move.type='button';move.textContent=label;
+        move.disabled=index+offset<0||index+offset>=photos.length;
+        move.onclick=()=>{[photos[index],photos[index+offset]]=[photos[index+offset],photos[index]];redrawPhotos(form);};item.append(move);
+      }
+      const state=document.createElement('small');state.textContent=photo.existing?'Saved':photo.uploaded?'Uploaded':'Waiting to upload';item.append(state,remove);
       return item;
     }));
+    persistDraft(form);
   };
   for(const composer of document.querySelectorAll('[data-compose]')){
-    drafts.set(composer,{photos:[],cover:null,initialTags:composer.querySelector('[data-topic-chips]').innerHTML});
+    const initial=JSON.parse(composer.querySelector('[data-album-initial]')?.textContent||'{}');
+    const d={photos:(initial.photos||[]).map(p=>({...p,url:'/media/post/'+p.id+'?w=96'})),cover:initial.cover||null,initialTags:composer.querySelector('[data-topic-chips]').innerHTML,ready:false};
+    drafts.set(composer,d);
+    if(composer.elements.body.dataset.initial)composer.elements.body.value=composer.elements.body.dataset.initial;
+    const controls=[...composer.elements];controls.forEach(c=>c.disabled=true);
+    const status=composer.querySelector('[data-compose-status]');
+    d.loading=(async()=>{
+      try{
+        const saved=await draftStore(composer,'get');
+        if(saved){
+          d.photos=await Promise.all(saved.photos.map(async p=>{
+            const file=p.existing?null:await draftFile(composer,p.id);
+            if(!p.existing&&!p.uploaded&&!file)throw new Error('Draft file unavailable');
+            return {...p,file,url:file?URL.createObjectURL(file):(p.existing?'/media/post/':'/compose/photo?id=')+p.id+(p.existing?'?w=96':'')};
+          }));d.storedFiles=new Set(d.photos.filter(p=>p.file).map(p=>p.id));d.cover=saved.cover;
+          composer.elements.id.value=saved.id;composer.elements.body.value=saved.body;composer.elements.title.value=saved.title;
+          composer.querySelector('[data-topic-chips]').innerHTML=saved.tags;
+          if(composer.elements.revision&&saved.revision)composer.elements.revision.value=saved.revision;
+          status.textContent='Restored your unfinished draft. Continue adding photos or retry saving.';
+        }
+      }catch{status.textContent='Draft storage is unavailable. Keep this page open until you finish.';}
+      finally{d.ready=true;controls.forEach(c=>c.disabled=false);redrawPhotos(composer);}
+    })();
+    new MutationObserver(()=>persistDraft(composer)).observe(composer.querySelector('[data-topic-chips]'),{childList:true});
+    composer.addEventListener('input',()=>persistDraft(composer));
+    composer.querySelector('[data-remove-selected]').onclick=()=>{
+      if(composer.dataset.saving)return;
+      d.photos=d.photos.filter(p=>{if(p.selected&&!p.existing)URL.revokeObjectURL(p.url);return !p.selected;});
+      if(!d.photos.some(p=>p.id===d.cover))d.cover=d.photos[0]?.id;
+      redrawPhotos(composer);
+    };
   }
   const viewer=document.querySelector('.album-viewer');
   if(viewer){
@@ -467,9 +554,9 @@ export const socialScript = String.raw`
       const status=picker.form.querySelector('[data-compose-status]');
       status.textContent='';
       for(const file of picker.files){
-        if(draft.photos.length===50){status.textContent='An album can hold up to 50 photos.';break;}
+        if(draft.photos.length===300){status.textContent='An album can hold up to 300 photos.';break;}
         if(file.size>15*1024*1024){status.textContent='Each photo must be 15 MB or smaller.';continue;}
-        const photo={id:crypto.randomUUID(),file,url:URL.createObjectURL(file),uploaded:false};
+        const photo={id:crypto.randomUUID(),name:file.name,file,url:URL.createObjectURL(file),uploaded:false};
         draft.photos.push(photo);
         draft.cover ||= photo.id;
       }
@@ -502,17 +589,20 @@ export const socialScript = String.raw`
     if(form.matches('[data-compose]')){
       event.preventDefault();
       if(form.dataset.saving)return;
+      await drafts.get(form).loading;
       form.dataset.saving='true';
       const status=form.querySelector('[data-compose-status]');
       const button=form.querySelector('button[type=submit]');
       button.disabled=true;
       try{
         const draft=drafts.get(form), data=new FormData(form);
+        await persistDraft(form).catch(()=>{});
+        const progress=form.querySelector('[data-upload-progress]');progress.hidden=false;progress.max=draft.photos.length||1;progress.value=draft.photos.filter(p=>p.uploaded).length;
         data.delete('images');
         if(!draft.photos.length&&!String(data.get('body')).trim())throw new Error('Add a photo or write a memory.');
         const picker=form.elements.images;
         picker.disabled=true;
-        form.querySelectorAll('[data-photo-queue] button').forEach(control=>{control.disabled=true;});
+        form.querySelectorAll('input,textarea,button:not([type=submit])').forEach(control=>{control.disabled=true;});
         let done=draft.photos.filter(photo=>photo.uploaded).length;
         const pending=draft.photos.filter(photo=>!photo.uploaded);
         for(let start=0;start<pending.length;start+=3){
@@ -521,7 +611,7 @@ export const socialScript = String.raw`
             const upload=new FormData();upload.set('photo',photo.file);
             // Each photo has a stable id, so pressing Publish again re-sends only photos not yet confirmed.
             await request('/compose/photo?id='+encodeURIComponent(photo.id),{method:'POST',body:upload,timeout:120000});
-            photo.uploaded=true;done++;
+            photo.uploaded=true;done++;progress.value=done;status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';await persistDraft(form).catch(()=>{});
             status.textContent='Uploaded '+done+' of '+draft.photos.length+' photos…';
           }));
           const failed=batch.find(result=>result.status==='rejected');
@@ -529,10 +619,11 @@ export const socialScript = String.raw`
         }
         for(const photo of draft.photos)data.append('photoId',photo.id);
         if(draft.cover)data.set('cover',draft.cover);
-        status.textContent='Publishing memory…';
+        status.textContent=form.hasAttribute('data-album-edit')?'Saving album…':'Publishing memory…';
         // The memory id is fixed per draft, so a retry after an unconfirmed publish never duplicates it.
         const result=await request(form.action,{method:'POST',body:data,timeout:30000});
-        if(!feed){location.assign(result.url);return;}
+        clearTimeout(draft.saveTimer);draft.clearing=true;await draft.saves?.catch(()=>{});await clearDraft(form).catch(()=>{});
+        if(form.hasAttribute('data-album-edit')||!feed){location.assign(result.url);return;}
         if(!feed.querySelector('[data-post]'))feed.replaceChildren();
         addBatch(result.html,true);
         draft.photos.forEach(photo=>URL.revokeObjectURL(photo.url));
@@ -541,11 +632,11 @@ export const socialScript = String.raw`
         form.querySelector('[data-topic-chips]').innerHTML=draft.initialTags;
         form.querySelector('[data-target-results]').replaceChildren();
         form.elements.id.value=crypto.randomUUID();
-        status.textContent='';
+        status.textContent='';draft.clearing=false;
         form.closest('dialog')?.close();
 
       }catch(error){status.textContent=error.message;}
-      finally{delete form.dataset.saving;button.disabled=false;form.elements.images.disabled=false;redrawPhotos(form);}
+      finally{delete form.dataset.saving;form.querySelectorAll('input,textarea,button').forEach(c=>c.disabled=false);redrawPhotos(form);}
       return;
     }
     if(form.matches('[data-profile-form]')){

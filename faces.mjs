@@ -140,7 +140,7 @@ export async function faceSchema(db) {
   if (schemaReady.has(db)) return true;
   try {
     await db.prepare('SELECT origin FROM photo_tags LIMIT 0').bind().all();
-    await db.prepare('SELECT notified FROM face_matches LIMIT 0').bind().all();
+    await db.prepare('SELECT notified FROM active_face_matches LIMIT 0').bind().all();
   } catch { return false; }
   schemaReady.add(db);
   return true;
@@ -150,7 +150,7 @@ export async function faceSchema(db) {
 export async function mediaObject(db, media) {
   const [kind, a, b] = String(media).split('/');
   let row = null;
-  if (kind === 'post' && a) row = await first(db, `SELECT a.object_key FROM uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${POST_VISIBLE}`, a);
+  if (kind === 'post' && a) row = await first(db, `SELECT a.object_key FROM active_uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${POST_VISIBLE}`, a);
   else if (kind === 'legacy' && a && Number(b) > 0) row = await first(db, `SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
     WHERE p.id=? AND ${POST_VISIBLE} ORDER BY ph.object_key LIMIT 1 OFFSET ?`, a, Number(b) - 1);
   return row?.object_key || null;
@@ -186,10 +186,10 @@ async function eligibleRefs(db, except = new Set()) {
 
 // A match may be written only if: no manual tag for that person on that photo, no "Not me", the person still has a
 // profile picture, and the face is not already someone else's. Parameters: ?1 post, ?2 media, ?3 member as text, ?4 member, ?5 face.
-const ALLOWED = `NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
-  AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND member=?4 AND state='removed')
+const ALLOWED = `NOT EXISTS(SELECT 1 FROM removed_album_photos WHERE ?2='post/'||photo) AND NOT EXISTS(SELECT 1 FROM photo_tags WHERE post=?1 AND media=?2 AND kind='person' AND target=?3 AND origin='manual')
+  AND NOT EXISTS(SELECT 1 FROM active_face_matches WHERE media=?2 AND member=?4 AND state='removed')
   AND ${ELIGIBLE('?4')}
-  AND NOT EXISTS(SELECT 1 FROM face_matches WHERE media=?2 AND face=?5 AND member<>?4 AND state IN ('shadow','auto'))`;
+  AND NOT EXISTS(SELECT 1 FROM active_face_matches WHERE media=?2 AND face=?5 AND member<>?4 AND state IN ('shadow','auto'))`;
 
 // Write matches the same way for every path. notify 'post': one notification per member per memory now (new
 // memories). notify 'later': no notification now; summarise() tells each member once (backlog, re-matching, publishing).
@@ -235,11 +235,11 @@ export async function summarise(env, member = null) {
   if (faceMode(env) !== 'on' || !await faceSchema(db)) return 0;
   const who = member === null ? '' : ' AND m.member=?';
   const extra = member === null ? [] : [member];
-  const pending = await rows(db, `SELECT m.member,count(*) AS n FROM face_matches m JOIN posts p ON p.id=m.post
+  const pending = await rows(db, `SELECT m.member,count(*) AS n FROM active_face_matches m JOIN posts p ON p.id=m.post
     WHERE m.state='auto' AND m.notified=0 AND p.author<>m.member${who} GROUP BY m.member`, ...extra);
   const stamp = Date.now();
   for (const {member: person, n} of pending) {
-    const newest = await first(db, `SELECT m.post,m.media FROM face_matches m JOIN posts p ON p.id=m.post
+    const newest = await first(db, `SELECT m.post,m.media FROM active_face_matches m JOIN posts p ON p.id=m.post
       WHERE m.member=? AND m.state='auto' AND m.notified=0 AND p.author<>m.member ORDER BY p.created DESC,m.media LIMIT 1`, person);
     await db.batch([
       q(db, `INSERT OR IGNORE INTO notifications(recipient,actor,kind,post,anchor,event_key) VALUES(?,NULL,'mention',?,?,?)`,
@@ -267,14 +267,14 @@ export async function scanPhoto(env, post, media, notify = 'later') {
       ON CONFLICT(media) DO UPDATE SET status='done',faces=excluded.faces,width=excluded.width,height=excluded.height,
       model=excluded.model,scanned=excluded.scanned`, media, post, result.faces.length, result.width ?? null, result.height ?? null, result.model, stamp),
   ]);
-  const ids = (await rows(db, 'SELECT id FROM faces WHERE media=? ORDER BY id', media)).map(r => r.id);
+  const ids = (await rows(db, 'SELECT id FROM active_faces WHERE media=? ORDER BY id', media)).map(r => r.id);
   // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
-  const skip = new Set((await rows(db, `SELECT member FROM face_matches WHERE media=? AND state='removed'
+  const skip = new Set((await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state='removed'
     UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
   const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(db, skip));
   const kept = pairs.map(p => p.member);
   const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
-  const stale = (await rows(db, `SELECT member FROM face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
+  const stale = (await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
   if (stale.length) await db.batch(stale.flatMap(member => [
     q(db, `DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=? AND origin='auto'`, media, String(member)),
     q(db, `DELETE FROM face_matches WHERE media=? AND member=? AND state IN ('auto','shadow')`, media, member),
@@ -424,7 +424,7 @@ export async function rematchMembers(env, members) {
   if (!refs.size) return 0;
   const best = new Map();   // member/media -> match
   for (let after = 0; ;) {
-    const page = await rows(db, 'SELECT id,media,post,embedding FROM faces WHERE id>? ORDER BY id LIMIT 500', after);
+    const page = await rows(db, 'SELECT id,media,post,embedding FROM active_faces WHERE id>? ORDER BY id LIMIT 500', after);
     if (!page.length) break;
     for (const face of page) {
       const vector = toVector(face.embedding);
@@ -443,7 +443,7 @@ export async function rematchMembers(env, members) {
 export const rematchMember = (env, member) => rematchMembers(env, [member]);
 
 // Every photo the member is tagged in, newest memory first.
-export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM photo_tags pt JOIN posts p ON p.id=pt.post
+export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
   WHERE pt.kind='person' AND pt.target=? AND ${POST_VISIBLE} ORDER BY p.created DESC,pt.media`, String(me));
 
 async function notMe(req, env, me) {
@@ -471,7 +471,7 @@ export async function faceRoute({req, env, me, path, post}) {
 // ---------- the 3-hour batch and the admin page ----------
 
 // Every photo shown in a visible memory, with the media id the site uses for it.
-const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
+const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM active_uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
     UNION ALL
     SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,p.id AS post
       FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${POST_VISIBLE}`;
@@ -494,7 +494,7 @@ const NEEDS_REFS = `SELECT pf.member FROM profile_fields pf LEFT JOIN face_prefs
 
 // Anyone who no longer has a profile picture loses their references and automatic tags (Not me and manual tags stay).
 async function dropIneligible(db) {
-  const gone = await rows(db, `SELECT member FROM (SELECT member FROM face_refs UNION SELECT member FROM face_matches
+  const gone = await rows(db, `SELECT member FROM (SELECT member FROM face_refs UNION SELECT member FROM active_face_matches
     WHERE state<>'removed') x WHERE NOT ${ELIGIBLE('x.member')} LIMIT 100`);
   for (const {member} of gone) await db.batch([
     q(db, 'DELETE FROM face_refs WHERE member=?', member),
@@ -546,14 +546,14 @@ export async function faceAdminData(env) {
       photos: await count(`SELECT count(*) n FROM (${SHOWN_PHOTOS})`),
       scanned: await count(`SELECT count(*) n FROM face_scans WHERE status='done'`),
       failed: await count(`SELECT count(*) n FROM face_scans WHERE status='failed'`),
-      faces: await count('SELECT count(*) n FROM faces'),
+      faces: await count('SELECT count(*) n FROM active_faces'),
       eligible: await count(`SELECT count(*) n FROM members m WHERE ${ELIGIBLE('m.id')}`),
-      shadow: await count(`SELECT count(*) n FROM face_matches WHERE state='shadow'`),
-      auto: await count(`SELECT count(*) n FROM face_matches WHERE state='auto'`),
-      removed: await count(`SELECT count(*) n FROM face_matches WHERE state='removed'`),
+      shadow: await count(`SELECT count(*) n FROM active_face_matches WHERE state='shadow'`),
+      auto: await count(`SELECT count(*) n FROM active_face_matches WHERE state='auto'`),
+      removed: await count(`SELECT count(*) n FROM active_face_matches WHERE state='removed'`),
     },
     // Lowest scores first: those are the ones worth checking by eye.
-    shadow: await rows(db, `SELECT m.media,m.post,m.score,r.name FROM face_matches m JOIN roster r ON r.id=m.member
+    shadow: await rows(db, `SELECT m.media,m.post,m.score,r.name FROM active_face_matches m JOIN roster r ON r.id=m.member
       WHERE m.state='shadow' ORDER BY m.score LIMIT 200`),
   };
 }
@@ -561,7 +561,7 @@ export async function faceAdminData(env) {
 // Turn shadow matches into real tags, then tell each member once.
 export async function publishShadow(env) {
   if (faceMode(env) !== 'on' || !await faceSchema(env.DB)) return null;
-  const shadow = await rows(env.DB, `SELECT media,post,member,face,score FROM face_matches WHERE state='shadow' AND score>=? ORDER BY member`, FACE_BAR);
+  const shadow = await rows(env.DB, `SELECT media,post,member,face,score FROM active_face_matches WHERE state='shadow' AND score>=? ORDER BY member`, FACE_BAR);
   const written = await writeMatches(env, shadow, 'later');
   await summarise(env);
   return written.length;

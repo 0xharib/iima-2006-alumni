@@ -1,0 +1,23 @@
+# Isolated album QA. Never use production's wrangler.toml for this release.
+name = "iima-album-preview"
+main = "worker.mjs"
+compatibility_date = "2025-11-23"
+
+[vars]
+PREVIEW_LABEL = "Preview · isolated test data"
+PREVIEW_DEMO = "1"
+ACCESS_MODE = "batch"
+SITE_ORIGIN = "https://iima-album-preview.arun-devanathan.workers.dev"
+FACE_TAGGING = "off"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iima-album-preview"
+database_id = "281b5826-9d49-4ed3-8061-5b1467fc354a"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "iima-album-preview-media"
+
+[images]
+binding = "IMAGES"

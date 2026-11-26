@@ -54,7 +54,7 @@ export default {
       };
       let response = await route(request, env, record, member=>{viewer=member;}, ctx);
       if (env.PREVIEW_LABEL && response.headers.get('Content-Type')?.includes('text/html')) {
-        const html=(await response.text()).replace(/<body\b[^>]*>/,tag=>tag+'<div role="note" style="padding:6px 12px;text-align:center;background:#e4c58b;color:#251b14;font:600 12px/1.4 sans-serif">Preview · live data</div>');
+        const html=(await response.text()).replace(/<body\b[^>]*>/,tag=>tag+'<div role="note" style="padding:6px 12px;text-align:center;background:#e4c58b;color:#251b14;font:600 12px/1.4 sans-serif">'+escape(env.PREVIEW_LABEL)+'</div>');
         response=new Response(html,{status:response.status,headers:response.headers});
       }
       // Dark is the default; a visitor who picked light gets the attribute flipped before the page leaves.
@@ -201,6 +201,17 @@ async function route(req, env, record, setViewer, ctx) {
       + (edge?chars.slice(-edge).join(''):'') + '@' + domain : '';
     return signIn({selected, maskedEmail, next, mailHelp, feedback});
   };
+  // Dedicated isolated demo environment only. Never enable this flag on production.
+  if (env.PREVIEW_DEMO==='1' && (path==='/preview-demo' || (!member && (path==='/'||path==='/signin')))) {
+    if(post){
+      const chosen=Number((await data()).get('member'));
+      if(![1,2].includes(chosen))return missing();
+      const raw=id()+id();
+      await run('INSERT INTO sessions VALUES(?,?,?)',await hash(raw),chosen,now()+86400000);
+      return redirect('/memories',{'Set-Cookie':cookie(raw,86400)});
+    }
+    return show('Album preview', '<p>This is an isolated test site with sample classmates. Uploads and edits stay here.</p>'+form('/preview-demo',field('member','1'),'Try as album owner')+form('/preview-demo',field('member','2'),'Try as another classmate'));
+  }
   if (!post && !member && env.PREVIEW_LABEL && (path==='/' || path==='/signin'))
     return redirect('https://iima-class-of-2006.in/preview',{'Cache-Control':'no-store'});
   if (!post && (path === '/signin' || (!member && path === '/'))) {
@@ -338,10 +349,10 @@ async function route(req, env, record, setViewer, ctx) {
     if (response) return response;
   }
   const aboutPerson = key => `(p.subject=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(${key} AS INTEGER) AS TEXT)))`;
-  const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
+  const aboutTopic = key => `(p.topic=${key} OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='topic' AND ma.target=${key}) OR EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.post=p.id AND pt.kind='topic' AND pt.target=${key}))`;
   const postQuery = `SELECT p.*,r.name AS author_name,${portrait} AS author_portrait,(SELECT title FROM memory_albums WHERE post=p.id) AS album_title,(SELECT cover FROM memory_albums WHERE post=p.id) AS album_cover,t.title AS topic_title,subject.name AS subject_name,
     EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) AS has_legacy_photo,
-    (SELECT a.id FROM uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
+    (SELECT a.id FROM active_uploads a WHERE a.post=p.id ORDER BY a.id LIMIT 1) AS feed_photo,
     (SELECT json_group_array(json_object('href',href,'label',label,'kind',kind)) FROM (
       -- Start from this memory's own links instead of testing every classmate and topic per card.
       SELECT '/people/'||rr.id AS href,rr.name AS label,'person' AS kind FROM roster rr
@@ -356,7 +367,7 @@ async function route(req, env, record, setViewer, ctx) {
       ORDER BY kind,label
     )) AS linked_tags,
     (SELECT json_group_array(media) FROM (
-      SELECT 'post/'||a.id AS media FROM uploads a WHERE a.post=p.id
+      SELECT 'post/'||a.id AS media FROM active_uploads a WHERE a.post=p.id
       UNION ALL SELECT 'legacy/'||p.id||'/'||row_number() OVER(ORDER BY ph.object_key)
       FROM photos ph WHERE ph.submission=p.origin
     )) AS collage_photos,
@@ -374,14 +385,14 @@ async function route(req, env, record, setViewer, ctx) {
         OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=${key} AND t.status='accepted')
       ) AS profile_album_tag,
       (SELECT json_group_array(json_object('media',media,'kind',kind,'href',href,'label',label)) FROM (
-        SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label FROM photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=p.id AND pt.kind='person'
-        UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title FROM photo_tags pt JOIN topics t ON t.id=pt.target WHERE pt.post=p.id AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
+        SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label FROM active_photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=p.id AND pt.kind='person'
+        UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title FROM active_photo_tags pt JOIN topics t ON t.id=pt.target WHERE pt.post=p.id AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       )) AS profile_photo_links,`;
       query=query.replace('SELECT p.*,','SELECT p.*,'+projection);
     }
     return all(`${query} WHERE ${postVisible} AND (${where}) ORDER BY ${order} LIMIT ?`,me,me,+pilot,...args,size);
   }
-  const profileMemories=key=>posts(`p.author=? OR EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted') OR (EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.kind='person' AND CAST(pt.target AS INTEGER)=?) AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id))`,[key,key,key,key],100,'p.created DESC,p.id DESC',key);
+  const profileMemories=key=>posts(`p.author=? OR EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted') OR (EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.post=p.id AND pt.kind='person' AND CAST(pt.target AS INTEGER)=?) AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id))`,[key,key,key,key],100,'p.created DESC,p.id DESC',key);
   async function gallery(person) {
     const seed = `SELECT 'seed/'||s.roster_id AS media,r.name AS caption,'/people/'||r.id AS source,s.portrait_key AS object_key
       FROM profile_seeds s JOIN roster r ON r.id=s.roster_id WHERE ${visibleSeed} AND s.portrait_key IS NOT NULL AND (? IS NULL OR r.id=?)`;
@@ -389,16 +400,16 @@ async function route(req, env, record, setViewer, ctx) {
       FROM yearbook_public y,json_each(y.images) j JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission')
       AND ph.object_key=json_extract(j.value,'$.key') WHERE (? IS NULL OR y.member=?)`;
     const uploads = `SELECT 'post/'||a.id AS media,a.caption,'/posts/'||p.id AS source,a.object_key
-      FROM uploads a JOIN posts p ON p.id=a.post WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
+      FROM active_uploads a JOIN posts p ON p.id=a.post WHERE ${postVisible} AND (? IS NULL OR p.author=? OR
       (EXISTS(SELECT 1 FROM (SELECT ? AS id) person_ref WHERE ${aboutPerson('person_ref.id')}) AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id)) OR
       EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=? AND t.status='accepted') OR
-      EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=p.id AND pt.media='post/'||a.id AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
+      EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.post=p.id AND pt.media='post/'||a.id AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
     // Legacy media ids are numbered within each memory, so number first and then filter (a photo tag names that id).
     const memories = `SELECT media,caption,source,object_key FROM (SELECT 'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key) AS media,
       ph.caption,'/posts/'||p.id AS source,ph.object_key,p.id AS post,p.author,p.subject
       FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE ${postVisible}) lp WHERE (? IS NULL OR lp.author=? OR
       (lp.subject=? AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=lp.post)) OR
-      EXISTS(SELECT 1 FROM photo_tags pt WHERE pt.post=lp.post AND pt.media=lp.media AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
+      EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.post=lp.post AND pt.media=lp.media AND pt.kind='person' AND pt.target=CAST(CAST(? AS INTEGER) AS TEXT)))`;
     const rows = await all(`${seed} UNION ALL ${yearbook} UNION ALL ${uploads} UNION ALL ${memories}`,+pilot,...Array(13).fill(person));
     const seen = new Set();
     return rows.filter(row => {if (seen.has(row.object_key)) return false; seen.add(row.object_key); return true;});
@@ -410,7 +421,7 @@ async function route(req, env, record, setViewer, ctx) {
     if (bits[0]==='profile-photo' && ['then','now'].includes(bits[2])) row=await one(
       'SELECT value AS object_key FROM profile_fields WHERE member=? AND field=?',Number(bits[1]),bits[2]+'PhotoObject');
     else if (bits[0]==='portrait') row = await one("SELECT value AS object_key FROM profile_fields WHERE member=? AND field='portraitObject'",Number(bits[1]));
-    else if (bits[0]==='post') row = await one(`SELECT a.object_key,a.type FROM uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${postVisible}`,bits[1]);
+    else if (bits[0]==='post') row = await one(`SELECT a.object_key,a.type FROM active_uploads a JOIN posts p ON p.id=a.post WHERE a.id=? AND ${postVisible}`,bits[1]);
     else if (bits[0]==='seed') row = await one(`SELECT s.portrait_key AS object_key FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,Number(bits[1]),+pilot);
     else if (bits[0]==='yearbook') row = await one(`SELECT ph.object_key FROM yearbook_public y,json_each(y.images) j
       JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
@@ -420,7 +431,7 @@ async function route(req, env, record, setViewer, ctx) {
     return servePhoto(env,row,req,false,ctx);
   }
   async function feed(size, q='') {
-    const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM uploads up WHERE up.post=p.id)
+    const photoBonus = `CASE WHEN EXISTS(SELECT 1 FROM active_uploads up WHERE up.post=p.id)
       OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) THEN 604800000 ELSE 0 END`;
     const before = Number(u.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
     const cursor = u.searchParams.get('cursor') || '';
@@ -431,7 +442,7 @@ async function route(req, env, record, setViewer, ctx) {
         AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
         LEFT JOIN topics at ON ma.kind='topic' AND ma.target=at.id AND at.hidden=0 AND at.redirect IS NULL
         WHERE ma.post=p.id AND instr(lower(coalesce(ar.name,'')||' '||coalesce(ar.nickname,'')||' '||coalesce(at.title,'')),lower(?))>0)
-      OR EXISTS(SELECT 1 FROM uploads a WHERE a.post=p.id AND instr(lower(a.caption),lower(?))>0)
+      OR EXISTS(SELECT 1 FROM active_uploads a WHERE a.post=p.id AND instr(lower(a.caption),lower(?))>0)
       OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin AND instr(lower(ph.caption),lower(?))>0)
       OR (lower(?) IN ('photo','photos') AND ((${photoBonus})>0)))`;
     const rows = await posts(`(p.created<? OR (p.created=? AND p.id<?)) ${q?search:''}`,
@@ -765,12 +776,18 @@ async function route(req, env, record, setViewer, ctx) {
     if (!row || row.hidden) return missing();
     return show(row.title,page.topic(row,await posts(`EXISTS(SELECT 1 FROM (SELECT ? AS id) topic_ref WHERE ${aboutTopic('topic_ref.id')})`,[row.id])));
   }
+  if (path==='/compose/photo' && !post) {
+    const row=await one('SELECT object_key,type FROM uploads WHERE id=? AND owner=? AND post IS NULL',u.searchParams.get('id'),me);
+    if(!row)return missing();
+    const object=await env.MEDIA.get(row.object_key);
+    return object?new Response(object.body,{headers:{'Content-Type':row.type,'Cache-Control':'private, no-store'}}):missing();
+  }
   if (path==='/compose/photo' && post) {
     const photoId=u.searchParams.get('id')||'';
     if (!/^[a-f0-9-]{36}$/.test(photoId)) return invalid('Photo unavailable.');
-    const previous=await one('SELECT owner,post FROM uploads WHERE id=?',photoId);
+    const previous=await one('SELECT owner,post FROM active_uploads WHERE id=?',photoId);
     if (previous) return previous.owner===me && !previous.post ? json({id:photoId}) : missing();
-    if (!await limit('photo:'+me,60,150)) return new Response('Photo upload limit reached. Try again later.',{status:429});
+    if (!await limit('photo:'+me,60,360)) return new Response('Photo upload limit reached. Try again later.',{status:429});
     if (Number(req.headers.get('Content-Length'))>16*1024*1024) return invalid('Each photo must be 15 MB or smaller.');
     const file=(await data()).get('photo');
     if (!(file instanceof File) || !file.size || file.size>15*1024*1024) return invalid('Each photo must be 15 MB or smaller.');
@@ -785,7 +802,7 @@ async function route(req, env, record, setViewer, ctx) {
     } finally {
       if (!inserted) await env.MEDIA.delete(object);
     }
-    if (!inserted && !await one('SELECT 1 FROM uploads WHERE id=? AND owner=? AND post IS NULL',photoId,me)) return missing();
+    if (!inserted && !await one('SELECT 1 FROM active_uploads WHERE id=? AND owner=? AND post IS NULL',photoId,me)) return missing();
     if (inserted) warmVariants(env,ctx,object,clean.type,memoryWidths);
     return json({id:photoId});
   }
@@ -808,7 +825,7 @@ async function route(req, env, record, setViewer, ctx) {
     const title = str(f,'title',120);
     const photoCount = files.length+staged.length;
     if (!/^[a-f0-9-]{36}$/.test(key) || (!body&&!photoCount)) return invalid('Add a photo or write a memory.');
-    if (photoCount>50 || new Set(staged).size!==staged.length || staged.some(photo=>! /^[a-f0-9-]{36}$/.test(photo))) return invalid('Choose up to 50 distinct photos.');
+    if (photoCount>300 || new Set(staged).size!==staged.length || staged.some(photo=>! /^[a-f0-9-]{36}$/.test(photo))) return invalid('Choose up to 300 distinct photos.');
     if (photoCount>1 && !title) return invalid('Give your album a title.');
     const wantsJson=req.headers.get('Accept')==='application/json';
     const success=async()=>wantsJson?json({html:page.memoryCards(await posts('p.id=?',[key],1)),url:'/posts/'+key}):redirect('/posts/'+key);
@@ -817,7 +834,7 @@ async function route(req, env, record, setViewer, ctx) {
     const selections=[...new Set(f.getAll('about').map(String))];
     if (selections.length>30) return invalid('Choose up to 30 tags.');
     if (staged.length) {
-      const owned=await all(`SELECT id FROM uploads WHERE owner=? AND post IS NULL AND id IN (${staged.map(()=>'?').join(',')})`,me,...staged);
+      const owned=await all(`SELECT id FROM active_uploads WHERE owner=? AND post IS NULL AND id IN (SELECT value FROM json_each(?))`,me,JSON.stringify(staged));
       if (owned.length!==staged.length) return invalid('One or more photos are unavailable.');
     }
     const jobs = [sql('INSERT INTO posts(id,author,body,created) VALUES(?,?,?,?)',key,me,body||'Shared a photo.',now())];
@@ -835,7 +852,7 @@ async function route(req, env, record, setViewer, ctx) {
     }
     const uploaded = [];
     const order = [...staged];
-    if (staged.length) jobs.push(sql(`UPDATE uploads SET post=? WHERE owner=? AND id IN (${staged.map(()=>'?').join(',')})`,key,me,...staged));
+    if (staged.length) jobs.push(sql(`UPDATE uploads SET post=? WHERE owner=? AND id IN (SELECT value FROM json_each(?)) AND post IS NULL`,key,me,JSON.stringify(staged)));
     try {
       for (const [index,image] of files.entries()) {
         if (image.size>15*1024*1024) return invalid('Each photo must be 15 MB or smaller.');
@@ -862,6 +879,44 @@ async function route(req, env, record, setViewer, ctx) {
       await Promise.allSettled(uploaded.map(key=>env.MEDIA.delete(key)));
     }
   }
+  const albumEdit = path.match(/^\/posts\/([\w-]+)\/album$/);
+  if (albumEdit) {
+    const key=albumEdit[1];
+    const item=(await posts('p.id=?',[key],1))[0];
+    if (!item || item.author!==me || item.origin) return missing();
+    const current=await all('SELECT id,caption FROM active_uploads WHERE post=? ORDER BY id',key);
+    const album=await one('SELECT * FROM memory_albums WHERE post=?',key);
+    if (!post) {
+      const order=album?JSON.parse(album.photo_order):current.map(p=>p.id);
+      current.sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id));
+      const version=await one('SELECT version FROM album_versions WHERE post=?',key);
+      return show('Edit album',page.albumEditor(item,current,album,String(version?.version||0)));
+    }
+    const f=await data(), ids=f.getAll('photoId').map(String),title=str(f,'title',120),body=str(f,'body');
+    if (!ids.length || ids.length>300 || new Set(ids).size!==ids.length || ids.some(x=>! /^[a-f0-9-]{36}$/.test(x))) return invalid('Choose between 1 and 300 distinct photos.');
+    if (!title) return invalid('Give your album a title.');
+    // One JSON parameter avoids D1's 100-bound-parameter ceiling for large albums.
+    const owned=await all('SELECT id,post FROM active_uploads WHERE owner=? AND id IN (SELECT value FROM json_each(?))',me,JSON.stringify(ids));
+    if (owned.length!==ids.length || owned.some(p=>p.post && p.post!==key)) return invalid('One or more photos are unavailable.');
+    const expected=str(f,'revision',20000);
+    const version=await one('SELECT version FROM album_versions WHERE post=?',key);
+    const revision=String(version?.version||0);
+    // A repeat of a confirmed save is harmless, including retry after a lost response.
+    const unchanged=album && album.photo_order===JSON.stringify(ids) && album.title===title && item.body===(body||'Shared a photo.') && album.cover===str(f,'cover',50);
+    if (expected!==revision && !unchanged) return new Response('This album changed in another tab. Reload before editing.',{status:409});
+    if (!unchanged) {
+      const removed=current.filter(p=>!ids.includes(p.id));
+      const cover=str(f,'cover',50);
+      try { await db.batch([
+        sql('INSERT INTO album_versions VALUES(?,?) ON CONFLICT(post) DO UPDATE SET version=excluded.version',key,Number(expected)+1),
+        sql('UPDATE posts SET body=? WHERE id=?',body||'Shared a photo.',key),
+        sql('UPDATE uploads SET post=? WHERE owner=? AND post IS NULL AND id IN (SELECT value FROM json_each(?))',key,me,JSON.stringify(ids)),
+        sql('INSERT OR IGNORE INTO removed_album_photos SELECT value,? FROM json_each(?)',now(),JSON.stringify(removed.map(p=>p.id))),
+        sql('INSERT INTO memory_albums(post,title,cover,photo_order) VALUES(?,?,?,?) ON CONFLICT(post) DO UPDATE SET title=excluded.title,cover=excluded.cover,photo_order=excluded.photo_order',key,title,ids.includes(cover)?cover:ids[0],JSON.stringify(ids))
+      ]); } catch(error) { if(String(error).includes('Album changed'))return new Response('This album changed in another tab. Reload before editing.',{status:409});throw error; }
+    }
+    return req.headers.get('Accept')==='application/json'?json({url:'/posts/'+key}):redirect('/posts/'+key);
+  }
   const postMatch = path.match(/^\/posts\/([\w-]+)$/);
   if (postMatch) {
     const key = postMatch[1];
@@ -877,8 +932,8 @@ async function route(req, env, record, setViewer, ctx) {
     if (!item) return missing();
     const origin=await faceSchema(db)?'pt.origin':"'manual'";
     const photoLinks=()=>all(`SELECT pt.media,pt.kind,'/people/'||r.id AS href,r.name AS label,${origin} AS origin,r.id AS member
-      FROM photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.kind='person'
-      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title,${origin},NULL FROM photo_tags pt
+      FROM active_photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.kind='person'
+      UNION ALL SELECT pt.media,pt.kind,'/topics/'||t.id,t.title,${origin},NULL FROM active_photo_tags pt
       JOIN topics t ON t.id=pt.target WHERE pt.post=? AND pt.kind='topic' AND t.hidden=0 AND t.redirect IS NULL
       ORDER BY kind,label`,key,key);
     if (!post) {
@@ -886,7 +941,7 @@ async function route(req, env, record, setViewer, ctx) {
       const [comments,tags,images,tagLinks,album] = await Promise.all([
         all('SELECT c.*,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key),
         all("SELECT t.*,r.name FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND (t.status='accepted' OR t.member=? OR ?=?)",key,me,me,item.author),
-        all("SELECT 'post/'||id AS media,caption,'/posts/'||post AS source FROM uploads WHERE post=? UNION ALL SELECT 'legacy/'||?||'/'||ROW_NUMBER() OVER(ORDER BY object_key),caption,'/posts/'||? FROM photos WHERE submission=?",key,key,key,item.origin),
+        all("SELECT 'post/'||id AS media,caption,'/posts/'||post AS source FROM active_uploads WHERE post=? UNION ALL SELECT 'legacy/'||?||'/'||ROW_NUMBER() OVER(ORDER BY object_key),caption,'/posts/'||? FROM photos WHERE submission=?",key,key,key,item.origin),
         photoLinks(),
         one('SELECT photo_order FROM memory_albums WHERE post=?',key)
       ]);
@@ -996,8 +1051,8 @@ async function route(req, env, record, setViewer, ctx) {
         WHEN n.anchor LIKE 'photo-post-%' THEN 'post/'||substr(n.anchor,12)
         WHEN n.anchor LIKE 'photo-legacy-%' THEN 'legacy/'||p.id||'/'||substr(n.anchor,length(p.id)+15)
         WHEN a.cover IS NOT NULL THEN 'post/'||a.cover
-        WHEN EXISTS(SELECT 1 FROM uploads u WHERE u.post=p.id) THEN
-          (SELECT 'post/'||u.id FROM uploads u WHERE u.post=p.id ORDER BY u.id LIMIT 1)
+        WHEN EXISTS(SELECT 1 FROM active_uploads u WHERE u.post=p.id) THEN
+          (SELECT 'post/'||u.id FROM active_uploads u WHERE u.post=p.id ORDER BY u.id LIMIT 1)
         WHEN EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin) THEN 'legacy/'||p.id||'/1'
       END AS preview_media
       ${notificationFrom} LEFT JOIN meet_wishes w ON w.request_id=n.anchor AND n.kind IN ('catchup_request','catchup_accepted')
