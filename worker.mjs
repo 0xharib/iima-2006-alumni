@@ -961,7 +961,7 @@ async function route(req, env, record, setViewer, ctx) {
     if (!post) {
       if (u.searchParams.get('panel')==='tags') {
         const photo=u.searchParams.get('photo')||'';
-        if(photo) return json((await photoLinks()).filter(t=>t.media===photo&&t.kind==='person').map(t=>({member:t.member,label:t.label,origin:t.origin})));
+        if(photo) return json(await all(`SELECT r.id AS member,r.name AS label,${origin} AS origin FROM active_photo_tags pt JOIN roster r ON r.id=pt.target WHERE pt.post=? AND pt.media=? AND pt.kind='person' ORDER BY r.name`,key,photo));
         return json(await all("SELECT t.member,r.name AS label,'manual' AS origin FROM tags t JOIN roster r ON r.id=t.member WHERE t.post=? AND t.status='accepted' ORDER BY r.name",key));
       }
       if (panel) return json((await all('SELECT c.id,c.author,c.body,r.name FROM comments c JOIN roster r ON r.id=c.author WHERE c.post=? AND c.hidden=0 ORDER BY c.created,c.id',key)).map(({id,author,name,body})=>({id,name,body,canDelete:author===me})));
