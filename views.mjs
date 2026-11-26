@@ -207,7 +207,7 @@ export function render(title,body,member,{home=false,active=null}={}) {
     <details class="account"><summary aria-label="My profile menu">${portrait(member,false)}</summary>
       <div class="account-menu">${link('/people/'+member.id,'View profile')}
       ${member.role==='admin'?link('/admin','Admin View'):''}${themeSwitch('in-menu')}${form('/logout','','Log out')}</div></details></nav>`:'';
-  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script src="/social.js?v=24" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  return new Response(`<!doctype html><html lang="en" data-theme="dark"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${e(title)} · IIMA ’06</title><link rel="icon" href="/campus/logo.png"><link rel="preload" href="/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/fonts/source-sans-3.woff2" as="font" type="font/woff2" crossorigin>${shareMeta}<link rel="stylesheet" href="${siteStylesheet}"><body class="${home?'home ':''}${member?'member-site has-mobile-nav ':''}page-${slug}${banded?' page-band':''}"><header class="bar"><div class="mast"><a class="wordmark" href="/" aria-label="IIMA Class of 2006, home"><img src="/campus/logo.png" alt=""><span class="wm-iima">IIMA</span><span class="wm-class">Class of 2006</span></a>${nav}</div></header><main>${home?'':'<h1>'+e(title)+'</h1>'}${body}</main>${footer}${member?mobileNavigation(current):''}${member?'<script data-member="'+member.id+'" src="/social.js?v=25" defer></script>':''}</body></html>`,{headers:{'Content-Type':'text/html; charset=utf-8'}});
 }
 export function whatsappRequirements(details, photos={}) {
   return [['dorm','Dorm number'],['nickname','Dorm name'],['city','Current city'],['life','Life, Lately'],['family','Family']]
@@ -538,11 +538,16 @@ export const page={
       `<label class="memory-file-picker">Add photos<input type="file" name="images" accept="image/jpeg,image/png" multiple></label>
       <div data-album-title hidden>${input('title','Album title','','maxlength="120"')}</div>
       <p data-cover-hint hidden>Tap a thumbnail to choose the album cover.</p>
-      <ol class="photo-queue" data-photo-queue></ol>
+      <p>Up to 300 photos. Originals are kept at full quality.</p><button type="button" data-remove-selected>Remove selected photos</button><ol class="photo-queue" data-photo-queue></ol><progress data-upload-progress hidden max="1" value="0" aria-label="Photo upload progress"></progress>
       <div class="memory-targets"><label>Add tags<input type="search" data-target-search placeholder="@classmate or #place or event" autocomplete="off"></label>
         <div data-target-results></div><div data-topic-chips>${selected.map(chip).join('')}</div>
       </div>
       <p data-compose-status role="status"></p>`,'Publish memory','enctype="multipart/form-data" data-compose');},
+  albumEditor(item,photos,album,revision){
+    const initial=JSON.stringify({photos:photos.map(p=>({id:p.id,name:p.caption||'Album photo',uploaded:true,existing:true})),cover:album?.cover||photos[0]?.id}).replaceAll('<','\u003c');
+    return page.compose(item.id).replace('action="/compose"','action="/posts/'+e(item.id)+'/album"').replace('data-compose','data-compose data-album-edit').replace('Publish memory','Save album').replace('class="memory-targets"','class="memory-targets" hidden').replace('</form>',field('revision',revision)+'<script type="application/json" data-album-initial>'+initial+'</script></form>')
+      .replace('name="body"','name="body" data-initial="'+e(item.body)+'"').replace('name="title" value=""','name="title" value="'+e(album?.title||'Photo album')+'"');
+  },
   post(item,comments,tags,photos,me,commentPosted=false){
     const url='/posts/'+item.id;
     const isAlbum=photos.length>1;
@@ -556,7 +561,7 @@ export const page={
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
       ${action(url,'like',item.liked?'Unlike':'Like',{liked:item.liked?0:1})} ${badge(item.likes+' likes')}</article>${isAlbum?gallery:''}`+
-      (item.author===me?`<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',caption,photos.length?'':'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
+      (item.author===me?`${photos.length&&!item.origin?link(url+'/album','Edit album · add, remove or reorder photos'):''}<details><summary>Edit memory</summary>${form(url,field('action','edit')+area('body','Memory',caption,photos.length?'':'required'),'Save')}</details>${action(url,'delete','Delete memory')}`:'')+
       (item.subject===me||item.is_about_me?action(url,'unassociate','Remove from my profile'):'')+report('post',item.id)+
       (tags.length?'<h2>Tags</h2>'+list(tags.map(t=>link('/people/'+t.member,t.name)+' '+badge(t.status)+
        (t.member===me?(t.status==='pending'?action(url,'tag-accept','Accept tag'):'')+action(url,'tag-remove','Remove tag'):'')),''):'')+

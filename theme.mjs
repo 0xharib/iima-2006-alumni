@@ -344,8 +344,8 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .memory-enlarge:has(.memory-read-more) .memory-quote{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden;padding-bottom:0;margin-bottom:.65rem}
 .memory-dialog .memory-enlarge:has(.memory-read-more) .memory-quote{display:block;overflow:visible;padding-bottom:.9rem}
 .memory-dialog .memory-read-more{display:none}
-.photo-queue{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:.55rem;max-height:15rem;overflow:auto;padding:.3rem;margin:.55rem 0}
-.photo-queue li{position:relative;min-width:0}
+.photo-queue{list-style:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:.55rem;max-height:15rem;overflow:auto;padding:.3rem;margin:.55rem 0}
+.photo-queue li{position:relative;min-width:0;padding:.3rem;border:1px solid var(--line);border-radius:.5rem}.photo-queue li>button:not(.cover-thumb):not(.remove-thumb){font-size:.875rem;padding:.35rem;margin:.15rem 0;min-height:36px;width:100%}.photo-queue li>small{display:block;font-size:.875rem}.photo-queue input[type=checkbox]{width:22px;height:22px;margin:.3rem}progress[data-upload-progress]{width:100%}
 .photo-queue img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:.5rem}
 .photo-queue .cover-thumb{display:block;position:relative;width:100%;margin:0;padding:0;border:0;background:none;border-radius:.5rem}
 .cover-thumb[aria-pressed=true]{outline:2px solid #963f2c;outline-offset:2px}
