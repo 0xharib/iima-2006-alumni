@@ -513,7 +513,10 @@ export const socialScript = String.raw`
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
             if(rendered.dataset.photoScope===card.dataset.photoScope){
               rendered.querySelector('[data-memory-tags]').innerHTML=tags;
-              if(!rendered.querySelector('[data-panel-content="tags"]').hidden)await editableTags(rendered);
+              const panel=rendered.querySelector('[data-panel-content="tags"]');
+              panel?.querySelectorAll('[data-correct-tag]').forEach(remove=>{
+                if(remove.dataset.correctTag===target)remove.closest('.topic-chip')?.remove();
+              });
             }
           }
           message(card,'Tag removed.');
