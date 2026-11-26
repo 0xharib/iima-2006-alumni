@@ -142,6 +142,7 @@ const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
       <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
       <div data-tag-results></div></div>
     <div class="memory-result" role="status"></div>
+    ${!scoped&&photos.length===1?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(photo.replaceAll('/','-'))}">Manage photo tags →</a>`:''}
   </article>`;
 }).join('');
 const memoryDialog=()=>`<dialog class="memory-dialog" aria-label="Memory">${icon('close','Close','data-close')}<div data-dialog-content></div></dialog>`;
@@ -564,7 +565,7 @@ export const page={
       <a data-album-photo href="/media/${e(photo.media)}"><img src="${mediaSrc(photo.media,480)}" srcset="${mediaSet(photo.media,[480,768,1200])}" sizes="(max-width: 490px) 95vw, (max-width: 850px) 45vw, 400px" alt="${e(photo.caption||'Album photo '+(i+1))}" loading="lazy" decoding="async"></a>
       <div class="album-photo-footer"><span>Photo ${i+1} of ${photos.length}</span>${photo.caption?`<p>${e(photo.caption)}</p>`:''}
         <div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</div></article>`).join('')}</section>
-      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:images(photos)+photos.map(photo=>notMe(photo,me)).join('');
+      <dialog class="memory-dialog album-viewer" aria-label="Album photo">${icon('close','Close','data-close')}<img alt="" sizes="100vw"><div><button type="button" data-album-prev>Previous</button><span role="status"></span><button type="button" data-album-next>Next</button></div><p><a data-album-original target="_blank" rel="noopener">Open full-size original</a></p></dialog>`:photos.map(photo=>`<section data-post="${e(item.id)}" data-photo-scope="${e(photo.media)}" id="photo-${e(photo.media.replaceAll('/','-'))}" class="album-photo-panel">${images([photo])}<div data-memory-tags>${memoryTags(photo)}</div>${notMe(photo,me)}${tagControls('this photo')}</section>`).join('');
     return `<article class="memory-detail" data-post="${e(item.id)}">${memoryAuthor(item)}${caption?`<p class="story">${e(caption)}</p>`:''}
       ${isAlbum?`<p>${photos.length} photos</p>`:gallery}
       <div data-memory-tags>${memoryTags(item)}</div>${tagControls(isAlbum?'the album':'this memory')}
