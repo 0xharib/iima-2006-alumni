@@ -403,19 +403,33 @@ export const socialScript = String.raw`
     clearTagEditing(list);
     if(panel.hidden)return;
     const photo=card.dataset.photoScope||'';
+    const addControl=(link,member,label)=>{
+      if(link.parentElement.hasAttribute('data-tag-chip-edit'))return link.parentElement.querySelector('button');
+      const remove=document.createElement('button');
+      remove.type='button';remove.dataset.correctTag=member;remove.textContent='×';
+      remove.style.cssText='padding:0 6px;min-width:24px;min-height:24px;border:0;background:transparent;color:inherit';
+      remove.setAttribute('aria-label','Remove tag for '+label);
+      const chip=document.createElement('span');chip.dataset.tagChipEdit='';chip.className='tag-chip-edit';link.before(chip);chip.append(link,remove);
+      return remove;
+    };
+    for(const link of list.querySelectorAll('a[href^="/people/"]')){
+      const member=link.getAttribute('href').split('/').pop();
+      if(/^\d+$/.test(member))addControl(link,member,link.textContent);
+    }
+    const token=Symbol();panel.tagEditToken=token;
     const rows=await request(path(card)+'?panel=tags&photo='+encodeURIComponent(photo));
     if(card.dataset.singlePhoto){const extra=await request(path(card)+'?panel=tags&photo='+encodeURIComponent(card.dataset.singlePhoto));rows.push(...extra.map(row=>({...row,photo:card.dataset.singlePhoto})));}
-    if(panel.hidden)return;
+    if(panel.hidden||panel.tagEditToken!==token)return;
     for(const row of rows){
       let link=list.querySelector('a[href="/people/'+CSS.escape(String(row.member))+'"]');
       if(row.photo&&!link){let group=list.querySelector('.memory-tags');if(!group){group=document.createElement('div');group.className='memory-tags';list.append(group);}link=document.createElement('a');link.href='/people/'+row.member;link.textContent='@'+row.label;link.dataset.photoEditOnly='';group.append(link);}
       if(!link)continue;
-      if(link.parentElement.hasAttribute('data-tag-chip-edit')){if(row.photo)link.parentElement.querySelector('button').dataset.alsoPhoto=row.photo;continue;}
-      const remove=document.createElement('button');
-      remove.type='button';remove.dataset.correctTag=row.member;if(row.photo)remove.dataset.correctPhoto=row.photo;remove.textContent='×';
-      remove.style.cssText='padding:0 6px;min-width:24px;min-height:24px;border:0;background:transparent;color:inherit';
-      remove.setAttribute('aria-label','Remove tag for '+row.label);
-      const chip=document.createElement('span');chip.dataset.tagChipEdit='';chip.className='tag-chip-edit';link.before(chip);chip.append(link,remove);
+      const remove=addControl(link,row.member,row.label);
+      if(row.photo){if(rows.some(other=>!other.photo&&String(other.member)===String(row.member)))remove.dataset.alsoPhoto=row.photo;else remove.dataset.correctPhoto=row.photo;}
+    }
+    for(const chip of list.querySelectorAll('[data-tag-chip-edit]')){
+      const remove=chip.querySelector('button');
+      if(!rows.some(row=>String(row.member)===remove.dataset.correctTag))chip.replaceWith(chip.querySelector('a'));
     }
   }
   async function comments(card){
