@@ -288,13 +288,30 @@ test('profile gallery shows photos I am tagged in, uploaded and legacy', async()
   const page=await (await w.call('/people/2',ck)).text();
   assert.match(page,/\/media\/post\/u1/); assert.match(page,/\/media\/legacy\/lp\/1/);
 });
-test('Photos of you shows Not me only on auto tags', async()=>{
+test('Photos of you renders one bulk selection form and no repeated Not me buttons', async()=>{
   const w=faceWorld(); const ck=await w.session(2,'bbbb');
   const a=w.photo('p1','u1',1), b=w.photo('p2','u2',2);
   w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('p1',?,'person','2','auto'),('p2',?,'person','2','manual')").run(a,b);
   const page=await (await w.call('/photos-of-you',ck)).text();
   assert.match(page,/\/media\/post\/u1/); assert.match(page,/\/media\/post\/u2/);
-  assert.equal((page.match(/action="\/faces\/not-me"/g)||[]).length,1);
+  assert.equal((page.match(/action="\/faces\/gallery-remove"/g)||[]).length,1);
+  assert.doesNotMatch(page,/action="\/faces\/not-me"/);
+  assert.equal((page.match(/name="media"/g)||[]).length,2);
+  assert.match(page,/data-album-memory/);
+});
+test('bulk gallery correction removes only the viewer’s selected person tags and preserves images',async()=>{
+  const w=faceWorld();const ck=await w.session(2,'bbbb');
+  const a=w.photo('p1','u1',1),b=w.photo('p1','u2',2),c=w.photo('p2','u3',3);
+  w.sqlite.prepare("INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('p1',?,'person','2','auto'),('p1',?,'person','2','manual'),('p2',?,'person','3','manual'),('p1',?,'person','3','auto')").run(a,b,c,a);
+  const form=new FormData();for(const media of [a,b,c,a])form.append('media',media);
+  const response=await w.call('/faces/gallery-remove',ck,form);
+  assert.equal(response.status,303);assert.equal(response.headers.get('Location'),'/photos-of-you?removed=2');
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='2'").get().n,0);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='3'").get().n,2);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM face_matches WHERE member=2 AND state='removed'").get().n,2);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM active_uploads WHERE post='p1'").get().n,2);
+  const retry=await w.call('/faces/gallery-remove',ck,form);assert.equal(retry.headers.get('Location'),'/photos-of-you?removed=0');
+  assert.equal((await w.call('/faces/gallery-remove',ck,new FormData())).status,400);
 });
 test('the memory page offers Not me on my own auto tag only', async()=>{
   const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0];

@@ -462,10 +462,33 @@ async function notMe(req, env, me) {
   return see(form.get('next') ? safeNext(form.get('next')) : '/photos-of-you');
 }
 
+// A gallery correction is scoped to the signed-in member; other tags and uploads stay intact.
+async function removeGalleryTags(req, env, me) {
+  const form=await req.formData();
+  const media=[...new Set(form.getAll('media').map(String))];
+  if(!media.length||media.length>300||media.some(key=>key.length>200))return new Response('Select between 1 and 300 photos.',{status:400});
+  let removed=0;
+  for(let i=0;i<media.length;i+=30){
+    const chunk=media.slice(i,i+30);
+    const tags=await rows(env.DB,`SELECT pt.media,pt.post FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
+      WHERE pt.kind='person' AND pt.target=? AND pt.media IN (${chunk.map(()=>'?').join(',')}) AND ${POST_VISIBLE}`,String(me),...chunk);
+    if(!tags.length)continue;
+    await env.DB.batch(tags.flatMap(tag=>[
+      q(env.DB,`DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=?`,tag.media,String(me)),
+      q(env.DB,`INSERT INTO face_matches(media,member,post,face,score,state,created) VALUES(?,?,?,NULL,0,'removed',?)
+        ON CONFLICT(media,member) DO UPDATE SET state='removed'`,tag.media,me,tag.post,Date.now()),
+      q(env.DB,`DELETE FROM notifications WHERE recipient=? AND event_key='found:'||? AND NOT EXISTS(SELECT 1 FROM photo_tags
+        WHERE post=? AND kind='person' AND target=? AND origin='auto')`,me,tag.post,tag.post,String(me))
+    ]));
+    removed+=tags.length;
+  }
+  return see('/photos-of-you?removed='+removed);
+}
+
 export async function faceRoute({req, env, me, path, post}) {
-  if (!post || path !== '/faces/not-me') return null;
+  if (!post || !['/faces/not-me','/faces/gallery-remove'].includes(path)) return null;
   if (!await faceSchema(env.DB)) return missingPage();
-  return notMe(req, env, me);
+  return path==='/faces/gallery-remove'?removeGalleryTags(req,env,me):notMe(req,env,me);
 }
 
 // ---------- the 3-hour batch and the admin page ----------
