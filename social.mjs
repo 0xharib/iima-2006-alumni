@@ -388,6 +388,20 @@ export const socialScript = String.raw`
   const path = card => '/posts/'+encodeURIComponent(card.dataset.post);
   const send=(url,data)=>request(url,{method:'POST',body:data});
   function message(card,text){card.querySelector('.memory-result').textContent=text;}
+  async function editableTags(card){
+    const panel=card.querySelector('[data-panel-content="tags"]');
+    let list=panel.querySelector('[data-editable-tags]');
+    if(!list){list=document.createElement('div');list.dataset.editableTags='';list.className='memory-tags';panel.prepend(list);}
+    const photo=card.dataset.photoScope||'';
+    const rows=await request(path(card)+'?panel=tags&photo='+encodeURIComponent(photo));
+    list.replaceChildren(...rows.map(row=>{
+      const chip=document.createElement('span'), remove=document.createElement('button');
+      chip.className='topic-chip';chip.textContent=row.label+' ';
+      remove.type='button';remove.dataset.correctTag=row.member;remove.textContent='×';
+      remove.setAttribute('aria-label','Remove tag for '+row.label);
+      chip.append(remove);return chip;
+    }));
+  }
   async function comments(card){
     const rows=await request(path(card)+'?panel=comments');
     const list=card.querySelector('[data-comments]');
@@ -473,6 +487,7 @@ export const socialScript = String.raw`
           }
           panel.querySelector('input,textarea')?.focus();
           if(button.dataset.panel==='comments') await comments(card);
+          if(button.dataset.panel==='tags') await editableTags(card);
         }
       } else if(button.matches('[data-comment-again]')){
         button.hidden=true;
@@ -487,6 +502,28 @@ export const socialScript = String.raw`
           await send(path(card),data);
           await comments(card);
         } finally {button.disabled=false;}
+      } else if(button.matches('[data-correct-tag],[data-undo-tag]')){
+        const undo=button.hasAttribute('data-undo-tag');
+        const target=undo?button.dataset.undoTag:button.dataset.correctTag;
+        button.disabled=true;
+        try{
+          const data=new FormData();
+          data.set('action',undo?'tag-add':'tag-correct');data.set('tag',target);
+          if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
+          const {tags}=await send(path(card),data);
+          for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
+            if(rendered.dataset.photoScope===card.dataset.photoScope){
+              rendered.querySelector('[data-memory-tags]').innerHTML=tags;
+              if(!rendered.querySelector('[data-panel-content="tags"]').hidden)await editableTags(rendered);
+            }
+          }
+          message(card,undo?'Tag restored.':'Tag removed.');
+          if(!undo){
+            const restore=document.createElement('button');restore.type='button';restore.dataset.undoTag=target;restore.textContent='Undo';
+            const status=card.querySelector('.memory-result');status.append(' ',restore);
+            setTimeout(()=>restore.remove(),10000);
+          }
+        }finally{button.disabled=false;}
       } else if(button.matches('[data-tag-id]')){
         const panel=card.querySelector('[data-panel-content="tags"]');
         const toggle=card.querySelector('[data-panel="tags"]');
