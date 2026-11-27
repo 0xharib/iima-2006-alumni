@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fixture } from './fixture.mjs';
 import { refScore, FACE_BAR_2006, faceMode2006, vectorBytes, scanPhoto, refreshRefs, handleQueue, sweep, publishShadow, rematchMember,
-  consistent, AGREE, TAGGED_MIN_SIZE, faceAdminData, finishRun, SCAN_ALL_PEOPLE } from '../faces.mjs';
+  consistent, AGREE, TAGGED_MIN_SIZE, faceAdminData, finishRun, SCAN_ALL_PEOPLE, summarise } from '../faces.mjs';
 
 const unitVec = i => { const a = new Float32Array(512); a[i] = 1; return a; };
 const mixVec = (i, j, w) => { const a = new Float32Array(512); a[i] = w; a[j] = Math.sqrt(1 - w * w); return a; };
@@ -233,4 +233,16 @@ test('Scan all queues reference rebuilds for the whole roster, and the finish jo
   w.face(m, 'p1', unitVec(149), 60);
   await finishRun(w.env);
   assert.equal(w.sqlite.prepare("SELECT count(*) n FROM photo_tags WHERE target='1149' AND origin='auto'").get().n, 1);
+});
+
+test('two summaries running at once send each person one notification', async () => {
+  const w = world('on', 'on'); w.portrait2006('pc1', 3, 5); await refreshRefs(w.env, 3);
+  for (const [i, byte] of [[1, 11], [2, 12]]) { const m = w.photo('p' + i, 'u' + i, byte, 2); w.photoFaces[byte] = [5]; await scanPhoto(w.env, 'p' + i, m); }
+  w.sqlite.exec("UPDATE face_matches SET notified=0 WHERE member=3");
+  w.sqlite.exec("DELETE FROM notifications WHERE recipient=3");
+  // D1 runs batches one after another; both summaries read the pending list before either writes.
+  const batch = w.env.DB.batch.bind(w.env.DB); let queue = Promise.resolve();
+  w.env.DB.batch = jobs => (queue = queue.then(() => batch(jobs)));
+  await Promise.all([summarise(w.env), summarise(w.env)]);
+  assert.equal(w.sqlite.prepare("SELECT count(*) n FROM notifications WHERE recipient=3 AND event_key LIKE 'found-all:%'").get().n, 1);
 });
