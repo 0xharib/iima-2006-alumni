@@ -670,7 +670,7 @@ async function route(req, env, record, setViewer, ctx) {
     const row = await one(`SELECT r.*,a.status AS own_attendance,${portrait} AS portrait,CASE WHEN coalesce(m.attendance_private,0)=0 THEN a.status END AS status
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
-    if(isMemorial(row.name))return renderPage(row.name,page.memorial(row,await profileMemories(key),id(),await loadTribute(env.MEDIA)),member,{home:true,active:'/remembering-sachin'});
+    if(isMemorial(row.name))return renderPage(row.name,page.memorial(row,await posts(`EXISTS(SELECT 1 FROM (SELECT ? AS id) subject_ref WHERE ${aboutPerson('subject_ref.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects m WHERE m.post=p.id))`,[key],100,'p.created DESC,p.id DESC',key),id(),await loadTribute(env.MEDIA)),member,{home:true,active:'/remembering-sachin'});
     const [seed,selected,section,photos,stories,profilePhotos,meet,yearbook] = await Promise.all([
       one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot),
       all(`SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=?
