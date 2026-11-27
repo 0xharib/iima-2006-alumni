@@ -563,11 +563,11 @@ export const socialScript = String.raw`
           const data=new FormData();
           data.set('action','tag-correct');data.set('tag',target);
           if(button.dataset.correctPhoto||card.dataset.photoScope)data.set('photo',button.dataset.correctPhoto||card.dataset.photoScope);
-          const {tags}=await send(path(card),data);
+          const {tags,cardTags}=await send(path(card),data);
           if(button.dataset.alsoPhoto){const extra=new FormData();extra.set('action','tag-correct');extra.set('tag',target);extra.set('photo',button.dataset.alsoPhoto);await send(path(card),extra);}
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
             if(rendered.dataset.photoScope===(button.dataset.correctPhoto||card.dataset.photoScope)){
-              rendered.querySelector('[data-memory-tags]').innerHTML=tags;
+              rendered.querySelector('[data-memory-tags]').innerHTML=rendered.matches('.collage-card')&&cardTags!=null?cardTags:tags;
               const panel=rendered.querySelector('[data-panel-content="tags"]');
               panel?.querySelectorAll('[data-correct-tag]').forEach(remove=>{
                 if(remove.dataset.correctTag===target)remove.closest('.topic-chip')?.remove();
@@ -588,9 +588,9 @@ export const socialScript = String.raw`
           const data=new FormData();
           data.set('action','tag-add');data.set('tag',button.dataset.tagId);
           if(card.dataset.photoScope)data.set('photo',card.dataset.photoScope);
-          const {tags}=await send(path(card),data);
+          const {tags,cardTags}=await send(path(card),data);
           for(const rendered of document.querySelectorAll('[data-post="'+CSS.escape(card.dataset.post)+'"]')){
-            if(rendered.dataset.photoScope===card.dataset.photoScope) rendered.querySelector('[data-memory-tags]').innerHTML=tags;
+            if(rendered.dataset.photoScope===card.dataset.photoScope) rendered.querySelector('[data-memory-tags]').innerHTML=rendered.matches('.collage-card')&&cardTags!=null?cardTags:tags;
           }
           message(card,'Tag added.');
           panel.querySelector('[data-tag-search]').value='';
