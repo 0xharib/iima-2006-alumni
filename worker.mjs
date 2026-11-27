@@ -5,6 +5,7 @@ import { whatsappRoute } from './whatsapp.mjs';
 export { FaceContainer } from './faces.mjs';
 import { SCAN_ALL_PEOPLE, faceAdminData, faceCron, faceRoute, faceSchema, forgetPostFaces, forgetTopicFaces, faceNudge, handleQueue, markRefs, photosOfYou, publishShadow, sweep } from './faces.mjs';
 import { completedProfilesCTE } from './completion.mjs';
+import { iimagesSchema, setYearbookHidden, yearbookEntry, yearbookPhotoKey } from './iimages2006.mjs';
 
 import { editReunionDetail, missingReunionDetails, reunionDetails, reunionValues } from './reunion.mjs';
 
@@ -446,6 +447,7 @@ async function route(req, env, record, setViewer, ctx) {
     else if (bits[0]==='yearbook') row = await one(`SELECT ph.object_key FROM yearbook_public y,json_each(y.images) j
       JOIN photos ph ON ph.submission=json_extract(j.value,'$.submission') AND ph.object_key=json_extract(j.value,'$.key')
       WHERE y.member=? AND j.key=?`,Number(bits[1]),Number(bits[2]));
+    else if (bits[0]==='iimages') { const key=await yearbookPhotoKey(db,Number(bits[1]),me,admin); row=key?{object_key:key}:null; }
     else if (bits[0]==='legacy' && Number(bits[2])>0) row = await one(`SELECT ph.object_key FROM posts p JOIN photos ph ON ph.submission=p.origin
       WHERE p.id=? AND ${postVisible} ORDER BY ph.object_key LIMIT 1 OFFSET ?`,bits[1],Number(bits[2])-1);
     return servePhoto(env,row,req,false,ctx);
