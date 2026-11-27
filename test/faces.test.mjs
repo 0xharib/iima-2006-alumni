@@ -19,14 +19,25 @@ test('face tables exist and photo_tags rejects an unknown origin', ()=>{
   assert.throws(()=>sqlite.exec(`INSERT INTO photo_tags(post,media,kind,target,origin) VALUES('x','m','person','2','robot')`));
 });
 
-import { assign, toVector, vectorBytes, faceMode, FACE_BAR } from '../faces.mjs';
+import { assign, toVector, vectorBytes, faceMode, FACE_BAR, FACE_MARGIN } from '../faces.mjs';
 const unitVec=i=>{const a=new Float32Array(512);a[i]=1;return a;};
 const mixVec=(i,j,w)=>{const a=new Float32Array(512);a[i]=w;a[j]=Math.sqrt(1-w*w);return a;};
 
 test('assign gives each face and each member at most once, best first, at or above the bar', ()=>{
   const refs=new Map([[7,[unitVec(0),unitVec(5)]],[8,[unitVec(1)]]]);
-  const faces=[{id:1,vector:mixVec(0,1,0.9)},{id:2,vector:mixVec(0,1,0.8)},{id:3,vector:unitVec(9)}];
-  assert.deepEqual(assign(faces,refs).map(p=>[p.face,p.member]),[[1,7],[2,8]]);
+  const faces=[{id:1,vector:mixVec(0,1,0.9)},{id:2,vector:mixVec(0,1,0.8)},{id:3,vector:unitVec(9)},{id:4,vector:mixVec(1,2,0.7)}];
+  // Face 2 looks most like 7, who already has face 1: it is not handed to 8 instead.
+  assert.deepEqual(assign(faces,refs).map(p=>[p.face,p.member]),[[1,7],[4,8]]);
+});
+test('a face that looks almost as much like someone else is not assigned', ()=>{
+  assert.equal(FACE_MARGIN,0.10);
+  const refs=new Map([[7,[unitVec(0)]],[8,[unitVec(1)]]]);
+  const close=new Float32Array(512); close[0]=0.62; close[1]=0.55; close[2]=Math.sqrt(1-0.62**2-0.55**2);
+  assert.deepEqual(assign([{id:1,vector:close}],refs),[]);
+  const clear=new Float32Array(512); clear[0]=0.62; clear[1]=0.50; clear[2]=Math.sqrt(1-0.62**2-0.50**2);
+  assert.deepEqual(assign([{id:1,vector:clear}],refs).map(p=>p.member),[7]);
+  // Someone tagged by hand on the photo still competes, but is not given the face again.
+  assert.deepEqual(assign([{id:1,vector:unitVec(0)}],refs,new Set([7])),[]);
 });
 test('a member just under the bar is not assigned', ()=>{
   assert.equal(FACE_BAR,0.35);

@@ -161,6 +161,10 @@ are matched through 2006 photos only while `FACE_TAGGING_2006` (off | shadow | o
 - `archive`: their face from the iimages 2006 yearbook PDF, imported once into `face_archive` (see below).
 - the approved seed portrait.
 A match through a `tagged` or `archive` reference needs 0.40 (`FACE_BAR_2006`), not 0.35.
+For everyone, a face is matched only to the member it looks most like, and only if it scores at least 0.10
+(`FACE_MARGIN`) above the next member. Crowded group photos (30–90 faces) produced many matches just over 0.35 where
+another batchmate scored almost as high; in the labelled test photos every right match cleared the next person by 0.17
+or more. Someone tagged by hand on a photo still competes for its faces, so their face is not handed to a lookalike.
 Every member's references must agree with each other (0.30 or more against at least one other); the ones that don't
 are left out and listed under "Reference photos left out" on `/admin/faces`. In shadow, the group's matches are marked
 "2006" on that page and **Publish** leaves them alone. Members who cannot be matched see "Add a profile picture to be

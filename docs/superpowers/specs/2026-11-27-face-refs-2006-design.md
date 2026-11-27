@@ -24,6 +24,12 @@ the iimages 2006 yearbook PDF as the base for everyone's appearance.
   (`FACE_BAR_2006`); current photos (profile picture, Then/Now, seed portrait) keep 0.35. In Hari's labelled test photos
   the 2006 references at 0.35 named two wrong people (Jay Dave and Arup Ghosh at 0.36, which Hari rejected on 27 Nov);
   at 0.40 there were none and nobody else was lost.
+- **A margin over the next person** (added 27 Nov after the first overnight shadow run, 5,566 matches on 1,498 photos).
+  A face goes only to the member it looks most like, and only if it beats the next member by 0.10 (`FACE_MARGIN`).
+  In the 200 lowest-scoring shadow matches, mostly faces in group photos of 30–90 people, about 1 in 4 faces looked
+  more like a different batchmate than the one named and only about 1 in 3 cleared the next person by 0.10; in the
+  labelled test photos every right match cleared the next person by 0.17 or more, so the margin loses none of them.
+  Hand-tagged people on a photo still compete for its faces but are not given one again.
 - **Rebuilds.** A hand tag on a photo marks that person's references for a rebuild, and so does scanning a one-face
   photo that carries one hand tag. The batch builds references for the whole roster while the 2006 group is on.
 - **Shadow for the new group.** While `FACE_TAGGING=on` and `FACE_TAGGING_2006=shadow`, the 2006 group's matches are

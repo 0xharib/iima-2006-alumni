@@ -58,13 +58,59 @@ export function refScore(vector, refs) {
   return best;
 }
 
-export function assign(faces, refs) {
+// A face is matched only to the member it looks most like, and only if it looks clearly more like them than like anyone
+// else: FACE_MARGIN or more above the next member. In Hari's labelled photos every right match cleared the next person
+// by 0.17 or more; in crowded group photos (30–90 faces) most matches just over the bar did not.
+export const FACE_MARGIN = 0.10;
+
+// All references of a refs map in one flat array, built once per map: every stored face is compared with every
+// member, so this inner loop is the batch's main cost.
+const packed = new WeakMap();
+function pack(refs) {
+  let p = packed.get(refs);
+  if (p) return p;
+  const list = [];
+  for (const [member, vectors] of refs) for (const ref of vectors) {
+    const v = ref.vector ?? ref;
+    if (v.length) list.push({member, old: !!ref.old, v});
+  }
+  const dim = list[0]?.v.length || 0, data = new Float32Array(list.length * dim);
+  list.forEach((r, i) => data.set(r.v, i * dim));
+  p = {dim, data, members: list.map(r => r.member), old: list.map(r => r.old)};
+  packed.set(refs, p);
+  return p;
+}
+
+// The member a face looks most like, their score and the margin over the next member (null if nobody reaches the bar).
+export function topMatch(vector, refs) {
+  const {dim, data, members, old} = pack(refs);
+  const scores = new Map();
+  for (let r = 0, o = 0; r < members.length; r++, o += dim) {
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0, i = 0;
+    for (; i + 3 < dim; i += 4) {
+      s0 += vector[i] * data[o + i]; s1 += vector[i + 1] * data[o + i + 1];
+      s2 += vector[i + 2] * data[o + i + 2]; s3 += vector[i + 3] * data[o + i + 3];
+    }
+    for (; i < dim; i++) s0 += vector[i] * data[o + i];
+    const score = s0 + s1 + s2 + s3;
+    if (old[r] && score < FACE_BAR_2006) continue;
+    if (!(scores.get(members[r]) >= score)) scores.set(members[r], score);
+  }
+  let member = null, best = -1, second = -1;
+  for (const [m, score] of scores) {
+    if (score > best) { second = best; best = score; member = m; }
+    else if (score > second) second = score;
+  }
+  return best >= FACE_BAR ? {member, score: best, margin: best - Math.max(second, 0)} : null;
+}
+
+// refs: every eligible member's references (they all compete). blocked: members who compete but may not be given a face
+// here (tagged by hand on the photo already).
+export function assign(faces, refs, blocked = new Set()) {
   const pairs = [];
   for (const face of faces) {
-    for (const [member, vectors] of refs) {
-      const best = refScore(face.vector, vectors);
-      if (best >= FACE_BAR) pairs.push({face: face.id, member, score: best});
-    }
+    const top = topMatch(face.vector, refs);
+    if (top && top.margin >= FACE_MARGIN && !blocked.has(top.member)) pairs.push({face: face.id, member: top.member, score: top.score});
   }
   pairs.sort((a, b) => b.score - a.score);
   const usedFaces = new Set(), usedMembers = new Set(), chosen = [];
@@ -326,10 +372,11 @@ export async function scanPhoto(env, post, media, notify = 'later') {
     const tagged = await rows(db, `SELECT CAST(target AS INTEGER) AS member,origin FROM active_photo_tags WHERE media=? AND kind='person'`, media);
     if (tagged.length === 1 && tagged[0].origin === 'manual') await markRefs(env, tagged[0].member);
   }
-  // People who said "Not me" or were tagged by hand here are left out before assigning, so the face can go to someone else.
-  const skip = new Set((await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state='removed'
-    UNION SELECT CAST(target AS INTEGER) FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media, media)).map(r => r.member));
-  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(env, skip));
+  // People who said "Not me" here are left out, so their face can go to someone else. People tagged by hand here still
+  // compete (their face must not go to a lookalike) but are not given a face again.
+  const notMe = new Set((await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state='removed'`, media)).map(r => r.member));
+  const manual = new Set((await rows(db, `SELECT CAST(target AS INTEGER) AS member FROM photo_tags WHERE media=? AND kind='person' AND origin='manual'`, media)).map(r => r.member));
+  const pairs = assign(result.faces.map((f, i) => ({id: ids[i], vector: f.vector})), await eligibleRefs(env, notMe), manual);
   const kept = pairs.map(p => p.member);
   const others = kept.length ? ` AND member NOT IN (${kept.map(() => '?').join(',')})` : '';
   const stale = (await rows(db, `SELECT member FROM active_face_matches WHERE media=? AND state IN ('auto','shadow')${others}`, media, ...kept)).map(r => r.member);
@@ -521,25 +568,20 @@ export async function refreshRefs(env, member) {
 
 // Match members against every face already stored (photos shared before their references were built), reading the
 // stored faces once for all of them. Each member's best face per photo is offered; writeMatches applies the rules.
+// Every stored face is compared with every eligible member (they all compete); matches are written for the given members.
 export async function rematchMembers(env, members) {
-  const db = env.DB, refs = new Map();
-  for (const member of members) {
-    if (!await eligible(env, member)) continue;
-    const vectors = (await rows(db, 'SELECT source,embedding FROM face_refs WHERE member=?', member)).map(r => refEntry(r.source, r.embedding));
-    if (vectors.length) refs.set(member, vectors);
-  }
-  if (!refs.size) return 0;
+  const db = env.DB, wanted = new Set(members);
+  const refs = await eligibleRefs(env);
+  if (![...wanted].some(m => refs.has(m))) return 0;
   const best = new Map();   // member/media -> match
   for (let after = 0; ;) {
     const page = await rows(db, 'SELECT id,media,post,embedding FROM active_faces WHERE id>? ORDER BY id LIMIT 500', after);
     if (!page.length) break;
     for (const face of page) {
-      const vector = toVector(face.embedding);
-      for (const [member, vectors] of refs) {
-        const score = refScore(vector, vectors);
-        const key = member + '/' + face.media;
-        if (score >= FACE_BAR && !(best.get(key)?.score >= score)) best.set(key, {media: face.media, post: face.post, member, face: face.id, score});
-      }
+      const top = topMatch(toVector(face.embedding), refs);
+      if (!top || top.margin < FACE_MARGIN || !wanted.has(top.member)) continue;
+      const key = top.member + '/' + face.media;
+      if (!(best.get(key)?.score >= top.score)) best.set(key, {media: face.media, post: face.post, member: top.member, face: face.id, score: top.score});
     }
     after = page[page.length - 1].id;
   }
@@ -660,15 +702,10 @@ export async function sweep(env, limit = 500, people = 100) {
 export async function finishRun(env) {
   const db = env.DB;
   if (faceMode(env) === 'off' || !await faceSchema(db)) return;
-  // Everyone rebuilt recently, 100 at a time (each pass reads the stored faces once), REMATCH_MAX at most per run.
-  const since = Date.now() - REMATCH_WINDOW_MS, wide = await wide2006(env);
-  for (let after = 0, done = 0; done < REMATCH_MAX;) {
-    const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND f.member>? AND ${ELIGIBLE('f.member', wide)}
-      AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT 100`, since, after);
-    if (!recent.length) break;
-    await rematchMembers(env, recent.map(r => r.member));
-    after = recent[recent.length - 1].member; done += recent.length;
-  }
+  // Everyone rebuilt recently, in one pass over the stored faces (every face is compared with everyone anyway).
+  const recent = await rows(db, `SELECT f.member FROM face_prefs f WHERE f.ref_tried>=? AND ${ELIGIBLE('f.member', await wide2006(env))}
+    AND EXISTS(SELECT 1 FROM face_refs r WHERE r.member=f.member) ORDER BY f.member LIMIT ?`, Date.now() - REMATCH_WINDOW_MS, REMATCH_MAX);
+  await rematchMembers(env, recent.map(r => r.member));
   await summarise(env);
 }
 
