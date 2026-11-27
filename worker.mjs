@@ -467,7 +467,9 @@ async function route(req, env, record, setViewer, ctx) {
       OR EXISTS(SELECT 1 FROM active_uploads a WHERE a.post=p.id AND instr(lower(a.caption),lower(?))>0)
       OR EXISTS(SELECT 1 FROM photos ph WHERE ph.submission=p.origin AND instr(lower(ph.caption),lower(?))>0)
       OR (lower(?) IN ('photo','photos') AND ((${photoBonus})>0)))`;
-    const rows = await posts(`(p.created<? OR (p.created=? AND p.id<?)) ${q?search:''}`,
+    const rows = await posts(`(p.created<? OR (p.created=? AND p.id<?))
+      AND NOT EXISTS(SELECT 1 FROM roster memorial WHERE lower(trim(memorial.name))='sachin kumar suman'
+        AND ${aboutPerson('memorial.id')} AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)) ${q?search:''}`,
       [before,before,cursor,...(q?Array(7).fill(q):[])],size+1,'p.created DESC,p.id DESC');
     const more = rows.length>size;
     if (more) rows.pop();
