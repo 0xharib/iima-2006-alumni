@@ -626,13 +626,14 @@ const memoryPhotos = `WITH ${MINE} SELECT m.post,m.media FROM (${MEMORY_PHOTOS})
 // Every photo the member is tagged in (on the photo, or on a single-photo memory), newest memory first.
 export const photosOfYou = (db, me) => rows(db, `WITH ${MINE}, memory AS (SELECT m.post,m.media FROM (${MEMORY_PHOTOS}) m
     WHERE NOT EXISTS(SELECT 1 FROM face_matches fm WHERE fm.media=m.media AND fm.member=?1 AND fm.state='removed'))
-  SELECT post,media,origin FROM (
+  SELECT gallery.post,gallery.media,gallery.origin,a.title AS album_title FROM (
     SELECT pt.post,pt.media,pt.origin,p.created FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
       WHERE pt.kind='person' AND pt.target=CAST(CAST(?1 AS INTEGER) AS TEXT) AND ${POST_VISIBLE}
     UNION ALL
     SELECT m.post,m.media,'memory',p.created FROM memory m JOIN posts p ON p.id=m.post
       WHERE NOT EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.media=m.media AND pt.kind='person' AND pt.target=CAST(CAST(?1 AS INTEGER) AS TEXT)))
-  ORDER BY created DESC,media`, Number(me));
+  AS gallery LEFT JOIN memory_albums a ON a.post=gallery.post
+  ORDER BY gallery.created DESC,gallery.media`, Number(me));
 
 async function notMe(req, env, me) {
   const form = await req.formData();
