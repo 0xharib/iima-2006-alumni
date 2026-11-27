@@ -239,3 +239,23 @@ Owners can edit an uploaded memory's caption/title, append photos, select a cove
 Drafts are scoped to the signed-in member and compose/edit destination in IndexedDB on that device and browser. File blobs are stored once, separately from draft metadata; confirmed uploads are skipped after a retry or reload. Uploads remain three at a time and retain the existing original-quality processing. Browser storage quotas/private modes can prevent persistence; the form then asks the user to keep the page open. Metadata edits preserve the original photo IDs. Publishing clears the local draft and its stored blobs. Gallery images and draft thumbnails load lazily. Large ID lists use one `json_each` parameter instead of exceeding D1's 100-bound-parameter limit; bulk removal uses one SQL statement.
 
 Validation: `node --test` covers the 300/301 boundary, duplicate IDs, ownership, foreign photos, stale edits, retry idempotency, ordering, retained comments/likes/tags/face scans, inaccessible removed media and the version guard. Existing face tests exercise the matching subsystem with synthetic embeddings. Live recognition is not enabled in the sandbox. Before promoting, run browser upload/reload/retry checks on a phone and apply migration 0020 to the production target only with an explicit production release instruction.
+
+## From the 2006 yearbook (profile section)
+
+Each classmate's profile can show their entry from the printed 2006 yearbook (*iimages 2006*): the photo, the heading and
+dorm, and the write-up as printed. The data lives only in table `iimages_2006` and R2 under `iimages-2006/photo/`; none of
+it is in this repository.
+
+**Going live** (after the code is deployed, from the site repo, with `wrangler` logged in):
+
+1. `npx wrangler d1 execute iima-2006-alumni --remote --file migrations/0022_iimages_2006.sql`
+2. `bash "<private bundle>/upload-photos.sh"` — one R2 put per photo (272).
+3. `npx wrangler d1 execute iima-2006-alumni --remote --file "<private bundle>/iimages-2006.sql"` (274 upserts).
+
+The private bundle is generated in the yearbook repo by `iimages/site_export.py` into `people/private/iimages-2006/`.
+Re-running the import updates text and photos but never touches `hidden`, so owners' choices survive.
+
+**Hiding.** The owner hides or restores their entry from their profile (`/profile`, `action=iimages-hide|iimages-show`).
+An admin can do the same from the profile (the small Admin control) or the admin action list, with a reason; both are
+written to `audit`. A hidden entry and its photo (`/media/iimages/<id>`) are served only to the owner and admins.
+Until migration 0022 has run, profiles simply show no section.

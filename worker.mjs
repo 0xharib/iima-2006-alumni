@@ -659,7 +659,7 @@ async function route(req, env, record, setViewer, ctx) {
       FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN attendance a ON a.member=r.id ${seedJoin} WHERE r.id=?`,+pilot,key);
     if (!row) return missing();
     if(isMemorial(row.name))return renderPage(row.name,page.memorial(row,await profileMemories(key),id(),await loadTribute(env.MEDIA)),member,{home:true,active:'/remembering-sachin'});
-    const [seed,selected,section,photos,stories,profilePhotos,meet] = await Promise.all([
+    const [seed,selected,section,photos,stories,profilePhotos,meet,yearbook] = await Promise.all([
       one(`SELECT s.source_data FROM profile_seeds s WHERE s.roster_id=? AND ${visibleSeed}`,key,+pilot),
       all(`SELECT field,value,source FROM selected_profile_fields WHERE member=? AND pilot_only<=?
         AND field NOT IN ('thenPhotoObject','nowPhotoObject') ORDER BY priority`,key,+pilot),
@@ -672,7 +672,8 @@ async function route(req, env, record, setViewer, ctx) {
         WHERE y.member=? AND ph.slot IN ('then','now')
         UNION ALL SELECT substr(field,1,length(field)-11), 'profile-photo/'||member||'/'||substr(field,1,length(field)-11), ''
         FROM profile_fields WHERE member=? AND field IN ('thenPhotoObject','nowPhotoObject') AND value<>''`,key,key),
-      meetSummary(key)
+      meetSummary(key),
+      yearbookEntry(db,key,me,admin)
     ]);
     const imported = parse(seed?.source_data);
     const details = {dorm:row.dorm,nickname:row.nickname,life:'',city:'',company:'',country:'',section:section?.section,education:'',professionalFocus:'',researchHighlight:''};
@@ -680,7 +681,7 @@ async function route(req, env, record, setViewer, ctx) {
       if (field.field==='section' && field.source==='selected_enrichment' && section) continue;
       details[field.field]=field.value;
     }
-    return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me&&await faceSchema(db)),member,{home:true,active:'/people'});
+    return renderPage(row.name,page.person({...row,lifeGenerated:!!String(details.life||'').trim()&&selected.filter(item=>item.field==='life').at(-1)?.source==='selected_enrichment',linkedin:imported['LinkedIn URL'],profileLinks:imported['Profile links']},attendanceNames[key===me?row.own_attendance:row.status],details,photos,stories,me,pilot,id(),Object.fromEntries(profilePhotos.map(photo=>[photo.slot,photo])),meet,key===me&&await faceSchema(db),yearbook,admin),member,{home:true,active:'/people'});
   }
 
   if (path==='/photos-of-you' && !post) return await faceSchema(db)?show('Photos of you',page.photosOfYou(await photosOfYou(db,me),Math.max(0,Math.min(300,Number(u.searchParams.get('removed'))||0)))):missing();
@@ -706,6 +707,12 @@ async function route(req, env, record, setViewer, ctx) {
       return show('Edit profile',page.editProfile(values,member,checks,Object.fromEntries(photos.map(photo=>[photo.slot,photo]))));
     }
     const f = await data();
+    // The owner hides or shows their own 2006 yearbook entry; there is no target, so no one can act for someone else here.
+    const ownAction = str(f,'action',40);
+    if (ownAction==='iimages-hide'||ownAction==='iimages-show') {
+      await setYearbookHidden(db,me,ownAction==='iimages-hide',me);
+      return redirect('/people/'+me+'#iimages-2006');
+    }
     const inline = f.get('field');
     // JavaScript clients ask for JSON and update the editor in place; plain form posts keep the redirect.
     const wantsJson = req.headers.get('Accept')==='application/json';
@@ -1202,6 +1209,9 @@ async function route(req, env, record, setViewer, ctx) {
     if (action==='resolve-report') update=sql('UPDATE reports SET resolved=1 WHERE id=?',target);
     if (action==='invite') update=sql('INSERT INTO members(id,invited) VALUES(?,1) ON CONFLICT(id) DO UPDATE SET invited=1',Number(target));
     if (action==='revoke') update=sql('DELETE FROM sessions WHERE member=?',Number(target));
+    if ((action==='iimages-hide'||action==='iimages-show') && await iimagesSchema(db)) update=action==='iimages-hide'
+      ? sql('UPDATE iimages_2006 SET hidden=1,hidden_by=?,hidden_at=? WHERE member=?',me,now(),Number(target))
+      : sql('UPDATE iimages_2006 SET hidden=0,hidden_by=NULL,hidden_at=NULL WHERE member=?',Number(target));
     if (action==='publish-memory') {
       const legacy = await one("SELECT * FROM submissions WHERE id=? AND kind='memory'",target);
       const body = parse(legacy?.payload).story;
@@ -1221,7 +1231,7 @@ async function route(req, env, record, setViewer, ctx) {
     }
     if (!update || !reason) return invalid('Choose an action and provide a reason.');
     await db.batch([update,...(action==='hide-post'?await forgetPostFaces(db,target):action==='hide-topic'?await forgetTopicFaces(db,target):[]),sql('INSERT INTO audit VALUES(?,?,?,?,?,?)',id(),me,action,target,reason,now())]);
-    return redirect(path);
+    return redirect(action.startsWith('iimages-')?'/people/'+Number(target)+'#iimages-2006':path);
   }
   return missing();
 }
