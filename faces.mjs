@@ -340,9 +340,12 @@ export async function summarise(env, member = null) {
   for (const {member: person, n} of pending) {
     const newest = await first(db, `SELECT m.post,m.media FROM active_face_matches m JOIN posts p ON p.id=m.post
       WHERE m.member=? AND m.state='auto' AND m.notified=0 AND p.author<>m.member ORDER BY p.created DESC,m.media LIMIT 1`, person);
+    // The insert only happens if the matches are still unnotified when this batch runs, so two summaries running at
+    // once (Publish pressed twice, or Publish during a batch) send one notification, not two.
     await db.batch([
-      q(db, `INSERT OR IGNORE INTO notifications(recipient,actor,kind,post,anchor,event_key) VALUES(?,NULL,'mention',?,?,?)`,
-        person, newest.post, anchorFor(newest.media), `found-all:${n}:${stamp}`),
+      q(db, `INSERT OR IGNORE INTO notifications(recipient,actor,kind,post,anchor,event_key) SELECT ?,NULL,'mention',?,?,?
+        WHERE EXISTS(SELECT 1 FROM face_matches WHERE member=? AND state='auto' AND notified=0)`,
+        person, newest.post, anchorFor(newest.media), `found-all:${n}:${stamp}`, person),
       q(db, `UPDATE face_matches SET notified=1 WHERE member=? AND state='auto' AND notified=0`, person),
     ]);
   }
