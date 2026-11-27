@@ -88,6 +88,12 @@ const memoryTags=(post)=> {
   const item=tag=>link(tag.href,(tag.kind==='person'?'@':'#')+tag.label);
   return tags.length?`<div class="memory-tags">${tags.slice(0,3).map(item).join('')}${tags.length>3?`<details><summary>View ${tags.length-3} more</summary><div>${tags.slice(3).map(item).join('')}</div></details>`:''}</div>`:'';
 };
+// A memory card: the memory's own tags plus, when it has a single photo, the tags on that photo, each shown once.
+const cardTags=post=>{
+  const seen=new Set(),tags=[...JSON.parse(post.linked_tags||'[]'),...JSON.parse(post.single_photo_tags||'[]')]
+    .filter(tag=>!seen.has(tag.href)&&seen.add(tag.href)).sort((a,b)=>a.kind.localeCompare(b.kind)||a.label.localeCompare(b.label));
+  return memoryTags({linked_tags:JSON.stringify(tags)});
+};
 const tagPanel=()=>`<div class="memory-inline" data-panel-content="tags" hidden>
   <input type="search" data-tag-search aria-label="Add a tag" placeholder="@classmate or #place or event" autocomplete="off">
   <div data-tag-results></div></div>`;
@@ -128,7 +134,7 @@ const memoryCards = (rows,priority=false) => rows.map((post,index)=>{
     ${photo&&post.body&&!['Shared a yearbook photo.','Shared a photo.'].includes(post.body)?`<p class="memory-caption">${e(post.body)}</p>`:''}
     ${album?`<a class="album-open-link" href="/posts/${e(post.id)}">Tap to open album · ${photos.length} photos <span aria-hidden="true">→</span></a>`:''}
     ${scoped?`<a class="album-open-link" href="/posts/${e(post.id)}#photo-${e(post.photo_scope.replaceAll('/','-'))}">Tap to open album · ${post.album_photo_total} photos <span aria-hidden="true">→</span></a><small style="display:block">Likes and comments are shared with the original memory.</small>`:''}
-    <div data-memory-tags>${memoryTags(post)}</div>
+    <div data-memory-tags>${scoped?memoryTags(post):cardTags(post)}</div>
     <div class="collage-actions">
       <div class="memory-like">${icon('like',post.liked?'Unlike':'Like','data-like aria-pressed="'+!!post.liked+'"')}<span data-count>${post.likes||''}</span></div>
       ${icon('comment','Comment','data-panel="comments" aria-expanded="false"')}
@@ -343,7 +349,7 @@ export const page={
     ${memoriesCompletionPrompt(collage(rows,next,true),checks,me)}
     ${page.composeDialog(key)}`;},
   gallery(photos,memories=[],person=null){return `<div class="memory-nav">${link('/memories','Back to memories')}</div>${memoryBatch(person===null?memories:profileMemoryRows(memories,person))}${memoryDialog()}${photos.length?`<section class="panel"><h2>Profile and yearbook photos</h2><p>These are profile photos rather than posted memories.</p>${images(photos)}</section>`:''}`;},
-  memoryCards, memoryTags,
+  memoryCards, memoryTags, cardTags,
   reunion(member,tracker,saved,directory,showSaved){
     const values = reunionValues(tracker,saved);
     const party = partySummary(values.spouse,values.children);

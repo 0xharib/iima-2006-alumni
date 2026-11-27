@@ -387,6 +387,14 @@ async function route(req, env, record, setViewer, ctx) {
         AND tt.hidden=0 AND tt.redirect IS NULL
       ORDER BY kind,label
     )) AS linked_tags,
+    -- A memory with one photo: who and what is tagged on that photo, for its card (albums keep their photo tags inside).
+    CASE WHEN (SELECT count(*) FROM active_uploads a WHERE a.post=p.id)+(SELECT count(*) FROM photos ph WHERE ph.submission=p.origin)=1
+      THEN (SELECT json_group_array(json_object('href',href,'label',label,'kind',kind)) FROM (
+        SELECT '/people/'||rr.id AS href,rr.name AS label,'person' AS kind FROM roster rr
+        WHERE rr.id IN (SELECT CAST(pt.target AS INTEGER) FROM active_photo_tags pt WHERE pt.post=p.id AND pt.kind='person')
+        UNION SELECT '/topics/'||tt.id,tt.title,'topic' FROM topics tt
+        WHERE tt.id IN (SELECT pt.target FROM active_photo_tags pt WHERE pt.post=p.id AND pt.kind='topic') AND tt.hidden=0 AND tt.redirect IS NULL
+        ORDER BY kind,label)) END AS single_photo_tags,
     (SELECT json_group_array(media) FROM (
       SELECT 'post/'||a.id AS media FROM active_uploads a WHERE a.post=p.id
       UNION ALL SELECT 'legacy/'||p.id||'/'||row_number() OVER(ORDER BY ph.object_key)
@@ -1087,7 +1095,7 @@ async function route(req, env, record, setViewer, ctx) {
       if (action==='tag-add'||action==='tag-correct') {
         const tagged=photoScope?{linked_tags:JSON.stringify((await photoLinks()).filter(link=>link.media===photoScope))}
           :(await posts('p.id=?',[key],1))[0];
-        return json({tags:page.memoryTags(tagged)});
+        return json({tags:page.memoryTags(tagged),cardTags:photoScope?null:page.cardTags(tagged)});
       }
       return json({ok:true});
     }
