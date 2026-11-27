@@ -271,6 +271,21 @@ export function memoriesCompletionPrompt(content,checks,me) {
     </div>
   </section>`;
 }
+// "From the 2006 yearbook": the printed photo, heading and write-up. The owner can hide it; an admin can too (audited).
+function iimagesSection(row,entry,own,isAdmin){
+  if(!entry)return '';
+  const ownerForm=(action,label)=>form('/profile',field('action',action),label);
+  const adminForm=(action,label)=>`<details class="iimages-admin"><summary>Admin</summary>${form('/admin',field('action',action)+field('target',String(row.id))+input('reason','Reason','','required'),label)}</details>`;
+  if(entry.hidden)return `<section class="profile-section profile-iimages is-hidden" id="iimages-2006"><p>${own?'Your 2006 write-up is hidden from batchmates.':'This 2006 write-up is hidden from batchmates.'}</p>
+    ${own?ownerForm('iimages-show','Show it again'):isAdmin?adminForm('iimages-show','Show it again'):''}</section>`;
+  const paras=String(entry.writeup).split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean).map(p=>'<p>'+e(p).replace(/\n/g,'<br>')+'</p>').join('\n');
+  return `<section class="profile-section profile-iimages" id="iimages-2006"><div class="profile-section-head"><h2>From the 2006 yearbook</h2><span class="registry">iimages 2006</span></div>
+    <div class="iimages-body${entry.hasPhoto?'':' no-photo'}">${entry.hasPhoto?`<a class="iimages-photo" href="/media/iimages/${row.id}"><img src="/media/iimages/${row.id}?w=480" alt="${e(row.name)} in the 2006 yearbook" loading="lazy"></a>`:''}
+    <div class="iimages-text"><h3>${e(entry.heading)} <span>· ${e(entry.dorm)}</span></h3>
+${paras}</div></div>
+    ${own?ownerForm('iimages-hide','Hide my 2006 write-up'):isAdmin?adminForm('iimages-hide','Hide this 2006 write-up'):''}</section>`;
+}
+
 export const page={
   socialScript,
   pickerScript:`const box=document.querySelector('#name-search'); const results=document.querySelector('#name-results'); let revision=0;
@@ -414,7 +429,7 @@ export const page={
         return reunion?`<div class="reunion-catchup-card" style="min-width:0">${content}${row.catchup==='incoming'?meetForm('accept',row.id,next,'Confirm catch up','reunion-confirm-catchup',row.catchup_request):row.catchup==='outgoing'?'<small style="display:block;padding:.3rem .5rem">Awaiting their confirmation</small>':''}</div>`:content;
       }).join('')}`;
   },
-  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces=false){
+  person(row,status,details,photos,stories,me,pilot,composeKey,profilePhotos={},meet={available:false},faces=false,yearbook=null,isAdmin=false){
     const own = me === row.id;
     stories=profileMemoryRows(stories,row.id);
     const received = stories.filter(post=>post.author!==row.id);
@@ -504,6 +519,7 @@ export const page={
                  `<p>No photo shared.</p>`}
 </div>`;
             }).join('')}</div></section>`:''}
+          ${iimagesSection(row,yearbook,own,isAdmin)}
           ${own&&faces?`<p class="profile-section face-photos-link"><a href="/photos-of-you">Photos of you</a></p>`:''}
 
           ${entryKeys.length?`<section class="profile-section"><dl class="profile-entry">${entryKeys.map(entry).join('')}</dl></section>`:''}
@@ -670,7 +686,7 @@ export const page={
       <h2>Classmate profiles</h2>
       ${table(['Classmate','Yearbook submitted','Profile details saved','Photo','Enriched information'],coverage.map(row=>[row,yes(row.submitted),yes(row.edited),yes(row.portrait||row.has_photos),yes(row.enriched)]))}`;
   },
-  admin(reports,seeds,topics,memories){const actions=['invite','revoke','approve-seed','hold-seed','resolve-report','hide-post','restore-post','hide-comment','restore-comment','rename-topic','hide-topic','merge-topic','publish-memory'];
+  admin(reports,seeds,topics,memories){const actions=['invite','revoke','approve-seed','hold-seed','resolve-report','hide-post','restore-post','hide-comment','restore-comment','rename-topic','hide-topic','merge-topic','publish-memory','iimages-hide','iimages-show'];
     return `<p>${link('/admin','Back to summary')} · ${link('/admin/analytics','Site analytics')} · ${link('/admin/faces','Face tagging')}</p><h2>Reports</h2>${list(reports.map(r=>`<strong>${e(r.target_type)} ${e(r.target)}</strong><br>${e(r.reason)}<br>Report ID ${e(r.id)}`),'No open reports.')}
       <h2>Take action</h2>${form('/admin',select('action','Action',actions.map(a=>[a,a.replaceAll('-',' ')]))+input('target','Target ID','','required')+
       input('reason','Reason','','required')+input('into','Merge destination topic ID')+input('title','New topic title'),'Apply action')}

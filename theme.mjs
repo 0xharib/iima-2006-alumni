@@ -580,6 +580,17 @@ time,small{color:var(--muted)}
 .then-now-slot h3 span{font:600 1.6rem/1 var(--serif);color:var(--brick)}
 .then-now-slot img{aspect-ratio:4/5;object-fit:cover;background:var(--brick-wash);border-radius:var(--r)}
 .then-now-slot p{display:grid;place-items:center;aspect-ratio:4/5;margin:0;border:1px dashed var(--concrete);border-radius:var(--r);color:var(--muted);font-size:.9rem}
+.iimages-body{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr);gap:1.25rem;align-items:start}
+.iimages-body.no-photo{grid-template-columns:1fr}
+.iimages-photo img{display:block;width:100%;aspect-ratio:4/5;object-fit:cover;background:var(--brick-wash);border-radius:var(--r)}
+.iimages-text h3{margin:0 0 .6rem;font:650 1.15rem var(--serif)}
+.iimages-text h3 span{font:500 .95rem var(--sans);color:var(--muted)}
+.iimages-text p{margin:0 0 .8rem;font:1.02rem/1.6 var(--serif);overflow-wrap:anywhere}
+.profile-iimages form{margin-top:.6rem}
+.profile-iimages form button{font-size:.85rem}
+.profile-iimages.is-hidden p{color:var(--muted);font-style:italic}
+.iimages-admin summary{font-size:.85rem;color:var(--muted);cursor:pointer}
+@media(max-width:700px){.iimages-body{grid-template-columns:1fr}.iimages-photo{max-width:220px}}
 .inline-edit summary,.profile-portrait [data-upload],.then-now-slot [data-upload]{opacity:.55;transition:opacity .16s}
 .inline-edit summary:hover,.inline-edit[open] summary,.inline-edit summary:focus-visible,[data-upload]:hover,[data-upload]:focus-visible{opacity:1}
 .profile-photos img{border-radius:var(--r)}
