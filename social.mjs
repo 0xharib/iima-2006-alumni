@@ -333,14 +333,14 @@ export const socialScript = String.raw`
     const figures=[...grid.querySelectorAll('figure')];
     if(group)group.onclick=()=>{
       const on=group.getAttribute('aria-pressed')!=='true';
-      group.setAttribute('aria-pressed',String(on));group.textContent=on?'All photos':'By album';
+      grid.classList.toggle('is-grouped',on);group.setAttribute('aria-pressed',String(on));group.textContent=on?'All photos':'By album';
       grid.querySelectorAll('[data-gallery-heading]').forEach(h=>h.remove());
       if(!on){figures.forEach(f=>grid.append(f));return;}
       const groups=new Map();
       figures.forEach(f=>{const key=f.dataset.sourcePost;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(f);});
       groups.forEach(items=>{
         const heading=document.createElement('h3');heading.dataset.galleryHeading='';heading.style.gridColumn='1 / -1';
-        heading.textContent=items[0].querySelector('[data-album-photo]').dataset.albumLabel+' · '+items.length;
+        const photo=items[0].querySelector('[data-album-photo]');const title=document.createElement('strong');title.textContent=(photo.dataset.albumLabel||'Batch memory')+' · '+items.length;const meta=document.createElement('div');meta.className='gallery-source-meta';const credit=document.createElement('span');credit.textContent='Uploaded by '+photo.dataset.uploader;const link=document.createElement('a');link.href=photo.dataset.memoryHref;link.textContent=photo.dataset.albumLabel?'View album ↗':'View memory ↗';meta.append(credit,link);heading.append(title,meta);
         grid.append(heading,...items);
       });
     };
@@ -349,7 +349,7 @@ export const socialScript = String.raw`
       if(source&&gallery.classList.contains('is-selecting')){event.preventDefault();const check=source.closest('figure').querySelector('input');check.checked=!check.checked;check.dispatchEvent(new Event('change'));}
     });
     const update=()=>{const n=checks.filter(c=>c.checked).length;remove.disabled=!n||n>300;remove.textContent=n?'Remove selected ('+n+')':'Remove selected';status.textContent=n>300?'Select at most 300 photos at a time.':n?n+' selected':'';};
-    const mode=on=>{gallery.classList.toggle('is-selecting',on);select.hidden=on;cancel.hidden=!on;remove.hidden=!on;checks.forEach(c=>{c.closest('label').hidden=!on;if(!on)c.checked=false;});update();if(on)checks[0]?.focus();else select.focus();};
+    const mode=on=>{gallery.classList.toggle('is-selecting',on);select.hidden=on;if(group)group.disabled=on;grid.querySelectorAll('.gallery-source a,[data-gallery-heading] a').forEach(a=>{if(on)a.setAttribute('tabindex','-1');else a.removeAttribute('tabindex');});cancel.hidden=!on;remove.hidden=!on;checks.forEach(c=>{c.closest('label').hidden=!on;if(!on)c.checked=false;});update();if(on)checks[0]?.focus();else select.focus();};
     select.onclick=()=>mode(true);cancel.onclick=()=>mode(false);checks.forEach(c=>c.addEventListener('change',update));
     form.addEventListener('submit',event=>{if(!gallery.classList.contains('is-selecting')||remove.disabled)event.preventDefault();else if(!confirm('Remove these tags from your gallery? The original photos will remain.'))event.preventDefault();});
   }
@@ -364,7 +364,8 @@ export const socialScript = String.raw`
       // A display-sized variant fills the viewer; the original stays one tap away.
       image.srcset=photo.href+'?w=768 768w, '+photo.href+'?w=1200 1200w';image.src=photo.href+'?w=1200';image.alt=photo.querySelector('img').alt;
       const original=viewer.querySelector('[data-album-original]');if(original)original.href=photo.href;
-      const memory=viewer.querySelector('[data-album-memory]');if(memory){memory.href=photo.dataset.memoryHref;if(photo.dataset.albumLabel)memory.textContent=photo.dataset.albumLabel==='View original memory'?'View original memory':'View album: '+photo.dataset.albumLabel;}
+      const memory=viewer.querySelector('[data-album-memory]');if(memory){memory.href=photo.dataset.memoryHref;if(gallery)memory.textContent=photo.dataset.albumLabel?'View album':'View memory';}
+      const credit=viewer.querySelector('[data-gallery-viewer-source]');if(credit)credit.textContent=(photo.dataset.albumLabel?'From: '+photo.dataset.albumLabel:'From a batch memory')+' · Uploaded by '+photo.dataset.uploader;
       viewer.querySelector('[role=status]').textContent=(current+1)+' of '+albumPhotos.length;
     };
     albumPhotos.forEach((photo,index)=>photo.addEventListener('click',event=>{
