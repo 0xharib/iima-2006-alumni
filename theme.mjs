@@ -807,7 +807,7 @@ p,dd,.memory-quote{text-wrap:pretty}
 .personal-gallery-photo{position:relative;min-width:0;margin:0;overflow:hidden;border-radius:10px;background:var(--tile)}
 .personal-gallery-photo img{width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:10px;display:block;background:var(--tile)}
 .personal-gallery-photo a{display:block;outline-offset:-3px}.personal-gallery-photo a:hover img{filter:brightness(1.06)}
-.gallery-selection{position:absolute;inset:0;display:flex;justify-content:flex-end;align-items:flex-start;padding:10px;cursor:pointer;margin:0;background:#0002;border:3px solid transparent;border-radius:10px}
+.gallery-source{padding:.45rem .65rem;font-size:.82rem;line-height:1.3}.gallery-source a{color:var(--ink);overflow-wrap:anywhere}.personal-gallery-grid [data-gallery-heading]{margin:.8rem 0 .1rem;font-size:1rem}.gallery-selection{position:absolute;inset:0;display:flex;justify-content:flex-end;align-items:flex-start;padding:10px;cursor:pointer;margin:0;background:#0002;border:3px solid transparent;border-radius:10px}
 .gallery-selection input{appearance:none;width:32px;height:32px;margin:0;border:2px solid white;border-radius:50%;background:#251c19b0;box-shadow:0 2px 6px #0005}
 .gallery-selection span{display:none;position:absolute;right:18px;top:14px;color:white;font-weight:800}
 .gallery-selection:has(input:checked){border-color:var(--brick);background:#0005}.gallery-selection input:checked{background:var(--brick)}.gallery-selection input:checked+span{display:block}

@@ -329,6 +329,25 @@ export const socialScript = String.raw`
   if(gallery){
     const form=gallery.querySelector('[data-gallery-form]'),select=form.querySelector('[data-gallery-select]'),cancel=form.querySelector('[data-gallery-cancel]'),remove=form.querySelector('[data-gallery-remove]'),status=form.querySelector('.gallery-selection-status');
     const checks=[...form.querySelectorAll('input[name=media]')];
+    const group=form.querySelector('[data-gallery-group]'),grid=form.querySelector('.personal-gallery-grid');
+    const figures=[...grid.querySelectorAll('figure')];
+    if(group)group.onclick=()=>{
+      const on=group.getAttribute('aria-pressed')!=='true';
+      group.setAttribute('aria-pressed',String(on));group.textContent=on?'All photos':'By album';
+      grid.querySelectorAll('[data-gallery-heading]').forEach(h=>h.remove());
+      if(!on){figures.forEach(f=>grid.append(f));return;}
+      const groups=new Map();
+      figures.forEach(f=>{const key=f.dataset.sourcePost;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(f);});
+      groups.forEach(items=>{
+        const heading=document.createElement('h3');heading.dataset.galleryHeading='';heading.style.gridColumn='1 / -1';
+        heading.textContent=items[0].querySelector('[data-album-photo]').dataset.albumLabel+' · '+items.length;
+        grid.append(heading,...items);
+      });
+    };
+    grid.addEventListener('click',event=>{
+      const source=event.target.closest('.gallery-source a');
+      if(source&&gallery.classList.contains('is-selecting')){event.preventDefault();const check=source.closest('figure').querySelector('input');check.checked=!check.checked;check.dispatchEvent(new Event('change'));}
+    });
     const update=()=>{const n=checks.filter(c=>c.checked).length;remove.disabled=!n||n>300;remove.textContent=n?'Remove selected ('+n+')':'Remove selected';status.textContent=n>300?'Select at most 300 photos at a time.':n?n+' selected':'';};
     const mode=on=>{gallery.classList.toggle('is-selecting',on);select.hidden=on;cancel.hidden=!on;remove.hidden=!on;checks.forEach(c=>{c.closest('label').hidden=!on;if(!on)c.checked=false;});update();if(on)checks[0]?.focus();else select.focus();};
     select.onclick=()=>mode(true);cancel.onclick=()=>mode(false);checks.forEach(c=>c.addEventListener('change',update));
@@ -336,7 +355,7 @@ export const socialScript = String.raw`
   }
   const viewer=document.querySelector('.album-viewer');
   if(viewer){
-    const albumPhotos=[...document.querySelectorAll('[data-album-photo]')];
+    let albumPhotos=[...document.querySelectorAll('[data-album-photo]')];
     let current=0, touchStart;
     const show=index=>{
       current=(index+albumPhotos.length)%albumPhotos.length;
@@ -345,11 +364,11 @@ export const socialScript = String.raw`
       // A display-sized variant fills the viewer; the original stays one tap away.
       image.srcset=photo.href+'?w=768 768w, '+photo.href+'?w=1200 1200w';image.src=photo.href+'?w=1200';image.alt=photo.querySelector('img').alt;
       const original=viewer.querySelector('[data-album-original]');if(original)original.href=photo.href;
-      const memory=viewer.querySelector('[data-album-memory]');if(memory)memory.href=photo.dataset.memoryHref;
+      const memory=viewer.querySelector('[data-album-memory]');if(memory){memory.href=photo.dataset.memoryHref;if(photo.dataset.albumLabel)memory.textContent=photo.dataset.albumLabel==='View original memory'?'View original memory':'View album: '+photo.dataset.albumLabel;}
       viewer.querySelector('[role=status]').textContent=(current+1)+' of '+albumPhotos.length;
     };
     albumPhotos.forEach((photo,index)=>photo.addEventListener('click',event=>{
-      event.preventDefault();if(gallery?.classList.contains('is-selecting')){const check=photo.closest('figure')?.querySelector('input');if(check){check.checked=!check.checked;check.dispatchEvent(new Event('change'));}return;}show(index);viewer.showModal();
+      event.preventDefault();if(gallery?.classList.contains('is-selecting')){const check=photo.closest('figure')?.querySelector('input');if(check){check.checked=!check.checked;check.dispatchEvent(new Event('change'));}return;}albumPhotos=[...document.querySelectorAll('[data-album-photo]')];show(albumPhotos.indexOf(photo));viewer.showModal();
     }));
     viewer.querySelector('[data-album-prev]').onclick=()=>show(current-1);
     viewer.querySelector('[data-album-next]').onclick=()=>show(current+1);
