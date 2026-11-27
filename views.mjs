@@ -280,7 +280,7 @@ function iimagesSection(row,entry,own,isAdmin){
     ${own?ownerForm('iimages-show','Show it again'):isAdmin?adminForm('iimages-show','Show it again'):''}</section>`;
   const paras=String(entry.writeup).split(/\n\s*\n/).map(p=>p.trim()).filter(Boolean).map(p=>'<p>'+e(p).replace(/\n/g,'<br>')+'</p>').join('\n');
   return `<section class="profile-section profile-iimages" id="iimages-2006"><div class="profile-section-head"><h2>From the 2006 yearbook</h2><span class="registry">iimages 2006</span></div>
-    <div class="iimages-body">${entry.hasPhoto?`<a class="iimages-photo" href="/media/iimages/${row.id}"><img src="/media/iimages/${row.id}?w=480" alt="${e(row.name)} in the 2006 yearbook" loading="lazy"></a>`:''}
+    <div class="iimages-body${entry.hasPhoto?'':' no-photo'}">${entry.hasPhoto?`<a class="iimages-photo" href="/media/iimages/${row.id}"><img src="/media/iimages/${row.id}?w=480" alt="${e(row.name)} in the 2006 yearbook" loading="lazy"></a>`:''}
     <div class="iimages-text"><h3>${e(entry.heading)} <span>· ${e(entry.dorm)}</span></h3>
 ${paras}</div></div>
     ${own?ownerForm('iimages-hide','Hide my 2006 write-up'):isAdmin?adminForm('iimages-hide','Hide this 2006 write-up'):''}</section>`;

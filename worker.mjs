@@ -1209,7 +1209,8 @@ async function route(req, env, record, setViewer, ctx) {
     if (action==='resolve-report') update=sql('UPDATE reports SET resolved=1 WHERE id=?',target);
     if (action==='invite') update=sql('INSERT INTO members(id,invited) VALUES(?,1) ON CONFLICT(id) DO UPDATE SET invited=1',Number(target));
     if (action==='revoke') update=sql('DELETE FROM sessions WHERE member=?',Number(target));
-    if ((action==='iimages-hide'||action==='iimages-show') && await iimagesSchema(db)) update=action==='iimages-hide'
+    if ((action==='iimages-hide'||action==='iimages-show') && !await iimagesSchema(db)) return invalid('The 2006 yearbook table is not installed yet (migration 0022).');
+    if (action==='iimages-hide'||action==='iimages-show') update=action==='iimages-hide'
       ? sql('UPDATE iimages_2006 SET hidden=1,hidden_by=?,hidden_at=? WHERE member=?',me,now(),Number(target))
       : sql('UPDATE iimages_2006 SET hidden=0,hidden_by=NULL,hidden_at=NULL WHERE member=?',Number(target));
     if (action==='publish-memory') {

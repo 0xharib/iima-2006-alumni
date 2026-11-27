@@ -143,3 +143,24 @@ test('no section and no img when no entry / no photo', async()=>{
   assert.match(html,/From the 2006 yearbook/);
   assert.doesNotMatch(html,/\/media\/iimages\//);
 });
+
+test('a write-up without a photo uses the full width', async()=>{
+  const fx=await people();
+  fx.sqlite.exec('UPDATE iimages_2006 SET photo_key=NULL');
+  assert.match(await page(fx,fx.other),/class="iimages-body no-photo"/);
+});
+
+test('hidden photo is 404 at every size for others', async()=>{
+  const fx=await people();
+  await setYearbookHidden(fx.env.DB,2,true,2);
+  for (const w of ['96','480','1200']) assert.equal((await fx.call('/media/iimages/2?w='+w,fx.other)).status,404);
+});
+
+test('before migration 0022, hide and show say so instead of failing', async()=>{
+  const fx=fixture({skip:['0022_iimages_2006.sql']});
+  const admin=await fx.session(1,'aaaa'), owner=await fx.session(2,'bbbb');
+  assert.equal((await fx.call('/profile',owner,{action:'iimages-hide'})).status,303);
+  const res=await fx.call('/admin',admin,{action:'iimages-hide',target:'2',reason:'x'});
+  assert.equal(res.status,400);
+  assert.match(await res.text(),/2006 yearbook table is not installed yet/);
+});
