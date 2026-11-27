@@ -359,6 +359,11 @@ nav{margin:0;gap:3px;align-items:center}nav a{font-size:.86rem;padding:.48rem .6
 .photo-queue .remove-thumb{right:.18rem;top:.18rem;margin:0;width:24px;height:24px;padding:0;font-size:1.03rem}
 [data-cover-hint]{font-size:.85rem;color:var(--muted)}
 .album-panels{margin:1.5rem auto}
+.album-panels>.album-photo-panel{min-width:0;margin:0;align-self:start;border-radius:10px;background:var(--tile);box-shadow:none}
+.album-panels>.album-photo-panel>a{display:block}
+.album-panels>.album-photo-panel>a>img{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:contain;background:var(--tile);border-radius:10px}
+.album-panels .album-photo-footer{padding:.4rem .65rem;overflow-wrap:anywhere}
+@media(max-width:600px){.album-panels>.album-photo-panel,.album-panels>.album-photo-panel>a>img{border-radius:6px}.album-panels .album-photo-footer{padding:.35rem .45rem}}
 .album-photo-panel{overflow:hidden;padding:0;background:var(--paper)}
 .album-photo-panel img{width:100%;height:auto;aspect-ratio:auto;object-fit:contain;border-radius:0;background:#211812}
 .album-photo-footer{padding:.6rem 1rem}
