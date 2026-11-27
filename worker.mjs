@@ -611,17 +611,27 @@ async function route(req, env, record, setViewer, ctx) {
           UNION SELECT ma.target FROM memory_about ma JOIN posts p ON p.id=ma.post
             WHERE ma.kind='person' AND CAST(p.author AS TEXT)<>ma.target AND ${postVisible}
             AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id)
+        ), profile_richness AS MATERIALIZED (
+          SELECT member,count(*) AS richness,sum(source='owner' AND field NOT IN ('thenPhotoObject','nowPhotoObject')) AS owner_fields
+          FROM (SELECT member,field,value,source,row_number() OVER (PARTITION BY member,field ORDER BY priority DESC) AS choice
+            FROM selected_profile_fields WHERE pilot_only<=${+pilot} )
+          WHERE choice=1 AND trim(value)<>'' GROUP BY member
         ), matches AS MATERIALIZED (
           SELECT r.id,r.name,r.dorm,r.nickname,rs.section,${portrait} AS portrait,
             CASE WHEN coalesce(m.attendance_private,0)=0 THEN coalesce(rt.status,a.status) END AS status,
             2*EXISTS(SELECT 1 FROM yearbook_public y WHERE y.member=r.id AND (y.fields<>'{}' OR y.images<>'[]'))
-              + 2*EXISTS(SELECT 1 FROM featured f WHERE f.target=CAST(r.id AS TEXT)) AS score
-          FROM roster r LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
+              + 2*EXISTS(SELECT 1 FROM featured f WHERE f.target=CAST(r.id AS TEXT)) AS score,
+            coalesce(st.complete_${pilot?'pilot':'public'},0) AS complete,
+            coalesce(pr.richness,0) AS richness,coalesce(pr.owner_fields,0) AS owner_fields,
+            coalesce(pc.completed_at,0) AS completed_at
+          FROM roster r LEFT JOIN profile_richness pr ON pr.member=r.id
+          LEFT JOIN profile_completion_state st ON st.member=r.id LEFT JOIN profile_completion pc ON pc.member=r.id
+          LEFT JOIN members m ON m.id=r.id LEFT JOIN reunion_tracker rt ON rt.member=r.id
           LEFT JOIN attendance a ON a.member=r.id LEFT JOIN roster_sections rs ON rs.member=r.id ${seedJoin}
           WHERE lower(trim(r.name))<>'sachin kumar suman' AND (?='' OR instr(lower(r.name||' '||coalesce(r.nickname,'')||' Dorm '||coalesce(r.dorm,'')),lower(?))>0)
           AND (?='' OR r.dorm=?) AND (?='' OR rs.section=?)
           AND (?='' OR (coalesce(m.attendance_private,0)=0 AND CASE WHEN ? THEN rt.status ELSE coalesce(rt.status,a.status) END=?))
-        ), ranked AS (SELECT *,score+(portrait IS NOT NULL) AS rank,count(*) OVER () AS total FROM matches)
+        ), ranked AS (SELECT *, ${reunion?'score+(portrait IS NOT NULL)':`(count(*) OVER ()+1)-row_number() OVER (ORDER BY complete DESC,CASE WHEN complete=1 THEN completed_at ELSE 0 END DESC,(owner_fields>0) DESC,richness DESC,(portrait IS NOT NULL) DESC,name,id)`} AS rank,count(*) OVER () AS total FROM matches)
         SELECT * FROM ranked WHERE ?=0 OR rank<? OR (rank=? AND (name>(SELECT name FROM roster WHERE id=?)
           OR (name=(SELECT name FROM roster WHERE id=?) AND id>?)))
         ORDER BY rank DESC,name,id LIMIT ?`,+pilot,q,q,dorm,dorm,section,section,status,+reunion,status,
