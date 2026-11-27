@@ -903,6 +903,8 @@ async function route(req, env, record, setViewer, ctx) {
         jobs.push(sql('INSERT INTO memory_albums VALUES(?,?,?,?)',key,title,order.includes(cover)?cover:order[0],JSON.stringify(order)));
       }
       await db.batch(jobs);
+      // A one-photo memory tagged with a classmate can give them a face reference once the photo has been scanned.
+      if (order.length===1) for (const selected of selections) if (/^person:\d+$/.test(selected)) await markRefs(env,Number(selected.slice(7)));
       for (const object of uploaded) warmVariants(env,ctx,object,'image/jpeg',memoryWidths);
       uploaded.length=0;
       return success();
@@ -1022,8 +1024,9 @@ async function route(req, env, record, setViewer, ctx) {
         );
       } else return invalid('Choose a classmate, place or event.');
       await db.batch([...tagJobs,sql('DELETE FROM notification_tag_actor WHERE post=?',key)]);
-      // A hand tag on a photo can become the person's face reference (a one-face photo such as a Placecom portrait).
-      if (photoScope && kind==='person' && /^\d+$/.test(target)) await markRefs(env,Number(target));
+      // A hand tag can become the person's face reference: on a one-face photo such as a Placecom portrait, or on a
+      // single-photo memory as a whole.
+      if (kind==='person' && /^\d+$/.test(target)) await markRefs(env,Number(target));
     } else if (action==='tag-correct') {
       photoScope=str(f,'photo',100);
       const target=str(f,'tag',112);
@@ -1042,6 +1045,7 @@ async function route(req, env, record, setViewer, ctx) {
         }
       }else{
         await db.batch([sql("DELETE FROM tags WHERE post=? AND member=? AND status='accepted'",key,Number(target)),sql("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,target)]);
+        await markRefs(env,Number(target));   // that memory's photo may have been their face reference
       }
     } else if (action==='edit-comment' || action==='delete-comment') {
       const comment = str(f,'comment',50), body = str(f,'body',1200);
@@ -1049,10 +1053,12 @@ async function route(req, env, record, setViewer, ctx) {
       else if (action==='delete-comment') await run('UPDATE comments SET hidden=1 WHERE id=? AND post=? AND author=?',comment,key,me);
     } else if (action==='tag-accept' || action==='tag-remove') {
       await run('UPDATE tags SET status=? WHERE post=? AND member=?',action==='tag-accept'?'accepted':'declined',key,me);
+      await markRefs(env,me);
     } else if (action==='unassociate' && item.subject===me) {
       await run('INSERT OR IGNORE INTO muted_subjects VALUES(?)',key);
     } else if (action==='unassociate' && item.is_about_me) {
       await run("DELETE FROM memory_about WHERE post=? AND kind='person' AND target=?",key,String(me));
+      await markRefs(env,me);
     } else if (action==='delete' && item.author===me) {
       await db.batch([sql('UPDATE posts SET hidden=1 WHERE id=?',key),...await forgetPostFaces(db,key)]);
       return redirect('/');

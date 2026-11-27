@@ -493,7 +493,21 @@ async function storedRefs(db, member) {
       AND (SELECT count(*) FROM active_photo_tags o WHERE o.media=t.media AND o.kind='person')=1
       AND (SELECT count(*) FROM active_faces o WHERE o.media=t.media)=1
     ORDER BY f.size DESC,f.media LIMIT 1`, String(member), TAGGED_MIN_SIZE);
-  if (tagged) found.push({source: 'tagged', key: tagged.object_key, bytes: tagged.embedding});
+  // Failing that, the same from a tag on the memory as a whole: one photo, one face, and this member is the only person
+  // tagged on the memory or the photo. (A memory merely written about someone is not enough: the face may be the writer's.)
+  const byMemory = tagged ? null : await first(db, `WITH ${MINE} SELECT f.media AS object_key,f.embedding FROM (${MEMORY_PHOTOS}) m
+    JOIN active_faces f ON f.media=m.media
+    WHERE f.size>=?2 AND (SELECT count(*) FROM active_faces o WHERE o.media=m.media)=1
+      AND NOT EXISTS(SELECT 1 FROM face_matches fm WHERE fm.media=m.media AND fm.member=?1 AND fm.state='removed')
+      AND NOT EXISTS(SELECT 1 FROM active_photo_tags o WHERE o.media=m.media AND o.kind='person' AND o.target<>CAST(CAST(?1 AS INTEGER) AS TEXT))
+      AND (EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=m.post AND ma.kind='person' AND ma.target=CAST(CAST(?1 AS INTEGER) AS TEXT))
+        OR EXISTS(SELECT 1 FROM tags t WHERE t.post=m.post AND t.member=?1 AND t.status='accepted'))
+      AND (SELECT count(*) FROM (SELECT CAST(target AS INTEGER) AS who FROM memory_about WHERE post=m.post AND kind='person'
+        UNION SELECT member FROM tags WHERE post=m.post AND status='accepted'
+        UNION SELECT subject FROM posts WHERE id=m.post AND subject IS NOT NULL))=1
+    ORDER BY f.size DESC,f.media LIMIT 1`, Number(member), TAGGED_MIN_SIZE);
+  const hand = tagged || byMemory;
+  if (hand) found.push({source: 'tagged', key: hand.object_key, bytes: hand.embedding});
   const archive = await first(db, 'SELECT object_key,embedding FROM face_archive WHERE member=? AND model=?', member, FACE_MODEL);
   if (archive) found.push({source: 'archive', key: archive.object_key, bytes: archive.embedding});
   return found.map(r => {
@@ -593,9 +607,32 @@ export async function rematchMembers(env, members) {
 
 export const rematchMember = (env, member) => rematchMembers(env, [member]);
 
-// Every photo the member is tagged in, newest memory first.
-export const photosOfYou = (db, me) => rows(db, `SELECT pt.post,pt.media,pt.origin FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
-  WHERE pt.kind='person' AND pt.target=? AND ${POST_VISIBLE} ORDER BY p.created DESC,pt.media`, String(me));
+// The member's photos by memory tag (?1 = member): a memory with exactly one photo that is written about them, tags them
+// with @, or carries their accepted tag. A tag on the memory then means that one photo, so it counts like a photo tag,
+// unless they removed the photo from their gallery. Albums are left out: a tag on an album does not say which photo.
+const MEMORY_PHOTOS = `SELECT post,min(media) AS media FROM (
+    SELECT p.id AS post,'post/'||a.id AS media FROM posts p JOIN active_uploads a ON a.post=p.id WHERE p.id IN (SELECT post FROM mine)
+    UNION ALL
+    SELECT p.id,'legacy/'||p.id||'/'||ROW_NUMBER() OVER(PARTITION BY p.id ORDER BY ph.object_key)
+      FROM posts p JOIN photos ph ON ph.submission=p.origin WHERE p.id IN (SELECT post FROM mine)
+  ) shown GROUP BY post HAVING count(*)=1`;
+const MINE = `mine AS (SELECT p.id AS post FROM posts p WHERE ${POST_VISIBLE} AND (
+    ((p.subject=?1 OR EXISTS(SELECT 1 FROM memory_about ma WHERE ma.post=p.id AND ma.kind='person' AND ma.target=CAST(CAST(?1 AS INTEGER) AS TEXT)))
+      AND NOT EXISTS(SELECT 1 FROM muted_subjects ms WHERE ms.post=p.id))
+    OR EXISTS(SELECT 1 FROM tags t WHERE t.post=p.id AND t.member=?1 AND t.status='accepted')))`;
+const memoryPhotos = `WITH ${MINE} SELECT m.post,m.media FROM (${MEMORY_PHOTOS}) m
+  WHERE NOT EXISTS(SELECT 1 FROM face_matches fm WHERE fm.media=m.media AND fm.member=?1 AND fm.state='removed')`;
+
+// Every photo the member is tagged in (on the photo, or on a single-photo memory), newest memory first.
+export const photosOfYou = (db, me) => rows(db, `WITH ${MINE}, memory AS (SELECT m.post,m.media FROM (${MEMORY_PHOTOS}) m
+    WHERE NOT EXISTS(SELECT 1 FROM face_matches fm WHERE fm.media=m.media AND fm.member=?1 AND fm.state='removed'))
+  SELECT post,media,origin FROM (
+    SELECT pt.post,pt.media,pt.origin,p.created FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
+      WHERE pt.kind='person' AND pt.target=CAST(CAST(?1 AS INTEGER) AS TEXT) AND ${POST_VISIBLE}
+    UNION ALL
+    SELECT m.post,m.media,'memory',p.created FROM memory m JOIN posts p ON p.id=m.post
+      WHERE NOT EXISTS(SELECT 1 FROM active_photo_tags pt WHERE pt.media=m.media AND pt.kind='person' AND pt.target=CAST(CAST(?1 AS INTEGER) AS TEXT)))
+  ORDER BY created DESC,media`, Number(me));
 
 async function notMe(req, env, me) {
   const form = await req.formData();
@@ -622,7 +659,8 @@ async function removeGalleryTags(req, env, me) {
   for(let i=0;i<media.length;i+=30){
     const chunk=media.slice(i,i+30);
     const tags=await rows(env.DB,`SELECT pt.media,pt.post FROM active_photo_tags pt JOIN posts p ON p.id=pt.post
-      WHERE pt.kind='person' AND pt.target=? AND pt.media IN (${chunk.map(()=>'?').join(',')}) AND ${POST_VISIBLE}`,String(me),...chunk);
+      WHERE pt.kind='person' AND pt.target=CAST(CAST(?1 AS INTEGER) AS TEXT) AND pt.media IN (${chunk.map((_,j)=>'?'+(j+2)).join(',')}) AND ${POST_VISIBLE}
+      UNION SELECT media,post FROM (${memoryPhotos}) WHERE media IN (${chunk.map((_,j)=>'?'+(j+2)).join(',')})`,Number(me),...chunk);
     if(!tags.length)continue;
     await env.DB.batch(tags.flatMap(tag=>[
       q(env.DB,`DELETE FROM photo_tags WHERE media=? AND kind='person' AND target=?`,tag.media,String(me)),
