@@ -64,7 +64,7 @@ export default {
         const html = (await response.text()).replace('<html lang="en" data-theme="dark"','<html lang="en" data-theme="light"');
         response = new Response(html,{status:response.status,headers:response.headers});
       }
-      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$|wa\/(?:batch)?$)/;
+      const acceptedPage=/^\/(?:$|signin$|memories$|people(?:\/\d+)?$|reunion$|gallery$|photos-of-you$|topics(?:\/[\w-]+)?$|posts\/[\w-]+$|notifications$|compose$|wa\/(?:batch)?$)/;
       const automated=/bot|crawler|spider|preview|whatsapp|facebookexternalhit/i.test(request.headers.get('User-Agent')||'');
       const intent=(request.headers.get('Sec-Purpose')||'')+' '+(request.headers.get('Purpose')||'');
       if(request.method==='GET' && response.ok && acceptedPage.test(path) &&
