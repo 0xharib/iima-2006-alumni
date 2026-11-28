@@ -181,12 +181,16 @@ references and automatic tags at the next batch (Not me and manual tags stay).
 4. Set `FACE_TAGGING_2006=on` and press **Publish**.
 
 **The batch.** Nothing happens when a memory is posted or a profile photo is saved (saving only marks the member's
-references for a rebuild). Every 3 hours (cron `17 */3 * * *`, at 05:47, 08:47, 11:47 … 02:47 IST) the Worker:
+references for a rebuild). Every 15 minutes (cron `*/15 * * * *`) the Worker:
 1. removes the references and automatic tags of anyone no longer eligible;
 2. queues photos not yet scanned (and failed ones; see below), up to 500;
 3. queues reference rebuilds for eligible members who are new, changed a profile photo or were tagged by hand, up to 100;
-4. queues one finish job, delayed 40 minutes: it matches everyone rebuilt in the last 6 hours against every stored
+4. queues one finish job, delayed 10 minutes: it matches everyone rebuilt in the last hour against every stored
    face, then sends each person one summary notification. Your own uploads are tagged but not counted.
+A large album can take longer than 15 minutes to scan, so the next run may queue the same photos or people again; a
+job for a photo already scanned, or for someone rebuilt after the job was queued, does nothing. Matches found after a
+run's finish job go out with the next run's notifications, so a person can get more than one summary for one album.
+With nothing new, a run only reads the database: the container starts only when there are photos or people to do.
 **Tags on a whole memory.** When a memory has exactly one photo, a tag on the memory (written about someone, an
 @-tag, or an accepted tag) counts as a tag on that photo: it shows in that person's "Photos of you", and, if the photo
 has one face and nobody else is tagged, it can be their hand-tagged face reference. Albums are left out, because a tag on
@@ -194,8 +198,8 @@ an album does not say which photo. Removing such a photo from "Photos of you" re
 and leaves the memory's tag alone. Existing memory tags are picked up as references by the next **Scan all photos now**.
 
 **Scan all photos now** on `/admin/faces` runs the same batch at once, with up to 5,000 photos and reference rebuilds
-for everyone who needs one (the 3-hour batch takes 100 people at a time). The finish job re-matches everyone rebuilt
-in the last 6 hours, 100 at a time, up to 600 per run.
+for everyone who needs one (each 15-minute batch takes 100 people at a time). The finish job re-matches everyone rebuilt
+in the last hour, up to 600 per run.
 
 **One-time setup (Arun), in this order.** The order matters: Workers deployed before this one insert into
 `photo_tags` without column names, so the migration must come *after* this Worker is live. This Worker works with or

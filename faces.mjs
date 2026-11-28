@@ -391,13 +391,20 @@ export async function scanPhoto(env, post, media, notify = 'later') {
   return {faces: result.faces.length, tagged: written.map(w => w.member)};
 }
 
+const scanned = async (db, media) => !!await first(db, "SELECT 1 AS ok FROM face_scans WHERE media=? AND status IN ('done','skipped')", media);
+const rebuiltSince = async (db, member, queued) => {
+  const when = queued ? new Date(queued).getTime() : NaN;
+  return Number.isFinite(when) && !!await first(db, 'SELECT 1 AS ok FROM face_prefs WHERE member=? AND ref_tried>=?', member, when);
+};
+
 export async function handleQueue(batch, env) {
   for (const msg of batch.messages) {
     const job = msg.body || {};
     try {
-      // Notifications wait for the run's finish job: one summary per person per run.
-      if (job.type === 'media') await scanPhoto(env, job.post, job.media);
-      else if (job.type === 'ref' && faceMode(env) !== 'off') await refreshRefs(env, job.member);
+      // Notifications wait for the run's finish job: one summary per person per run. Runs start every 15 minutes, so
+      // a photo or a person can be queued again before the first job ran; the second job then does nothing.
+      if (job.type === 'media') { if (!await scanned(env.DB, job.media)) await scanPhoto(env, job.post, job.media); }
+      else if (job.type === 'ref' && faceMode(env) !== 'off') { if (!await rebuiltSince(env.DB, job.member, msg.timestamp)) await refreshRefs(env, job.member); }
       else if (job.type === 'finish') await finishRun(env);
       msg.ack();
     } catch (error) {
@@ -682,7 +689,7 @@ export async function faceRoute({req, env, me, path, post}) {
   return path==='/faces/gallery-remove'?removeGalleryTags(req,env,me):notMe(req,env,me);
 }
 
-// ---------- the 3-hour batch and the admin page ----------
+// ---------- the 15-minute batch and the admin page ----------
 
 // Every photo shown in a visible memory, with the media id the site uses for it.
 const SHOWN_PHOTOS = `SELECT 'post/'||a.id AS media,p.id AS post FROM active_uploads a JOIN posts p ON p.id=a.post WHERE ${POST_VISIBLE}
@@ -696,10 +703,10 @@ const UNSCANNED = `SELECT media,post FROM (${SHOWN_PHOTOS}) shown
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const HOUR_MS = 60 * 60 * 1000;
-const FINISH_DELAY_S = 40 * 60;      // the run's photo and reference jobs are done well within this
-const REMATCH_WINDOW_MS = 6 * HOUR_MS;
+const FINISH_DELAY_S = 10 * 60;      // most of a run's jobs are done by then; later matches go out with the next run
+const REMATCH_WINDOW_MS = HOUR_MS;   // four runs: a rebuild finished after one run's finish is caught by the next
 const REMATCH_MAX = 600;   // members re-matched per finish job: the whole roster, with room to spare
-// Reference rebuilds queued by "Scan all photos now": the whole roster at once (the 3-hour batch takes 100).
+// Reference rebuilds queued by "Scan all photos now": the whole roster at once (each 15-minute batch takes 100).
 export const SCAN_ALL_PEOPLE = 1000;   // two runs: a rebuild finished after one run's finish is caught by the next
 
 // Members to (re)build references for: eligible and new, marked after a profile photo changed or a hand tag, or
@@ -724,7 +731,7 @@ async function dropIneligible(env) {
   return gone.length;
 }
 
-// The batch, every 3 hours (and the admin's "Scan all photos now"): queue new or failed photos and reference
+// The batch, every 15 minutes (and the admin's "Scan all photos now"): queue new or failed photos and reference
 // rebuilds, then one finish job, delayed so the rest is done first. Returns the number of photos queued.
 export async function sweep(env, limit = 500, people = 100) {
   if (faceMode(env) === 'off' || !env.FACE_JOBS || !await faceSchema(env.DB)) return 0;
