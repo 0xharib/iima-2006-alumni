@@ -791,7 +791,7 @@ p,dd,.memory-quote{text-wrap:pretty}
 .meet-face:first-child{margin-left:0}
 .meet-face :is(img,.initials){width:100%;height:100%;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:.7rem}
 .meet-banner .cta{white-space:nowrap}
-.face-nudge{margin:1rem 0;color:var(--muted)}.face-nudge a{color:var(--ink);font-weight:600}.face-photos-link{margin-top:1rem}
+.member-site img{-webkit-touch-callout:none;-webkit-user-drag:none;user-select:none;-webkit-user-select:none}.face-nudge{margin:1rem 0;color:var(--muted)}.face-nudge a{color:var(--ink);font-weight:600}.face-photos-link{margin-top:1rem}
 .face-not-me{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.85rem;color:var(--muted);margin:.5rem 0}.face-not-me form{margin:0}
 .photos-of-you{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin:1rem 0}
 .face-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin:1rem 0}.face-stats div{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:10px 12px}.face-stats dt{font-size:.8rem;color:var(--muted)}.face-stats dd{margin:0;font-size:1.4rem}

@@ -1,5 +1,8 @@
 export const socialScript = String.raw`
 (function socialInteractions(){
+  // Photos are for batchmates: no right-click or long-press "Save image", and no dragging a photo out of the page.
+  document.addEventListener('contextmenu',event=>{if(event.target instanceof Element&&event.target.closest('img'))event.preventDefault();});
+  document.addEventListener('dragstart',event=>{if(event.target instanceof Element&&event.target.closest('img'))event.preventDefault();});
   // One request helper for the site's JavaScript: a deadline, a JSON check (an expired session returns
   // the sign-in page instead) and a readable message. Nothing is retried automatically: an aborted
   // request does not prove a write failed, so mutations leave the retry to the person.
