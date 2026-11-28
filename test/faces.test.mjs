@@ -717,14 +717,14 @@ test('B2: the batch queues new photos, rebuilds for new or changed profiles, and
   assert.deepEqual(sent.filter(m=>m.body.type==='media').map(m=>m.body.media),['post/u1']);
   assert.deepEqual(sent.filter(m=>m.body.type==='ref').map(m=>m.body.member).sort(),[2,3]);
   const finish=sent.filter(m=>m.body.type==='finish');
-  assert.equal(finish.length,1); assert.equal(finish[0].delaySeconds,2400);
+  assert.equal(finish.length,1); assert.equal(finish[0].delaySeconds,600);
 });
 test('B3: a reference job only rebuilds; the finish job re-matches recent rebuilds and sends one summary each', async()=>{
   const w=faceWorld(); w.sqlite.exec("UPDATE profile_seeds SET review_status='approved'"); w.photoFaces[50]=[0];
   picture(w,2); const a=w.photo('p1','u1',1); storedFace(w,a,'p1',0);
   await handleQueue({messages:[message({type:'ref',member:2})]},w.env);
   assert.equal(autoTags(w,2),0);                                          // nothing until the run finishes
-  picture(w,3); w.consent(3,5); w.sqlite.prepare('UPDATE face_prefs SET ref_tried=? WHERE member=3').run(Date.now()-7*HOUR);
+  picture(w,3); w.consent(3,5); w.sqlite.prepare('UPDATE face_prefs SET ref_tried=? WHERE member=3').run(Date.now()-2*HOUR);
   const b=w.photo('p2','u2',2); storedFace(w,b,'p2',5);                   // 3 was rebuilt too long ago to re-match
   const msg=message({type:'finish'}); await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);
   assert.equal(autoTags(w,2),1); assert.equal(autoTags(w,3),0);
@@ -761,8 +761,8 @@ test('B6: the batch removes the automatic tags of anyone without a profile pictu
   const keys=w.sqlite.prepare("SELECT event_key FROM notifications WHERE recipient=3").all().map(r=>r.event_key);
   assert.ok(keys.includes('like:p1:1')); assert.ok(!keys.some(k=>k.startsWith('found')),keys.join());
 });
-test('B7: the batch runs every 3 hours', ()=>{
-  assert.match(readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8'),/crons = \["17 \*\/3 \* \* \*"\]/);
+test('B7: the batch runs every 15 minutes', ()=>{
+  assert.match(readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8'),/crons = \["\*\/15 \* \* \* \*"\]/);
 });
 test('B8: the finish job reads the stored faces once for everyone it re-matches', async()=>{
   const w=faceWorld();
@@ -782,4 +782,26 @@ test('B9: a new member whose reference job keeps failing waits a day before the 
   await handleQueue({messages:[msg]},w.env); assert.equal(msg.acked,1);
   w.env.DB=db; await sweep(w.env);
   assert.deepEqual(sent.filter(m=>m.body.type==='ref'),[]);
+});
+
+// ---------- 28 Nov: every 15 minutes; a run may start before the last one's jobs are done ----------
+test('Q1: a photo job for a photo already scanned does not call the face service again', async()=>{
+  const w=faceWorld(); w.consent(2,0); const a=w.photo('p1','u1',1); w.photoFaces[1]=[0]; let calls=0;
+  const get=w.env.FACES.get; w.env.FACES={...w.env.FACES,get:()=>{const s=get(); return {fetch:(...x)=>{calls++; return s.fetch(...x);}};}};
+  await handleQueue({messages:[message({type:'media',post:'p1',media:a})]},w.env);
+  const again=message({type:'media',post:'p1',media:a});
+  await handleQueue({messages:[again]},w.env);
+  assert.equal(calls,1); assert.equal(again.acked,1); assert.equal(autoTags(w,2),1);
+});
+test('Q2: a reference job for someone rebuilt after it was queued does nothing', async()=>{
+  const w=faceWorld(); w.photoFaces[50]=[0]; picture(w,2); let calls=0;
+  const get=w.env.FACES.get; w.env.FACES={...w.env.FACES,get:()=>{const s=get(); return {fetch:(...x)=>{calls++; return s.fetch(...x);}};}};
+  const queued=Date.now()-60000;
+  w.sqlite.prepare('INSERT INTO face_prefs(member,recognise,decided,ref_tries,ref_tried) VALUES(2,1,1,0,?)').run(Date.now()-1000);
+  const stale=message({type:'ref',member:2}); stale.timestamp=new Date(queued);
+  await handleQueue({messages:[stale]},w.env);
+  assert.equal(calls,0); assert.equal(stale.acked,1);
+  const fresh=message({type:'ref',member:2}); fresh.timestamp=new Date();  // queued after the last rebuild: runs
+  await handleQueue({messages:[fresh]},w.env);
+  assert.ok(calls>0);
 });

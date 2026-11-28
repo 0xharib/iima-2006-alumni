@@ -55,4 +55,4 @@ tag = "faces-v1"
 new_sqlite_classes = ["FaceContainer"]
 
 [triggers]
-crons = ["17 */3 * * *"]   # face tagging batch, every 3 hours
+crons = ["*/15 * * * *"]   # face tagging batch, every 15 minutes
